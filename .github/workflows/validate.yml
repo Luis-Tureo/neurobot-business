@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
@@ -17,8 +17,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -28,56 +26,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Update tests and maintenance UI without backups
-        if: github.event_name == 'pull_request' && github.head_ref == 'agent/remove-backup-system' && github.actor != 'github-actions[bot]'
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          replacements = {
-              'tests/database.test.ts': [
-                  (
-                      'expect(database.getMigrationVersions()).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);',
-                      'expect(database.getMigrationVersions()).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);',
-                  ),
-              ],
-              'tests/environment.test.ts': [
-                  ('expect(environment.panelPort).toBe(3000);', 'expect(environment.panelPort).toBe(3001);'),
-              ],
-              'tests/maintenance-ui.test.ts': [
-                  ("  const gitignore = readFileSync(resolve('.gitignore'), 'utf8');\n", ''),
-                  ("    expect(gitignore).toContain('backups/');\n", ''),
-              ],
-              'public/app.js': [
-                  ("  'creating_backup',\n", ''),
-                  (
-                      "['closing_database', 'creating_backup', 'creating_database', 'restoring_defaults']",
-                      "['closing_database', 'creating_database', 'restoring_defaults']",
-                  ),
-              ],
-              'public/index.html': [
-                  ('            <li data-stage="creating_backup">Creando copia de seguridad.</li>\n', ''),
-                  ('Sistema y respaldos', 'Sistema'),
-              ],
-          }
-
-          for filename, pairs in replacements.items():
-              path = Path(filename)
-              text = path.read_text(encoding='utf-8')
-              for old, new in pairs:
-                  if old not in text:
-                      raise SystemExit(f'{filename}: no se encontró el texto esperado: {old!r}')
-                  text = text.replace(old, new)
-              path.write_text(text, encoding='utf-8')
-          PY
-          npx prettier --write tests/database.test.ts tests/environment.test.ts tests/maintenance-ui.test.ts public/app.js public/index.html
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/database.test.ts tests/environment.test.ts tests/maintenance-ui.test.ts public/app.js public/index.html
-          git commit -m "Actualizar mantenimiento sin respaldos"
-          git push origin HEAD:agent/remove-backup-system
 
       - name: Typecheck
         run: npm run typecheck
