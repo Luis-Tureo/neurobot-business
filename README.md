@@ -72,7 +72,7 @@ npm run setup
 npm run db:init
 ```
 
-`npm run setup` crea el archivo `.env` local cuando todavía no existe y genera secretos de desarrollo. No confirma claves ni sesiones en Git.
+`npm run setup` crea o repara el archivo `.env` local y genera secretos aleatorios cuando faltan. Los comandos `npm run dev`, `npm run dev:watch` y `npm start` ejecutan esta preparación automáticamente antes de iniciar la aplicación.
 
 ## Configuración
 
@@ -122,6 +122,8 @@ Con la configuración predeterminada, el panel queda disponible en:
 http://127.0.0.1:3001
 ```
 
+Si el navegador conserva una versión anterior del panel, cierre esa pestaña y vuelva a abrir la dirección anterior. No debería ser necesario usar `Ctrl + F5` después de reiniciar el servidor.
+
 ## Comandos de validación
 
 Ejecute la validación completa antes de publicar cambios:
@@ -148,8 +150,8 @@ No se considera válida una corrección que dependa de `@ts-ignore`, módulos fi
 src/        backend, lógica del asistente y persistencia
 public/     panel administrativo
 scripts/    instalación, inicialización y utilidades operativas
- tests/      pruebas automatizadas
- data/       estado local ignorado por Git
+tests/      pruebas automatizadas
+data/       estado local ignorado por Git
 ```
 
 ## Aislamiento respecto del asistente comunitario
