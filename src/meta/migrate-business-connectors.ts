@@ -8,7 +8,10 @@ export type BusinessConnectorMigrationResult = {
 export function migrateBusinessConnectorsToMeta(input: {
   databasePath: string;
   metaPhoneNumberId?: string;
+  primaryBotId?: string;
 }): BusinessConnectorMigrationResult {
+  if (input.databasePath === ':memory:') return { inspected: 0, migrated: 0 };
+  const primaryBotId = input.primaryBotId ?? 'neurobot';
   const database = new BetterSqlite3(input.databasePath);
   database.pragma('foreign_keys = ON');
   database.pragma('busy_timeout = 5000');
@@ -24,6 +27,8 @@ export function migrateBusinessConnectorsToMeta(input: {
 
   const operation = database.transaction(() => {
     for (const assistant of assistants) {
+      const metaPhoneNumberId =
+        assistant.id === primaryBotId ? input.metaPhoneNumberId ?? null : null;
       let connectorId = assistant.active_connector_id;
       if (connectorId === null) {
         const result = database
@@ -33,13 +38,7 @@ export function migrateBusinessConnectorsToMeta(input: {
                public_webhook_identifier, connector_status, created_at, updated_at
              ) VALUES (?, 'WHATSAPP_CLOUD_API', ?, ?, 'UNLINKED', ?, ?)`,
           )
-          .run(
-            assistant.id,
-            input.metaPhoneNumberId ?? null,
-            assistant.id,
-            now,
-            now,
-          );
+          .run(assistant.id, metaPhoneNumberId, assistant.id, now, now);
         connectorId = Number(result.lastInsertRowid);
       } else {
         database
@@ -58,7 +57,7 @@ export function migrateBusinessConnectorsToMeta(input: {
                  updated_at = ?
              WHERE id = ?`,
           )
-          .run(input.metaPhoneNumberId ?? null, assistant.id, now, connectorId);
+          .run(metaPhoneNumberId, assistant.id, now, connectorId);
       }
 
       database
