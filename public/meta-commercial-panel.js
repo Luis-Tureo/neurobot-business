@@ -40,6 +40,6 @@ window.addEventListener('bot-services-load', (event) => {
   if (typeof botId === 'string') void loadCommercialPlan(botId).catch(() => {});
 });
 
-const observer = new MutationObserver(() => install());
+const observer = new window.MutationObserver(() => install());
 observer.observe(document.documentElement, { childList: true, subtree: true });
 install();
