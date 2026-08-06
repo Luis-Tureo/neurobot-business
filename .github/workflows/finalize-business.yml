@@ -1,0 +1,298 @@
+name: Finalize Neurobot Business
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  finalize:
+    if: github.event.issue.title == '[finalize-neurobot-business]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/repair-business-readme
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Remove obsolete community presentation and update tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          panel_path = Path('public/multibot-panel.js')
+          panel = panel_path.read_text(encoding='utf-8')
+          panel, moderation_count = re.subn(
+              r"\nasync function loadModeration\(\) \{.*?\n\}\n\nasync function renderSimpleModeration",
+              "\nasync function renderSimpleModeration",
+              panel,
+              count=1,
+              flags=re.S,
+          )
+          if moderation_count != 1:
+              raise SystemExit('Could not remove unused loadModeration function')
+          panel = panel.replace(
+              "  const singleTurnCommunity = Boolean(bot.capabilities.communitySingleTurnMode);\n",
+              '',
+              1,
+          )
+          panel_path.write_text(panel, encoding='utf-8')
+
+          friendly_path = Path('public/friendly-panel.js')
+          friendly = friendly_path.read_text(encoding='utf-8')
+          patterns = [
+              (r"\nfunction simplifyAutomaticMessages\(\) \{.*?\n\}\n\nfunction simplifyPolls", "\nfunction simplifyPolls"),
+              (r"\nfunction simplifyPolls\(\) \{.*?\n\}\n\nfunction simplifyModeration", "\nfunction simplifyModeration"),
+              (r"\nfunction simplifyModeration\(\) \{.*?\n\}\n\nfunction simplifyStatistics", "\nfunction simplifyStatistics"),
+          ]
+          for pattern, replacement in patterns:
+              friendly, count = re.subn(pattern, replacement, friendly, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f'Could not remove obsolete function: {pattern}')
+          friendly = friendly.replace("searchInput.placeholder = 'Ejemplo: bienvenida';", "searchInput.placeholder = 'Ejemplo: horarios';")
+          friendly_path.write_text(friendly, encoding='utf-8')
+
+          html_path = Path('public/index.html')
+          html = html_path.read_text(encoding='utf-8')
+          html = html.replace(
+              '<li>Grupos detectados y autorizados.</li>',
+              '<li>Estados temporales y solicitudes pendientes del asistente.</li>',
+          )
+          html = html.replace(
+              '<li>Administradores de comandos de WhatsApp.</li>',
+              '<li>Datos temporales de administración local.</li>',
+          )
+          html_path.write_text(html, encoding='utf-8')
+
+          for relative in [
+              'harden-report.txt',
+              'public/panel-refinement.js',
+              'public/panel-refinement.css',
+              'tests/panel-refinement.test.ts',
+          ]:
+              path = Path(relative)
+              if path.exists():
+                  path.unlink()
+
+          Path('tests/knowledge-panel-ui.test.ts').write_text("""import { readFileSync } from 'node:fs';
+
+const html = readFileSync('public/index.html', 'utf8');
+const panel = readFileSync('public/multibot-panel.js', 'utf8');
+const friendly = readFileSync('public/friendly-panel.js', 'utf8');
+const styles = readFileSync('public/friendly-panel.css', 'utf8');
+
+describe('información del negocio con edición guiada', () => {
+  it('separa categorías, contenido y formularios de edición', () => {
+    expect(html).toContain('<h2>Información del bot</h2>');
+    expect(html).toContain('id="new-knowledge-entry"');
+    expect(html).toContain('id="toggle-knowledge-categories"');
+    expect(html).toContain('id="knowledge-category-form"');
+    expect(html).toContain('class="inline-form knowledge-editor hidden"');
+    expect(html).toContain('id="knowledge-entry-form"');
+    expect(html).toContain('class="card inset knowledge-editor friendly-primary-card hidden"');
+  });
+
+  it('abre los formularios solo al crear o editar', () => {
+    expect(panel).toContain('openKnowledgeCategoryForm(category)');
+    expect(panel).toContain("actionButton('Renombrar categoría'");
+    expect(panel).toContain('openNewKnowledgeEntry');
+    expect(panel).toContain("actionButton('Editar información'");
+    expect(panel).toContain("form.classList.remove('hidden')");
+    expect(panel).toContain("form.classList.add('hidden')");
+  });
+
+  it('usa una prioridad comprensible y mantiene oculta la fuente técnica', () => {
+    expect(html).toContain('name="priority"');
+    expect(html).toContain('type="range"');
+    expect(html).toContain('min="-100"');
+    expect(html).toContain('max="100"');
+    expect(html).toContain('id="knowledge-priority-label"');
+    expect(html).toContain('<input name="internalSource" type="hidden" />');
+    expect(html).not.toContain('Fuente interna opcional');
+    expect(panel).toContain('knowledgePriorityLabel');
+    expect(panel).toContain('Prioridad normal');
+    expect(styles).toContain('KNOWLEDGE_PANEL_FRIENDLY_V2');
+  });
+
+  it('mantiene la explicación amigable', () => {
+    expect(friendly).toContain('Las categorías sirven únicamente para mantenerlos ordenados.');
+    expect(friendly).toContain("data-friendly-group', 'knowledge-categories'");
+  });
+});
+""", encoding='utf-8')
+
+          Path('tests/friendly-panel.test.ts').write_text("""import { readFileSync } from 'node:fs';
+
+const html = readFileSync('public/index.html', 'utf8');
+const script = readFileSync('public/friendly-panel.js', 'utf8');
+const styles = readFileSync('public/friendly-panel.css', 'utf8');
+
+describe('panel empresarial amigable y ordenado', () => {
+  it('carga la capa de navegación después del panel principal', () => {
+    expect(html).toContain('<link rel="stylesheet" href="/friendly-panel.css" />');
+    expect(html).toContain('<script type="module" src="/friendly-panel.js"></script>');
+    expect(html.indexOf('/friendly-panel.js')).toBeGreaterThan(html.indexOf('/multibot-panel.js'));
+  });
+
+  it('ordena únicamente módulos útiles para negocios', () => {
+    [
+      'Inicio',
+      'Identidad y respuestas',
+      'Contenido y atención',
+      'Seguimiento y administración',
+    ].forEach((label) => expect(script).toContain(label));
+    expect(script).toContain("label: 'Preguntas frecuentes'");
+    expect(script).toContain('Buscar una opción');
+    expect(script).not.toContain('Comunidad y automatización');
+    expect(script).not.toContain("label: 'Mensajes automáticos'");
+  });
+
+  it('separa configuraciones principales y secundarias', () => {
+    [
+      'profile-messages',
+      'profile-branding',
+      'knowledge-categories',
+      'menu-options',
+      'catalog-categories',
+      'cached-answer-editor',
+      'statistics-events',
+      'maintenance-danger',
+    ].forEach((group) => expect(script).toContain(group));
+    expect(script).toContain('friendly-collapsible-card');
+    expect(script).toContain('makeCardCollapsible');
+    expect(script).not.toContain('automatic-history');
+    expect(script).not.toContain('poll-history');
+  });
+
+  it('incluye diseño adaptable y sin desplazamiento horizontal', () => {
+    expect(styles).toContain('FRIENDLY_PANEL_V1');
+    expect(styles).toContain('grid-template-columns: 285px minmax(0, 1fr)');
+    expect(styles).toContain('.friendly-nav-search');
+    expect(styles).toContain('@media (max-width: 820px)');
+    expect(styles).toContain('@media (max-width: 640px)');
+    expect(styles).not.toContain('overflow-x: auto');
+  });
+});
+""", encoding='utf-8')
+
+          Path('tests/start-panel-consolidation.test.ts').write_text("""import { readFileSync } from 'node:fs';
+
+describe('inicio empresarial consolidado', () => {
+  const app = readFileSync('public/app.js', 'utf8');
+  const multibot = readFileSync('public/multibot-panel.js', 'utf8');
+  const friendly = readFileSync('public/friendly-panel.js', 'utf8');
+  const styles = readFileSync('public/styles.css', 'utf8');
+
+  it('presenta un inicio centrado en estado y conexión', () => {
+    expect(friendly).toContain("label: 'Inicio'");
+    expect(friendly).toContain("description: 'Estado y conexión'");
+    expect(friendly).not.toContain('Estado, conexión y grupos');
+  });
+
+  it('muestra categorías desplegables en la barra lateral', () => {
+    expect(styles).toContain('.sidebar-accordion');
+    expect(styles).toContain('.sidebar-accordion summary');
+  });
+
+  it('no carga módulos comunitarios al seleccionar un negocio', () => {
+    expect(multibot).toContain("!['automatic-messages', 'polls', 'moderation'].includes(module)");
+    expect(multibot).not.toContain('loaders.push(loadModeration())');
+  });
+
+  it('mantiene la carga automática sin inicializaciones duplicadas', () => {
+    expect(app).toContain("window.dispatchEvent(new window.CustomEvent('multibot-panel-load'))");
+    expect(multibot).toContain('let initializationPromise = null');
+    expect(multibot).toContain('requestMultibotInitialization');
+    expect(multibot).toContain('assistantsEmpty');
+  });
+});
+""", encoding='utf-8')
+          PY
+
+      - name: Format files
+        run: npx prettier --write public/index.html public/multibot-panel.js public/friendly-panel.js tests/knowledge-panel-ui.test.ts tests/friendly-panel.test.ts tests/start-panel-consolidation.test.ts
+
+      - name: Commit final cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: remove obsolete community presentation code"
+            git push origin HEAD:agent/repair-business-readme
+          fi
+
+      - name: Validate and capture report
+        id: validate
+        shell: bash
+        run: |
+          set +e
+          : > final-validation-report.txt
+          overall=0
+          run_step() {
+            name="$1"
+            shift
+            echo "## $name" >> final-validation-report.txt
+            echo '```text' >> final-validation-report.txt
+            "$@" >> final-validation-report.txt 2>&1
+            status=$?
+            echo '```' >> final-validation-report.txt
+            echo "Exit code: $status" >> final-validation-report.txt
+            echo >> final-validation-report.txt
+            if [ "$status" -ne 0 ]; then overall=1; fi
+          }
+          run_step "npm ci" npm ci
+          run_step "Typecheck" npm run typecheck
+          run_step "Lint" npm run lint
+          run_step "Tests" npm test
+          run_step "Build" npm run build
+          echo "overall=$overall" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish final report
+        uses: actions/github-script@v7
+        env:
+          FINAL_RESULT: ${{ steps.validate.outputs.overall }}
+        with:
+          script: |
+            const fs = require('fs');
+            let report = fs.readFileSync('final-validation-report.txt', 'utf8');
+            const limit = 60000;
+            if (report.length > limit) report = `${report.slice(0, limit)}\n\n[Registro truncado]`;
+            const heading = process.env.FINAL_RESULT === '0'
+              ? '✅ Validación final completada'
+              : '❌ La validación final encontró errores';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `${heading}\n\n${report}`
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed',
+              state_reason: 'completed'
+            });
+
+      - name: Fail when validation failed
+        if: steps.validate.outputs.overall != '0'
+        run: exit 1
