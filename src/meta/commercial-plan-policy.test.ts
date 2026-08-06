@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AppDatabase } from '../persistence/database.js';
+import type { AppDatabase } from '../persistence/database.js';
 import {
   CommercialMessagingPolicy,
   CommercialPlanService,
@@ -78,62 +78,55 @@ describe('CommercialMessagingPolicy', () => {
 
 describe('CommercialPlanService', () => {
   it('registra una solicitud avanzada sin activar el plan antes de la cotización', () => {
-    const database = new AppDatabase(':memory:');
-    database.migrate();
-    const service = new CommercialPlanService(database);
+    const service = new CommercialPlanService(createPlanTestDatabase());
+    const requested = service.requestAdvanced({
+      botId: 'neurobot',
+      useCase: 'DELIVERY',
+    });
 
-    try {
-      const requested = service.requestAdvanced({
-        botId: 'neurobot',
-        useCase: 'DELIVERY',
-      });
-
-      expect(requested.plan).toBe('BASIC');
-      expect(requested.requestStatus).toBe('QUOTE_REQUIRED');
-      expect(requested.requestedUseCase).toBe('DELIVERY');
-      expect(requested.quoteReference).toBeNull();
-    } finally {
-      database.close();
-    }
+    expect(requested.plan).toBe('BASIC');
+    expect(requested.requestStatus).toBe('QUOTE_REQUIRED');
+    expect(requested.requestedUseCase).toBe('DELIVERY');
+    expect(requested.quoteReference).toBeNull();
   });
 
   it('rechaza la activación avanzada sin presupuesto aprobado', () => {
-    const database = new AppDatabase(':memory:');
-    database.migrate();
-    const service = new CommercialPlanService(database);
+    const service = new CommercialPlanService(createPlanTestDatabase());
 
-    try {
-      expect(() => service.set({ botId: 'neurobot', plan: 'ADVANCED' })).toThrow(
-        'presupuesto aprobado',
-      );
-      expect(service.get('neurobot').plan).toBe('BASIC');
-    } finally {
-      database.close();
-    }
+    expect(() => service.set({ botId: 'neurobot', plan: 'ADVANCED' })).toThrow(
+      'presupuesto aprobado',
+    );
+    expect(service.get('neurobot').plan).toBe('BASIC');
   });
 
   it('activa el plan avanzado solo después de registrar la cotización', () => {
-    const database = new AppDatabase(':memory:');
-    database.migrate();
-    const service = new CommercialPlanService(database);
+    const service = new CommercialPlanService(createPlanTestDatabase());
+    service.requestAdvanced({ botId: 'neurobot', useCase: 'APPOINTMENTS' });
+    const activated = service.set({
+      botId: 'neurobot',
+      plan: 'ADVANCED',
+      quoteReference: 'COT-2026-001',
+    });
 
-    try {
-      service.requestAdvanced({ botId: 'neurobot', useCase: 'APPOINTMENTS' });
-      const activated = service.set({
-        botId: 'neurobot',
-        plan: 'ADVANCED',
-        quoteReference: 'COT-2026-001',
-      });
-
-      expect(activated.plan).toBe('ADVANCED');
-      expect(activated.requestStatus).toBe('ACTIVE');
-      expect(activated.quoteReference).toBe('COT-2026-001');
-      expect(activated.requestedUseCase).toBe('APPOINTMENTS');
-    } finally {
-      database.close();
-    }
+    expect(activated.plan).toBe('ADVANCED');
+    expect(activated.requestStatus).toBe('ACTIVE');
+    expect(activated.quoteReference).toBe('COT-2026-001');
+    expect(activated.requestedUseCase).toBe('APPOINTMENTS');
   });
 });
+
+function createPlanTestDatabase(): AppDatabase {
+  const settings = new Map<string, unknown>();
+  return {
+    getSetting<T>(key: string, fallback: T): T {
+      return settings.has(key) ? (settings.get(key) as T) : fallback;
+    },
+    setSetting(key: string, value: unknown): void {
+      settings.set(key, value);
+    },
+    recordTechnicalEvent(): void {},
+  } as unknown as AppDatabase;
+}
 
 function expectPolicyError(action: () => void, expectedCode: MessagingPolicyErrorCode): void {
   try {
