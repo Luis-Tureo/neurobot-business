@@ -310,11 +310,11 @@ async function loadSelectedBot() {
   if (visible.has('media')) loaders.push(loadMedia());
   if (visible.has('hours')) loaders.push(loadHours());
   if (visible.has('requests')) loaders.push(loadRequests());
-  if (visible.has('moderation')) loaders.push(Promise.resolve());
+  if (visible.has('moderation')) loaders.push(loadModeration());
   await Promise.all(loaders);
 }
 
-async function Promise.resolve() {
+async function loadModeration() {
   if (!panelState.selectedBotId || !panelState.visibleModules.includes('moderation')) return;
   const data = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation`);
   panelState.moderation = data;
