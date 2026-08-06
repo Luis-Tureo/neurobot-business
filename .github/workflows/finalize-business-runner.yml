@@ -1,0 +1,135 @@
+name: Run Neurobot Business Finalization
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  finalize:
+    if: github.event.issue.title == '[run-finalize-neurobot-business]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/repair-business-readme
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Extract finalization script
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin master
+          git show origin/master:.github/workflows/finalize-business.yml > /tmp/finalize-workflow.yml
+          python - <<'PY'
+          from pathlib import Path
+          lines = Path('/tmp/finalize-workflow.yml').read_text(encoding='utf-8').splitlines()
+          start = next(index for index, line in enumerate(lines) if "python - <<'PY'" in line)
+          end = next(index for index in range(start + 1, len(lines)) if lines[index].strip() == 'PY')
+          script = [line[10:] if line.startswith('          ') else line for line in lines[start + 1:end]]
+          Path('/tmp/finalize.py').write_text('\n'.join(script) + '\n', encoding='utf-8')
+          PY
+
+      - name: Apply final cleanup and commit
+        id: patch
+        shell: bash
+        run: |
+          set +e
+          : > finalization-report.txt
+          echo '## Finalization script' >> finalization-report.txt
+          echo '```text' >> finalization-report.txt
+          python /tmp/finalize.py >> finalization-report.txt 2>&1
+          patch_status=$?
+          echo '```' >> finalization-report.txt
+          echo "Exit code: $patch_status" >> finalization-report.txt
+          echo >> finalization-report.txt
+
+          if [ "$patch_status" -eq 0 ]; then
+            npx prettier --write public/index.html public/multibot-panel.js public/friendly-panel.js tests/knowledge-panel-ui.test.ts tests/friendly-panel.test.ts tests/start-panel-consolidation.test.ts >> finalization-report.txt 2>&1
+            format_status=$?
+            echo "Prettier exit code: $format_status" >> finalization-report.txt
+            if [ "$format_status" -eq 0 ]; then
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add -A
+              if ! git diff --cached --quiet; then
+                git commit -m "chore: remove obsolete community presentation code" >> finalization-report.txt 2>&1
+                git push origin HEAD:agent/repair-business-readme >> finalization-report.txt 2>&1
+              fi
+            fi
+          fi
+          echo "patch_status=$patch_status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Validate full project
+        id: validate
+        shell: bash
+        run: |
+          set +e
+          overall=0
+          run_step() {
+            name="$1"
+            shift
+            echo "## $name" >> finalization-report.txt
+            echo '```text' >> finalization-report.txt
+            "$@" >> finalization-report.txt 2>&1
+            status=$?
+            echo '```' >> finalization-report.txt
+            echo "Exit code: $status" >> finalization-report.txt
+            echo >> finalization-report.txt
+            if [ "$status" -ne 0 ]; then overall=1; fi
+          }
+          if [ "${{ steps.patch.outputs.patch_status }}" -eq 0 ]; then
+            run_step "npm ci" npm ci
+            run_step "Typecheck" npm run typecheck
+            run_step "Lint" npm run lint
+            run_step "Tests" npm test
+            run_step "Build" npm run build
+          else
+            overall=1
+          fi
+          echo "overall=$overall" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish report
+        uses: actions/github-script@v7
+        env:
+          FINAL_RESULT: ${{ steps.validate.outputs.overall }}
+        with:
+          script: |
+            const fs = require('fs');
+            let report = fs.readFileSync('finalization-report.txt', 'utf8');
+            const limit = 60000;
+            if (report.length > limit) report = `${report.slice(0, limit)}\n\n[Registro truncado]`;
+            const heading = process.env.FINAL_RESULT === '0'
+              ? '✅ Finalización empresarial validada'
+              : '❌ La finalización requiere otra corrección';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `${heading}\n\n${report}`
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed',
+              state_reason: 'completed'
+            });
+
+      - name: Fail when validation failed
+        if: steps.validate.outputs.overall != '0'
+        run: exit 1
