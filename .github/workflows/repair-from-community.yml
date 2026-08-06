@@ -1,0 +1,86 @@
+name: Repair Neurobot Business Sources
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  repair:
+    if: github.event.issue.title == '[repair-neurobot-business]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout business repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/repair-business-readme
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Checkout clean community source
+        uses: actions/checkout@v4
+        with:
+          repository: Luis-Tureo/asistente-comunidad-neurodivergente
+          ref: main
+          path: _community_source
+
+      - name: Restore structurally damaged source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            src/admin/server.ts
+            src/persistence/database.ts
+            src/core/automatic-message-service.ts
+            src/core/maintenance-service.ts
+            src/messaging/whatsapp-adapter.ts
+            tests/connection-manager.test.ts
+          )
+          for file in "${files[@]}"; do
+            test -f "_community_source/$file"
+            cp "_community_source/$file" "$file"
+          done
+          rm -rf _community_source
+
+      - name: Remove temporary refactoring dependencies
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const path = 'package.json';
+          const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+          for (const name of ['ts-morph']) delete pkg.dependencies?.[name];
+          for (const name of ['@babel/generator', '@babel/parser', '@babel/traverse']) delete pkg.devDependencies?.[name];
+          fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+          NODE
+          npm install --package-lock-only --ignore-scripts
+
+      - name: Commit recovered files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/admin/server.ts src/persistence/database.ts src/core/automatic-message-service.ts src/core/maintenance-service.ts src/messaging/whatsapp-adapter.ts tests/connection-manager.test.ts package.json package-lock.json
+          if git diff --cached --quiet; then
+            echo "No recovery changes were required."
+          else
+            git commit -m "repair: restore structurally damaged TypeScript sources"
+            git push origin HEAD:agent/repair-business-readme
+          fi
+
+      - name: Close trigger issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed',
+              state_reason: 'completed'
+            });
