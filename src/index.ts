@@ -92,6 +92,7 @@ async function main(): Promise<void> {
       metaCloud: {
         graphApiVersion: environment.metaGraphApiVersion,
         billingLedgerPath: environment.metaBillingLedgerPath,
+        primaryBotId: 'neurobot',
         ...(environment.metaPhoneNumberId === undefined
           ? {}
           : { phoneNumberId: environment.metaPhoneNumberId }),
@@ -103,6 +104,21 @@ async function main(): Promise<void> {
         ? {}
         : { chromeExecutablePath: environment.chromeExecutablePath }),
     },
+  );
+  const commercialPlan = multiBotManager.commercialPlanService().set({
+    botId: 'neurobot',
+    plan: environment.commercialPlan,
+    ...(environment.commercialQuoteReference === undefined
+      ? {}
+      : { quoteReference: environment.commercialQuoteReference }),
+  });
+  logger.info(
+    {
+      operation: 'COMMERCIAL_PLAN_APPLIED',
+      plan: commercialPlan.plan,
+      quoteReferenceConfigured: commercialPlan.quoteReference !== null,
+    },
+    'Plan comercial administrado por el proveedor aplicado',
   );
   await multiBotManager.prepareAll();
   const client = multiBotManager.client('neurobot');
