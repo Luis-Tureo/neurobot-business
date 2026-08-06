@@ -10,6 +10,8 @@ import { MultiBotManager } from './core/multi-bot-manager.js';
 import { WhatsAppSessionManager } from './core/whatsapp-session-manager.js';
 import { createLogger } from './infrastructure/logger.js';
 import { serializeError } from './infrastructure/safe-error.js';
+import { migrateBusinessConnectorsToMeta } from './meta/migrate-business-connectors.js';
+import { registerMetaWebhookRoutes } from './meta/register-meta-webhook-routes.js';
 import { AppDatabase } from './persistence/database.js';
 import { Anonymizer } from './security/anonymizer.js';
 import { hashPassword } from './security/password.js';
@@ -19,13 +21,31 @@ async function main(): Promise<void> {
   const environment = loadEnvironment();
   if (await isApplicationAlreadyRunning(environment.panelHost, environment.panelPort)) {
     process.stdout.write(
-      `El panel ya estÃ¡ funcionando en http://${displayHost(environment.panelHost)}:${environment.panelPort}. No es necesario iniciar otra copia.\n`,
+      `El panel ya está funcionando en http://${displayHost(environment.panelHost)}:${environment.panelPort}. No es necesario iniciar otra copia.\n`,
     );
     return;
   }
   const logger = createLogger(environment.logLevel);
   const database = new AppDatabase(environment.databasePath);
   database.migrate();
+  database.checkpoint();
+  database.close();
+  const connectorMigration = migrateBusinessConnectorsToMeta({
+    databasePath: environment.databasePath,
+    ...(environment.metaPhoneNumberId === undefined
+      ? {}
+      : { metaPhoneNumberId: environment.metaPhoneNumberId }),
+  });
+  database.reopen();
+  if (connectorMigration.migrated > 0) {
+    logger.info(
+      {
+        operation: 'BUSINESS_CONNECTORS_MIGRATED_TO_META',
+        migrated: connectorMigration.migrated,
+      },
+      'Los asistentes Business fueron migrados al conector oficial de Meta',
+    );
+  }
   for (const bot of database.listBots()) {
     database.updateBotConfiguration({
       botId: bot.id,
@@ -38,7 +58,6 @@ async function main(): Promise<void> {
       menuType: bot.menuType,
     });
   }
-  database.setBotSessionPath('neurobot', environment.sessionPath);
   await ensureInitialAdministrator(database, environment.panelInitialPassword);
 
   const anonymizer = new Anonymizer(environment.anonymizationSecret);
@@ -70,6 +89,16 @@ async function main(): Promise<void> {
       secretVault: vault,
       mediaRoot: resolve(process.cwd(), 'data', 'media'),
       isPaused: () => maintenance?.isRunning() ?? false,
+      metaCloud: {
+        graphApiVersion: environment.metaGraphApiVersion,
+        billingLedgerPath: environment.metaBillingLedgerPath,
+        ...(environment.metaPhoneNumberId === undefined
+          ? {}
+          : { phoneNumberId: environment.metaPhoneNumberId }),
+        ...(environment.metaAccessToken === undefined
+          ? {}
+          : { accessToken: environment.metaAccessToken }),
+      },
       ...(environment.chromeExecutablePath === undefined
         ? {}
         : { chromeExecutablePath: environment.chromeExecutablePath }),
@@ -134,11 +163,23 @@ async function main(): Promise<void> {
     secretVault: vault,
     sessionManager,
   });
+  registerMetaWebhookRoutes(server, multiBotManager, logger, {
+    ...(environment.metaWebhookVerifyToken === undefined
+      ? {}
+      : { verifyToken: environment.metaWebhookVerifyToken }),
+    ...(environment.metaAppSecret === undefined
+      ? {}
+      : { appSecret: environment.metaAppSecret }),
+  });
 
   await server.listen({ host: environment.panelHost, port: environment.panelPort });
   logger.info(
-    { host: environment.panelHost, port: environment.panelPort },
-    'Panel administrativo local iniciado',
+    {
+      host: environment.panelHost,
+      port: environment.panelPort,
+      metaWebhook: '/webhooks/meta/whatsapp',
+    },
+    'Panel administrativo y webhook de Meta iniciados',
   );
   void multiBotManager.startAll().catch((error: unknown) => {
     logger.error(
