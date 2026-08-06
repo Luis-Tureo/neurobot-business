@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { AppDatabase } from '../persistence/database.js';
 import {
   CommercialMessagingPolicy,
+  CommercialPlanService,
   MessagingPolicyError,
   type CommercialPlan,
   type MessagingPolicyErrorCode,
@@ -71,6 +73,65 @@ describe('CommercialMessagingPolicy', () => {
       () => policy.assertFreeFormMessageAllowed('56911111111'),
       'META_SERVICE_WINDOW_CLOSED',
     );
+  });
+});
+
+describe('CommercialPlanService', () => {
+  it('registra una solicitud avanzada sin activar el plan antes de la cotización', () => {
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    const service = new CommercialPlanService(database);
+
+    try {
+      const requested = service.requestAdvanced({
+        botId: 'neurobot',
+        useCase: 'DELIVERY',
+      });
+
+      expect(requested.plan).toBe('BASIC');
+      expect(requested.requestStatus).toBe('QUOTE_REQUIRED');
+      expect(requested.requestedUseCase).toBe('DELIVERY');
+      expect(requested.quoteReference).toBeNull();
+    } finally {
+      database.close();
+    }
+  });
+
+  it('rechaza la activación avanzada sin presupuesto aprobado', () => {
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    const service = new CommercialPlanService(database);
+
+    try {
+      expect(() => service.set({ botId: 'neurobot', plan: 'ADVANCED' })).toThrow(
+        'presupuesto aprobado',
+      );
+      expect(service.get('neurobot').plan).toBe('BASIC');
+    } finally {
+      database.close();
+    }
+  });
+
+  it('activa el plan avanzado solo después de registrar la cotización', () => {
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    const service = new CommercialPlanService(database);
+
+    try {
+      service.requestAdvanced({ botId: 'neurobot', useCase: 'APPOINTMENTS' });
+      const activated = service.set({
+        botId: 'neurobot',
+        plan: 'ADVANCED',
+        quoteReference: 'COT-2026-001',
+      });
+
+      expect(activated.plan).toBe('ADVANCED');
+      expect(activated.requestStatus).toBe('ACTIVE');
+      expect(activated.quoteReference).toBe('COT-2026-001');
+      expect(activated.requestedUseCase).toBe('APPOINTMENTS');
+    } finally {
+      database.close();
+    }
   });
 });
 
