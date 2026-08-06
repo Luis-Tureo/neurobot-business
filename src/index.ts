@@ -26,6 +26,18 @@ async function main(): Promise<void> {
   const logger = createLogger(environment.logLevel);
   const database = new AppDatabase(environment.databasePath);
   database.migrate();
+  for (const bot of database.listBots()) {
+    database.updateBotConfiguration({
+      botId: bot.id,
+      mode: 'business',
+      enabled: bot.enabled,
+      groupsEnabled: false,
+      privateMessagesEnabled: true,
+      realMentionRequired: false,
+      continuedConversationsEnabled: true,
+      menuType: bot.menuType,
+    });
+  }
   database.setBotSessionPath('neurobot', environment.sessionPath);
   await ensureInitialAdministrator(database, environment.panelInitialPassword);
 
@@ -112,6 +124,7 @@ async function main(): Promise<void> {
     sessionSecret: environment.panelSessionSecret,
     applicationVersion: packageData.version,
     developmentMode: environment.developmentMode,
+    businessOnly: true,
     maintenance,
     automaticMessages,
     pollRepository,
@@ -131,7 +144,10 @@ async function main(): Promise<void> {
   );
   void multiBotManager.startAll().catch((error: unknown) => {
     logger.error(
-      { operation: 'MULTIBOT_START_FAILED', ...serializeError(error, 'MULTIBOT_START_FAILED', false) },
+      {
+        operation: 'MULTIBOT_START_FAILED',
+        ...serializeError(error, 'MULTIBOT_START_FAILED', false),
+      },
       'No fue posible completar el inicio de todos los asistentes',
     );
   });

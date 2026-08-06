@@ -1,0 +1,15 @@
+## Hardening script
+```text
+```
+Exit code: 0
+
+npm warn exec The following package was not found and will be installed: prettier@3.9.6
+src/index.ts 105ms
+src/admin/server.ts 564ms
+public/index.html 186ms
+public/multibot-panel.js 265ms
+public/friendly-panel.js 36ms
+tests/assistant-platform.test.ts 7ms
+tests/panel-usability.test.ts 8ms
+tests/start-panel-consolidation.test.ts 4ms
+Prettier exit code: 0
