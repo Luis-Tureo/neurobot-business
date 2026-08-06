@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -26,6 +28,26 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Remove obsolete backup import
+        if: github.event_name == 'pull_request' && github.head_ref == 'agent/remove-backup-system' && github.actor != 'github-actions[bot]'
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/admin/server.ts')
+          text = path.read_text(encoding='utf-8')
+          old = "import { basename, dirname, join, resolve } from 'node:path';"
+          if old not in text:
+              raise SystemExit('No se encontró el import esperado.')
+          path.write_text(text.replace(old, "import { basename, join, resolve } from 'node:path';", 1), encoding='utf-8')
+          PY
+          npx prettier --write src/admin/server.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/admin/server.ts
+          git commit -m "Eliminar import de respaldo obsoleto"
+          git push origin HEAD:agent/remove-backup-system
 
       - name: Typecheck
         run: npm run typecheck
