@@ -31,6 +31,17 @@ const environmentSchema = z.object({
     .default('false')
     .transform((value) => value === 'true'),
   CHROME_EXECUTABLE_PATH: optionalTrimmedString,
+  META_GRAPH_API_VERSION: z
+    .string()
+    .trim()
+    .regex(/^v\d+\.\d+$/u)
+    .default('v25.0'),
+  META_PHONE_NUMBER_ID: optionalTrimmedString,
+  META_WABA_ID: optionalTrimmedString,
+  META_ACCESS_TOKEN: optionalTrimmedString,
+  META_WEBHOOK_VERIFY_TOKEN: optionalTrimmedString,
+  META_APP_SECRET: optionalTrimmedString,
+  META_BILLING_LEDGER_PATH: z.string().trim().default('./data/meta-billing-events.jsonl'),
   AI_PROVIDER: z.enum(['groq', 'disabled']).default('groq'),
   GROQ_API_KEY: optionalTrimmedString,
   GROQ_MODEL: z.string().trim().min(1).max(120).default('llama-3.1-8b-instant'),
@@ -56,6 +67,13 @@ export type Environment = {
   maxReconnectDelayMs: number;
   developmentMode: boolean;
   chromeExecutablePath?: string;
+  metaGraphApiVersion: string;
+  metaPhoneNumberId?: string;
+  metaWabaId?: string;
+  metaAccessToken?: string;
+  metaWebhookVerifyToken?: string;
+  metaAppSecret?: string;
+  metaBillingLedgerPath: string;
   aiProvider: 'groq' | 'disabled';
   groqApiKey?: string;
   groqModel: string;
@@ -95,6 +113,21 @@ export function loadEnvironment(
     maxReconnectAttempts: value.MAX_RECONNECT_ATTEMPTS,
     maxReconnectDelayMs: value.MAX_RECONNECT_DELAY_SECONDS * 1000,
     developmentMode: value.DEVELOPMENT_MODE,
+    metaGraphApiVersion: value.META_GRAPH_API_VERSION,
+    metaBillingLedgerPath: resolve(baseDirectory, value.META_BILLING_LEDGER_PATH),
+    ...(value.META_PHONE_NUMBER_ID === undefined
+      ? {}
+      : { metaPhoneNumberId: value.META_PHONE_NUMBER_ID }),
+    ...(value.META_WABA_ID === undefined ? {} : { metaWabaId: value.META_WABA_ID }),
+    ...(value.META_ACCESS_TOKEN === undefined
+      ? {}
+      : { metaAccessToken: value.META_ACCESS_TOKEN }),
+    ...(value.META_WEBHOOK_VERIFY_TOKEN === undefined
+      ? {}
+      : { metaWebhookVerifyToken: value.META_WEBHOOK_VERIFY_TOKEN }),
+    ...(value.META_APP_SECRET === undefined
+      ? {}
+      : { metaAppSecret: value.META_APP_SECRET }),
     aiProvider: value.AI_PROVIDER,
     ...(value.GROQ_API_KEY === undefined ? {} : { groqApiKey: value.GROQ_API_KEY }),
     groqModel: value.GROQ_MODEL,
