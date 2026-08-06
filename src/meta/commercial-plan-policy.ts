@@ -54,14 +54,21 @@ export class CommercialPlanService {
   }): CommercialPlanConfiguration {
     const current = this.get(input.botId);
     const now = new Date().toISOString();
+    const quoteReference = normalizeQuoteReference(input.quoteReference);
+    if (input.plan === 'ADVANCED' && quoteReference === null) {
+      throw new Error(
+        'El plan comercial avanzado requiere una referencia de presupuesto aprobado.',
+      );
+    }
     const configuration: CommercialPlanConfiguration = {
       plan: input.plan,
-      quoteReference:
-        input.quoteReference === undefined ? current.quoteReference : input.quoteReference,
+      quoteReference: input.plan === 'ADVANCED' ? quoteReference : null,
       activatedAt:
         input.activatedAt === undefined
           ? input.plan === 'ADVANCED'
-            ? current.activatedAt ?? now
+            ? current.plan === 'ADVANCED'
+              ? current.activatedAt ?? now
+              : now
             : null
           : input.activatedAt,
       updatedAt: now,
@@ -126,4 +133,12 @@ export class CommercialMessagingPolicy {
 
 function settingKey(botId: string): string {
   return `commercial_plan:${botId}`;
+}
+
+function normalizeQuoteReference(value: string | null | undefined): string | null {
+  if (value === undefined || value === null) return null;
+  const normalized = value.trim();
+  if (normalized === '') return null;
+  if (normalized.length > 120) throw new Error('La referencia del presupuesto es demasiado larga.');
+  return normalized;
 }
