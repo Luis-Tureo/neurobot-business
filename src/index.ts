@@ -52,7 +52,6 @@ async function main(): Promise<void> {
   );
   const sessionManager = new WhatsAppSessionManager(
     resolve(process.cwd(), 'data', 'whatsapp-sessions'),
-    resolve(process.cwd(), 'backups', 'sessions'),
   );
   let maintenance: MaintenanceService | null = null;
   const multiBotManager = new MultiBotManager(
@@ -93,7 +92,6 @@ async function main(): Promise<void> {
       projectRoot: process.cwd(),
       databasePath: environment.databasePath,
       sessionPath: environment.sessionPath,
-      encryptionSecret: environment.panelSessionSecret,
       resetTransientState: () => multiBotManager.resetTransientState(),
     },
   );

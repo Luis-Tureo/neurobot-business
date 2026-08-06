@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import cookie from '@fastify/cookie';
 import formbody from '@fastify/formbody';
 import helmet from '@fastify/helmet';
@@ -1048,21 +1048,17 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           eventType: 'PROTECTED_ASSISTANT_DELETION_BLOCKED',
           result: 'blocked',
         });
-        return reply
-          .code(403)
-          .send({
-            error: 'Este asistente está protegido y no puede enviarse a la papelera.',
-            code: 'PROTECTED_ASSISTANT_DELETION_BLOCKED',
-          });
+        return reply.code(403).send({
+          error: 'Este asistente está protegido y no puede enviarse a la papelera.',
+          code: 'PROTECTED_ASSISTANT_DELETION_BLOCKED',
+        });
       }
       const input = trashAssistantSchema.parse(request.body);
       if (input.confirmationName !== bot.botName) {
-        return reply
-          .code(400)
-          .send({
-            error: 'El nombre de confirmación no coincide.',
-            code: 'CONFIRMATION_NAME_MISMATCH',
-          });
+        return reply.code(400).send({
+          error: 'El nombre de confirmación no coincide.',
+          code: 'CONFIRMATION_NAME_MISMATCH',
+        });
       }
       const session = getSession(request, sessions) as PanelSession;
       const passwordHash = context.database.getPanelPasswordHash(session.username);
@@ -1097,21 +1093,17 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         return { assistant: adminBotResponse(context, restored) };
       } catch (error) {
         if (error instanceof Error && error.message === 'RESTORE_PHONE_CONFLICT') {
-          return reply
-            .code(409)
-            .send({
-              error:
-                'No se puede restaurar porque esa identidad de WhatsApp pertenece a otro asistente activo.',
-              code: 'RESTORE_PHONE_CONFLICT',
-            });
+          return reply.code(409).send({
+            error:
+              'No se puede restaurar porque esa identidad de WhatsApp pertenece a otro asistente activo.',
+            code: 'RESTORE_PHONE_CONFLICT',
+          });
         }
         if (error instanceof Error && error.message === 'ASSISTANT_NOT_ARCHIVED') {
-          return reply
-            .code(404)
-            .send({
-              error: 'El asistente no está en la papelera.',
-              code: 'ASSISTANT_NOT_ARCHIVED',
-            });
+          return reply.code(404).send({
+            error: 'El asistente no está en la papelera.',
+            code: 'ASSISTANT_NOT_ARCHIVED',
+          });
         }
         throw error;
       }
@@ -1135,22 +1127,18 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           eventType: 'PROTECTED_ASSISTANT_DELETION_BLOCKED',
           result: 'blocked',
         });
-        return reply
-          .code(403)
-          .send({
-            error: 'Este asistente está protegido y no puede eliminarse.',
-            code: 'PROTECTED_ASSISTANT_DELETION_BLOCKED',
-          });
+        return reply.code(403).send({
+          error: 'Este asistente está protegido y no puede eliminarse.',
+          code: 'PROTECTED_ASSISTANT_DELETION_BLOCKED',
+        });
       }
       const input = permanentlyDeleteAssistantSchema.parse(request.body);
       const expectedPhrase = `ELIMINAR PERMANENTEMENTE ${bot.botName}`;
       if (input.confirmationPhrase !== expectedPhrase) {
-        return reply
-          .code(400)
-          .send({
-            error: 'La frase de confirmación no coincide.',
-            code: 'CONFIRMATION_PHRASE_MISMATCH',
-          });
+        return reply.code(400).send({
+          error: 'La frase de confirmación no coincide.',
+          code: 'CONFIRMATION_PHRASE_MISMATCH',
+        });
       }
       const session = getSession(request, sessions) as PanelSession;
       const passwordHash = context.database.getPanelPasswordHash(session.username);
@@ -1160,33 +1148,13 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           .send({ error: 'La contraseña actual no es válida.', code: 'INVALID_PASSWORD' });
       }
       await context.multiBotManager?.stop(botId);
-      const backupRoot = join(
-        dirname(context.database.getPath()),
-        'backups',
-        'assistant-deletions',
-      );
-      await mkdir(backupRoot, { recursive: true });
-      const stamp = new Date().toISOString().replace(/[:.]/gu, '-');
-      const databaseBackup = join(backupRoot, `${bot.id}-${stamp}.db`);
-      await context.database.backupTo(databaseBackup);
-      let sessionBackup: string | null = null;
       if (context.sessionManager !== undefined) {
-        sessionBackup = await context.sessionManager.archive(bot);
+        await context.sessionManager.clear(bot);
       }
-      const backupReference = [
-        basename(databaseBackup),
-        sessionBackup === null ? null : basename(sessionBackup),
-      ]
-        .filter((value): value is string => value !== null)
-        .join(',');
-      context.database.permanentlyDeleteBot(
-        botId,
-        context.anonymizer.identifier(session.username),
-        backupReference,
-      );
+      context.database.permanentlyDeleteBot(botId, context.anonymizer.identifier(session.username));
       context.multiBotManager?.forgetAdminPhoneNumber(botId);
       audit(context, 'assistant_permanently_deleted', botId, 'ok', botId);
-      return { deleted: true, backupCreated: true };
+      return { deleted: true };
     },
   );
 
@@ -1202,12 +1170,10 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         source.mode === 'community' ||
         source.lifecycleStatus === 'ARCHIVED'
       ) {
-        return reply
-          .code(409)
-          .send({
-            error: 'Este asistente no contiene una configuración comercial transferible.',
-            code: 'COMMERCIAL_TRANSFER_NOT_AVAILABLE',
-          });
+        return reply.code(409).send({
+          error: 'Este asistente no contiene una configuración comercial transferible.',
+          code: 'COMMERCIAL_TRANSFER_NOT_AVAILABLE',
+        });
       }
       const input = transferCommercialConfigurationSchema.parse(request.body);
       const session = getSession(request, sessions) as PanelSession;
@@ -1217,14 +1183,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           .code(401)
           .send({ error: 'La contraseña actual no es válida.', code: 'INVALID_PASSWORD' });
       }
-      const backupRoot = join(
-        dirname(context.database.getPath()),
-        'backups',
-        'configuration-transfers',
-      );
-      await mkdir(backupRoot, { recursive: true });
-      const stamp = new Date().toISOString().replace(/[:.]/gu, '-');
-      await context.database.backupTo(join(backupRoot, `${sourceBotId}-to-neurobot-${stamp}.db`));
       const result = context.database.transferCommercialConfigurationToNeurobot(
         sourceBotId,
         context.anonymizer.identifier(session.username),
@@ -1711,13 +1669,11 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           lastEvent: cases[0]?.createdAt ?? null,
           aiConsumption: '0 tokens durante la moderación diaria.',
         },
-        administrators: context.database
-          .listAdministrators()
-          .map((identifier) => ({
-            identifier,
-            hash: context.anonymizer.identifier(identifier),
-            label: identifier.replace(/@(?:c|lid)\.us$/u, ''),
-          })),
+        administrators: context.database.listAdministrators().map((identifier) => ({
+          identifier,
+          hash: context.anonymizer.identifier(identifier),
+          label: identifier.replace(/@(?:c|lid)\.us$/u, ''),
+        })),
         safety: {
           automaticAIReviewEnabled: false,
           manualAIReviewEnabled: false,
@@ -1854,13 +1810,11 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           },
           'No fue posible preparar la moderación del grupo',
         );
-        return reply
-          .code(422)
-          .send({
-            error:
-              'No fue posible preparar una configuración segura. Revisa el texto e inténtalo nuevamente.',
-            code: 'MODERATION_ANALYSIS_FAILED',
-          });
+        return reply.code(422).send({
+          error:
+            'No fue posible preparar una configuración segura. Revisa el texto e inténtalo nuevamente.',
+          code: 'MODERATION_ANALYSIS_FAILED',
+        });
       }
     },
   );
@@ -1910,12 +1864,10 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         .parse(request.params).groupHash;
       const enabled = z.object({ enabled: z.boolean() }).strict().parse(request.body).enabled;
       if (enabled && context.database.listGroupModerationRecipients(botId, groupHash).length === 0)
-        return reply
-          .code(409)
-          .send({
-            error: 'Selecciona al menos un administrador para los avisos privados.',
-            code: 'MODERATION_ADMIN_REQUIRED',
-          });
+        return reply.code(409).send({
+          error: 'Selecciona al menos un administrador para los avisos privados.',
+          code: 'MODERATION_ADMIN_REQUIRED',
+        });
       try {
         const profile = context.database.setGroupModerationEnabled(botId, groupHash, enabled);
         context.database.recordTechnicalEvent({
@@ -1926,12 +1878,10 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         });
         return { profile: { ...profile, compiled: undefined } };
       } catch {
-        return reply
-          .code(409)
-          .send({
-            error: 'Completa y aprueba las pruebas antes de activar la moderación.',
-            code: 'MODERATION_TESTS_REQUIRED',
-          });
+        return reply.code(409).send({
+          error: 'Completa y aprueba las pruebas antes de activar la moderación.',
+          code: 'MODERATION_TESTS_REQUIRED',
+        });
       }
     },
   );
@@ -2122,19 +2072,17 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           },
           context.database.getModerationSettings(botId),
           context.database.listModerationRules(botId, false),
-          context.database
-            .listModerationTerms(botId)
-            .map((item) => ({
-              id: Number(item.id),
-              term: String(item.term),
-              normalizedTerm: String(item.normalizedTerm),
-              category: String(item.category),
-              severity: String(item.severity) as
-                'INFORMATIVA' | 'LEVE' | 'MEDIA' | 'ALTA' | 'CRITICA',
-              matchMode: String(item.matchMode),
-              score: Number(item.score),
-              enabled: item.enabled === 1,
-            })),
+          context.database.listModerationTerms(botId).map((item) => ({
+            id: Number(item.id),
+            term: String(item.term),
+            normalizedTerm: String(item.normalizedTerm),
+            category: String(item.category),
+            severity: String(item.severity) as
+              'INFORMATIVA' | 'LEVE' | 'MEDIA' | 'ALTA' | 'CRITICA',
+            matchMode: String(item.matchMode),
+            score: Number(item.score),
+            enabled: item.enabled === 1,
+          })),
         );
       context.database.recordTechnicalEvent({
         botId,
@@ -2246,17 +2194,15 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         rules: context.database
           .listModerationRules(botId)
           .map((rule) => ({ ...moderationRuleForTransfer(rule), enabled: false })),
-        terms: context.database
-          .listModerationTerms(botId)
-          .map((term) => ({
-            ruleId: null,
-            term: String(term.term),
-            category: String(term.category),
-            severity: String(term.severity),
-            matchMode: String(term.matchMode),
-            score: Number(term.score),
-            enabled: false,
-          })),
+        terms: context.database.listModerationTerms(botId).map((term) => ({
+          ruleId: null,
+          term: String(term.term),
+          category: String(term.category),
+          severity: String(term.severity),
+          matchMode: String(term.matchMode),
+          score: Number(term.score),
+          enabled: false,
+        })),
       };
     },
   );
@@ -2328,12 +2274,10 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const profile = context.database.getBotProfile(botId);
       const input = aiSettingsSchema.parse(request.body);
       if (exceedsSafeDefaults(input) && !input.confirmIncreasedLimits) {
-        return reply
-          .code(409)
-          .send({
-            error: 'Confirma explícitamente el aumento sobre los límites seguros iniciales.',
-            code: 'AI_LIMIT_INCREASE_CONFIRMATION_REQUIRED',
-          });
+        return reply.code(409).send({
+          error: 'Confirma explícitamente el aumento sobre los límites seguros iniciales.',
+          code: 'AI_LIMIT_INCREASE_CONFIRMATION_REQUIRED',
+        });
       }
       const { confirmIncreasedLimits, ...values } = input;
       void confirmIncreasedLimits;
@@ -2492,11 +2436,11 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const bot = context.database.getBot(botId);
       if (bot === null) return reply.code(404).send({ error: 'Asistente no encontrado.' });
       await context.multiBotManager.stop(botId);
-      const backupPath = await context.sessionManager.archive(bot);
+      await context.sessionManager.clear(bot);
       context.database.updateBotWhatsAppStatus(botId, 'disconnected');
       await context.multiBotManager.start(botId);
       audit(context, 'bot_unlink', botId, 'ok', botId);
-      return { unlinked: true, backupCreated: true, backupName: basename(backupPath) };
+      return { unlinked: true };
     },
   );
 
@@ -2527,11 +2471,9 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         };
       }
       if (input.apiKey === undefined || context.secretVault?.isConfigured() !== true) {
-        return reply
-          .code(409)
-          .send({
-            error: 'APP_ENCRYPTION_KEY debe estar configurada para guardar una clave por bot.',
-          });
+        return reply.code(409).send({
+          error: 'APP_ENCRYPTION_KEY debe estar configurada para guardar una clave por bot.',
+        });
       }
       const encrypted = context.secretVault.encrypt(input.apiKey, `bot:${botId}:groq`);
       context.database.setBotEncryptedCredential(
@@ -3020,12 +2962,11 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         .parse(request.body);
       const existing = context.database.getAssistantProfile(id);
       if (existing === null) return reply.code(404).send({ error: 'Perfil no encontrado.' });
-      const backupId = context.database.backupAssistantProfile(id, `Plantilla ${input.preset}`);
       const profile = context.database.saveAssistantProfile(
         applyProfilePreset(existing, input.preset),
       );
       audit(context, 'profile_template_apply', String(id), 'ok');
-      return { profile, backupCreated: true, backupId };
+      return { profile };
     },
   );
 
@@ -3990,12 +3931,10 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           templateId: id,
           result: 'rejected',
         });
-        return reply
-          .code(404)
-          .send({
-            error: 'No se pudo modificar la encuesta seleccionada.',
-            code: 'POLL_TEMPLATE_NOT_FOUND',
-          });
+        return reply.code(404).send({
+          error: 'No se pudo modificar la encuesta seleccionada.',
+          code: 'POLL_TEMPLATE_NOT_FOUND',
+        });
       }
       if (template.isDefault) {
         const session = getSession(request, sessions) as PanelSession;

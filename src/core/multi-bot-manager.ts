@@ -1,6 +1,12 @@
 import type { Logger } from 'pino';
 import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
-import type { AssistantProfile, BotMode, BotRecord, ConnectorType, MenuType } from '../domain/types.js';
+import type {
+  AssistantProfile,
+  BotMode,
+  BotRecord,
+  ConnectorType,
+  MenuType,
+} from '../domain/types.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import { WhatsAppWebAdapter } from '../messaging/whatsapp-adapter.js';
 import type { AppDatabase } from '../persistence/database.js';
@@ -31,7 +37,9 @@ export class MultiBotManager {
     private readonly options: BotInstanceOptions & { chromeExecutablePath?: string },
     private readonly clientFactory: ClientFactory = (bot) => {
       if (bot.connectorType !== 'WHATSAPP_WEB') {
-        throw new Error('El conector WHATSAPP_CLOUD_API requiere credenciales y webhooks oficiales antes de iniciar.');
+        throw new Error(
+          'El conector WHATSAPP_CLOUD_API requiere credenciales y webhooks oficiales antes de iniciar.',
+        );
       }
       return new WhatsAppWebAdapter(
         {
@@ -41,7 +49,9 @@ export class MultiBotManager {
           maxMessageLength: options.maxMessageLength,
           developmentMode: options.developmentMode,
           communityPollVotesNoAction: bot.capabilities.communitySingleTurnMode,
-          ...(options.chromeExecutablePath === undefined ? {} : { chromeExecutablePath: options.chromeExecutablePath }),
+          ...(options.chromeExecutablePath === undefined
+            ? {}
+            : { chromeExecutablePath: options.chromeExecutablePath }),
         },
         logger,
         anonymizer,
@@ -107,17 +117,17 @@ export class MultiBotManager {
         onDuplicateIdentity: async (duplicateBotId) => {
           const duplicateBot = this.database.getBot(duplicateBotId);
           if (duplicateBot === null) return;
-          const backupPath = await this.sessions.archive(duplicateBot);
+          await this.sessions.clear(duplicateBot);
           this.instances.delete(duplicateBotId);
           this.started.delete(duplicateBotId);
           this.database.recordTechnicalEvent({
             botId: duplicateBotId,
             eventType: 'TEMPORARY_SESSION_CLEANED',
-            result: 'archived',
+            result: 'cleared',
           });
           this.logger.warn(
-            { operation: 'TEMPORARY_SESSION_CLEANED', botId: duplicateBotId, backupCreated: Boolean(backupPath) },
-            'La sesión temporal duplicada fue aislada sin afectar al asistente existente',
+            { operation: 'TEMPORARY_SESSION_CLEANED', botId: duplicateBotId },
+            'La sesión temporal duplicada fue eliminada sin afectar al asistente existente',
           );
         },
       },
@@ -189,8 +199,13 @@ export class MultiBotManager {
     this.started.clear();
   }
 
-  public snapshots(): Array<{ bot: BotRecord; runtime: ReturnType<BotInstance['snapshot']> | null }> {
-    return this.database.listBots().map((bot) => ({ bot, runtime: this.instances.get(bot.id)?.snapshot() ?? null }));
+  public snapshots(): Array<{
+    bot: BotRecord;
+    runtime: ReturnType<BotInstance['snapshot']> | null;
+  }> {
+    return this.database
+      .listBots()
+      .map((bot) => ({ bot, runtime: this.instances.get(bot.id)?.snapshot() ?? null }));
   }
 
   public snapshot(botId: string): ReturnType<BotInstance['snapshot']> | null {
@@ -249,7 +264,10 @@ export class MultiBotManager {
 
   private recordInstanceFailure(operation: string, botId: string, error: unknown): void {
     const details = serializeError(error, operation, false);
-    this.logger.error({ operation, botId, ...details }, 'Falló una instancia aislada; las demás continuarán');
+    this.logger.error(
+      { operation, botId, ...details },
+      'Falló una instancia aislada; las demás continuarán',
+    );
     this.database.recordTechnicalEvent({
       botId,
       eventType: operation,
@@ -262,9 +280,13 @@ export class MultiBotManager {
     return (
       bot.enabled &&
       bot.connectorType === 'WHATSAPP_WEB' &&
-      !['ARCHIVED', 'PENDING_DELETION', 'DELETED', 'DUPLICATE_CONFIGURATION', 'DISABLED'].includes(
-        bot.lifecycleStatus,
-      )
+      ![
+        'ARCHIVED',
+        'PENDING_DELETION',
+        'DELETED',
+        'DUPLICATE_CONFIGURATION',
+        'DISABLED',
+      ].includes(bot.lifecycleStatus)
     );
   }
 }

@@ -4,7 +4,6 @@ import { resolve } from 'node:path';
 describe('interfaz de mantenimiento', () => {
   const html = readFileSync(resolve('public', 'index.html'), 'utf8');
   const script = readFileSync(resolve('public', 'app.js'), 'utf8');
-  const gitignore = readFileSync(resolve('.gitignore'), 'utf8');
 
   it('muestra la Zona de peligro fuera de la página principal', () => {
     expect(html).toContain('data-section="maintenance"');
@@ -32,6 +31,5 @@ describe('interfaz de mantenimiento', () => {
     expect(script).toContain("window.addEventListener('beforeunload'");
     expect(script).toContain('/api/admin/maintenance/status?operationId=');
     expect(script).toContain('authenticated(false)');
-    expect(gitignore).toContain('backups/');
   });
 });
