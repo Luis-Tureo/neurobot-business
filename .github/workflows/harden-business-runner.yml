@@ -1,0 +1,133 @@
+name: Run Neurobot Business Hardening
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  harden:
+    if: github.event.issue.title == '[run-harden-neurobot-business]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/repair-business-readme
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Extract hardening script from controlled workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin master
+          git show origin/master:.github/workflows/harden-business.yml > /tmp/harden-workflow.yml
+          python - <<'PY'
+          from pathlib import Path
+
+          lines = Path('/tmp/harden-workflow.yml').read_text(encoding='utf-8').splitlines()
+          start = next(index for index, line in enumerate(lines) if "python - <<'PY'" in line)
+          end = next(index for index in range(start + 1, len(lines)) if lines[index].strip() == 'PY')
+          script_lines = []
+          for line in lines[start + 1:end]:
+              script_lines.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/harden.py').write_text('\n'.join(script_lines) + '\n', encoding='utf-8')
+          PY
+
+      - name: Apply hardening and commit changes
+        id: patch
+        shell: bash
+        run: |
+          set +e
+          : > harden-report.txt
+          echo '## Hardening script' >> harden-report.txt
+          echo '```text' >> harden-report.txt
+          python /tmp/harden.py >> harden-report.txt 2>&1
+          patch_status=$?
+          echo '```' >> harden-report.txt
+          echo "Exit code: $patch_status" >> harden-report.txt
+          echo >> harden-report.txt
+
+          if [ "$patch_status" -eq 0 ]; then
+            npx prettier --write src/index.ts src/admin/server.ts public/index.html public/multibot-panel.js public/friendly-panel.js tests/assistant-platform.test.ts tests/panel-usability.test.ts tests/start-panel-consolidation.test.ts >> harden-report.txt 2>&1
+            format_status=$?
+            echo "Prettier exit code: $format_status" >> harden-report.txt
+            if [ "$format_status" -eq 0 ]; then
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add -A
+              if ! git diff --cached --quiet; then
+                git commit -m "refactor: enforce private business-only operation" >> harden-report.txt 2>&1
+                git push origin HEAD:agent/repair-business-readme >> harden-report.txt 2>&1
+              fi
+            fi
+          fi
+          echo "patch_status=$patch_status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Validate resulting branch
+        id: validate
+        shell: bash
+        run: |
+          set +e
+          overall=0
+          run_step() {
+            name="$1"
+            shift
+            echo "## $name" >> harden-report.txt
+            echo '```text' >> harden-report.txt
+            "$@" >> harden-report.txt 2>&1
+            status=$?
+            echo '```' >> harden-report.txt
+            echo "Exit code: $status" >> harden-report.txt
+            echo >> harden-report.txt
+            if [ "$status" -ne 0 ]; then overall=1; fi
+          }
+
+          if [ "${{ steps.patch.outputs.patch_status }}" -eq 0 ]; then
+            run_step "npm ci" npm ci
+            run_step "Typecheck" npm run typecheck
+            run_step "Lint" npm run lint
+            run_step "Tests" npm test
+            run_step "Build" npm run build
+          else
+            overall=1
+          fi
+          echo "overall=$overall" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish hardening report
+        uses: actions/github-script@v7
+        env:
+          HARDEN_RESULT: ${{ steps.validate.outputs.overall }}
+        with:
+          script: |
+            const fs = require('fs');
+            let report = fs.readFileSync('harden-report.txt', 'utf8');
+            const limit = 60000;
+            if (report.length > limit) report = `${report.slice(0, limit)}\n\n[Registro truncado]`;
+            const heading = process.env.HARDEN_RESULT === '0'
+              ? '✅ Endurecimiento empresarial validado'
+              : '❌ El endurecimiento requiere una corrección adicional';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `${heading}\n\n${report}`
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed',
+              state_reason: 'completed'
+            });
+
+      - name: Fail when validation failed
+        if: steps.validate.outputs.overall != '0'
+        run: exit 1
