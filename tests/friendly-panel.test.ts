@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
+import { readFriendlyPanelSource } from './source-bundles.js';
 
 const html = readFileSync('public/index.html', 'utf8');
-const script = readFileSync('public/friendly-panel.js', 'utf8');
+const script = readFriendlyPanelSource();
 const styles = readFileSync('public/friendly-panel.css', 'utf8');
 
 describe('panel empresarial amigable y ordenado', () => {
