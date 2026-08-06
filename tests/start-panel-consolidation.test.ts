@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
+import { readFriendlyPanelSource } from './source-bundles.js';
 
 describe('inicio empresarial consolidado', () => {
   const app = readFileSync('public/app.js', 'utf8');
   const multibot = readFileSync('public/multibot-panel.js', 'utf8');
-  const friendly = readFileSync('public/friendly-panel.js', 'utf8');
+  const friendly = readFriendlyPanelSource();
   const styles = readFileSync('public/styles.css', 'utf8');
 
   it('presenta un inicio centrado en estado y conexión', () => {
