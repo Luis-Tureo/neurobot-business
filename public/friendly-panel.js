@@ -232,7 +232,7 @@ function enhanceDesktopNavigation() {
   searchBox.append(createElement('span', '', 'Buscar una opción'));
   const searchInput = createElement('input');
   searchInput.type = 'search';
-  searchInput.placeholder = 'Ejemplo: bienvenida';
+  searchInput.placeholder = 'Ejemplo: horarios';
   searchInput.autocomplete = 'off';
   searchBox.append(searchInput);
   tabs.insertBefore(searchBox, more);
@@ -533,58 +533,6 @@ function makeCardCollapsible(card, openByDefault) {
 
 function simplifyWhatsApp() {
   makeCardCollapsible(query('#section-whatsapp .manual-tests-card'), false);
-}
-
-function simplifyAutomaticMessages() {
-  const cards = queryAll('#section-automatic-messages .automatic-card');
-  cards.forEach((card, index) => makeCardCollapsible(card, index === 0));
-
-  const deliveries = query('#automatic-deliveries');
-  const title = deliveries?.previousElementSibling;
-  const section = query('#section-automatic-messages');
-  if (section && deliveries && title) {
-    groupChildren(section, [title, deliveries], {
-      id: 'automatic-history',
-      title: 'Últimos resultados por grupo',
-      description: 'Consulta el historial cuando necesites verificar un envío.',
-    });
-  }
-}
-
-function simplifyPolls() {
-  const section = query('#section-polls');
-  if (!section) return;
-
-  for (const article of queryAll(':scope > article.card.inset', section)) {
-    if (query('#poll-configuration-form', article)) continue;
-    const openByDefault = Boolean(query('#poll-template-form', article));
-    makeCardCollapsible(article, openByDefault);
-  }
-
-  const history = query('#poll-history-list');
-  const title = history?.previousElementSibling;
-  if (history && title) {
-    groupChildren(section, [title, history], {
-      id: 'poll-history',
-      title: 'Historial de envíos',
-      description: 'Resultados anteriores de las encuestas enviadas.',
-    });
-  }
-}
-
-function simplifyModeration() {
-  const labels = {
-    configuration: 'Estado y avisos',
-    'group-rules': 'Reglas',
-    tests: 'Probar',
-    cases: 'Casos pendientes',
-    history: 'Historial',
-  };
-
-  for (const button of queryAll('#section-moderation [data-moderation-tab]')) {
-    const label = labels[button.dataset.moderationTab];
-    if (label) button.textContent = label;
-  }
 }
 
 function simplifyStatistics() {

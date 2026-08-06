@@ -4,7 +4,7 @@ describe('inicio empresarial consolidado', () => {
   const app = readFileSync('public/app.js', 'utf8');
   const multibot = readFileSync('public/multibot-panel.js', 'utf8');
   const friendly = readFileSync('public/friendly-panel.js', 'utf8');
-  const styles = readFileSync('public/panel-refinement.css', 'utf8');
+  const styles = readFileSync('public/styles.css', 'utf8');
 
   it('presenta un inicio centrado en estado y conexión', () => {
     expect(friendly).toContain("label: 'Inicio'");
@@ -12,9 +12,9 @@ describe('inicio empresarial consolidado', () => {
     expect(friendly).not.toContain('Estado, conexión y grupos');
   });
 
-  it('muestra signos más y menos en las categorías', () => {
-    expect(styles).toContain("content: '+' !important");
-    expect(styles).toContain("content: '−' !important");
+  it('muestra categorías desplegables en la barra lateral', () => {
+    expect(styles).toContain('.sidebar-accordion');
+    expect(styles).toContain('.sidebar-accordion summary');
   });
 
   it('no carga módulos comunitarios al seleccionar un negocio', () => {

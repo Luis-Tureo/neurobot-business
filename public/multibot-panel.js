@@ -323,59 +323,6 @@ async function loadSelectedBot() {
   await Promise.all(loaders);
 }
 
-async function loadModeration() {
-  if (!panelState.selectedBotId || !panelState.visibleModules.includes('moderation')) return;
-  const data = await panelApi(
-    `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation`,
-  );
-  panelState.moderation = data;
-  await renderSimpleModeration(data);
-  const legacyModerationAvailable = [
-    '#moderation-summary-cards',
-    '#moderation-state-notice',
-    '#moderation-settings-form',
-    '#moderation-warning-form',
-    '#moderation-groups-list',
-    '#moderation-rules-list',
-    '#moderation-terms-list',
-    '#moderation-statistics-cards',
-  ].every((selector) => document.querySelector(selector) !== null);
-  if (!legacyModerationAvailable || data.settings === undefined) return;
-  setCardGrid('#moderation-summary-cards', [
-    ['Estado', data.settings.enabled ? 'Activada' : 'Desactivada'],
-    ['Grupos protegidos', data.summary.protectedGroups],
-    ['Reglas activas', data.summary.activeRules],
-    ['Mensajes analizados hoy', data.metrics.messagesReviewed],
-    ['Mensajes permitidos', data.metrics.messagesAllowed],
-    ['Coincidencias', data.metrics.matchesDetected],
-    ['Advertencias', data.metrics.warningsSent],
-    ['Reincidencias', data.metrics.recurrencesDetected],
-    ['Casos pendientes', data.summary.pendingCases],
-    ['Falsos positivos', data.metrics.falsePositives],
-    ['Consumo de IA', `${data.metrics.aiTokens} tokens`],
-    ['Último evento', safeDate(data.summary.lastEvent)],
-  ]);
-  const notice = document.querySelector('#moderation-state-notice');
-  notice.textContent = data.settings.enabled
-    ? 'Moderación local activada para mensajes nuevos.'
-    : 'Moderación desactivada. Las reglas permanecen guardadas.';
-  fillModerationSettings(data.settings);
-  renderModerationGroups(data.groups);
-  renderModerationRules(data.rules);
-  renderModerationTerms(data.terms);
-  renderModerationCases(data.cases, data.groups);
-  setCardGrid('#moderation-statistics-cards', [
-    ['Revisados localmente', data.metrics.messagesReviewed],
-    ['Permitidos', data.metrics.messagesAllowed],
-    ['Coincidencias', data.metrics.matchesDetected],
-    ['Advertencias', data.metrics.warningsSent],
-    ['Casos administrativos', data.metrics.adminCasesCreated],
-    ['Errores locales', data.metrics.localErrors],
-    ['Revisiones con IA', data.metrics.aiReviews],
-    ['Tokens de moderación', data.metrics.aiTokens],
-  ]);
-}
-
 async function renderSimpleModeration(data) {
   const selector = document.querySelector('#moderation-group-selector');
   selector.replaceChildren();
@@ -932,7 +879,6 @@ function fillBotConfiguration(bot) {
   ].forEach((field) => {
     form.elements[field].checked = Boolean(bot[field]);
   });
-  const singleTurnCommunity = Boolean(bot.capabilities.communitySingleTurnMode);
   form.elements.mode.disabled = true;
   form.elements.menuType.disabled = !bot.capabilities.interactiveMenusEnabled;
   form.elements.groupsEnabled.checked = false;
