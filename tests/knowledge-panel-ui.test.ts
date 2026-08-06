@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
+import { readFriendlyPanelSource } from './source-bundles.js';
 
 const html = readFileSync('public/index.html', 'utf8');
 const panel = readFileSync('public/multibot-panel.js', 'utf8');
-const friendly = readFileSync('public/friendly-panel.js', 'utf8');
+const friendly = readFriendlyPanelSource();
 const styles = readFileSync('public/friendly-panel.css', 'utf8');
 
 describe('información del negocio con edición guiada', () => {

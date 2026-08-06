@@ -1,5 +1,6 @@
 import type { Logger } from 'pino';
 import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
+import type { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
 import type {
   AssistantProfile,
   BotMode,
@@ -7,26 +8,45 @@ import type {
   ConnectorType,
   MenuType,
 } from '../domain/types.js';
+import { serializeError } from '../infrastructure/safe-error.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import { WhatsAppWebAdapter } from '../messaging/whatsapp-adapter.js';
+import { CommercialPlanService } from '../meta/commercial-plan-policy.js';
+import { MetaBillingLedger } from '../meta/meta-billing-ledger.js';
+import { MetaCloudApiClient } from '../meta/meta-cloud-api-client.js';
+import type { ModerationService } from '../moderation/moderation-service.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
-import { serializeError } from '../infrastructure/safe-error.js';
-import { BotInstance, type BotInstanceOptions } from './bot-instance.js';
-import type { WhatsAppSessionManager } from './whatsapp-session-manager.js';
 import type { AutomaticMessageService } from './automatic-message-service.js';
+import { BotInstance, type BotInstanceOptions } from './bot-instance.js';
 import type { PollRepository } from './poll-repository.js';
 import type { PollScheduler } from './poll-scheduler.js';
 import type { PollService } from './poll-service.js';
-import type { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
-import type { ModerationService } from '../moderation/moderation-service.js';
+import type { WhatsAppSessionManager } from './whatsapp-session-manager.js';
 
 type ClientFactory = (bot: BotRecord) => MessagingClient;
+
+export type MetaCloudRuntimeConfiguration = {
+  graphApiVersion: string;
+  phoneNumberId?: string;
+  accessToken?: string;
+  billingLedgerPath: string;
+  primaryBotId?: string;
+};
+
+export type MultiBotManagerOptions = BotInstanceOptions & {
+  chromeExecutablePath?: string;
+  metaCloud?: MetaCloudRuntimeConfiguration;
+};
 
 export class MultiBotManager {
   private readonly instances = new Map<string, BotInstance>();
   private readonly started = new Set<string>();
   private readonly adminPhoneNumbers = new Map<string, string>();
+  private readonly planService: CommercialPlanService;
+  private readonly billingLedger: MetaBillingLedger;
+  private readonly clientFactory: ClientFactory;
+  private readonly metaCloud: MetaCloudRuntimeConfiguration;
 
   public constructor(
     private readonly database: AppDatabase,
@@ -34,30 +54,18 @@ export class MultiBotManager {
     private readonly sessions: WhatsAppSessionManager,
     private readonly anonymizer: Anonymizer,
     private readonly logger: Logger,
-    private readonly options: BotInstanceOptions & { chromeExecutablePath?: string },
-    private readonly clientFactory: ClientFactory = (bot) => {
-      if (bot.connectorType !== 'WHATSAPP_WEB') {
-        throw new Error(
-          'El conector WHATSAPP_CLOUD_API requiere credenciales y webhooks oficiales antes de iniciar.',
-        );
-      }
-      return new WhatsAppWebAdapter(
-        {
-          sessionPath: bot.sessionPath,
-          clientId: bot.clientId,
-          acceptPrivateMessages: bot.privateMessagesEnabled,
-          maxMessageLength: options.maxMessageLength,
-          developmentMode: options.developmentMode,
-          communityPollVotesNoAction: bot.capabilities.communitySingleTurnMode,
-          ...(options.chromeExecutablePath === undefined
-            ? {}
-            : { chromeExecutablePath: options.chromeExecutablePath }),
-        },
-        logger,
-        anonymizer,
-      );
-    },
-  ) {}
+    private readonly options: MultiBotManagerOptions,
+    clientFactory?: ClientFactory,
+  ) {
+    this.metaCloud = options.metaCloud ?? {
+      graphApiVersion: 'v25.0',
+      billingLedgerPath: './data/meta-billing-events.jsonl',
+      primaryBotId: 'neurobot',
+    };
+    this.planService = new CommercialPlanService(database);
+    this.billingLedger = new MetaBillingLedger(this.metaCloud.billingLedgerPath);
+    this.clientFactory = clientFactory ?? ((bot) => this.createMessagingClient(bot));
+  }
 
   public async startAll(): Promise<void> {
     for (const bot of this.database.listBots().filter((candidate) => this.canStart(candidate))) {
@@ -96,14 +104,8 @@ export class MultiBotManager {
     if (existing !== undefined) return existing;
     let bot = this.database.getBot(botId);
     if (bot === null) throw new Error('El asistente no existe.');
-    if (!this.canStart(bot)) {
-      throw new Error(
-        bot.connectorType === 'WHATSAPP_CLOUD_API'
-          ? 'El conector Cloud API queda pendiente hasta completar sus credenciales y webhook.'
-          : 'El asistente no puede iniciarse en su estado actual.',
-      );
-    }
-    await this.sessions.pathFor(bot);
+    if (!this.canStart(bot)) throw new Error('El asistente no puede iniciarse en su estado actual.');
+    if (bot.connectorType === 'WHATSAPP_WEB') await this.sessions.pathFor(bot);
     bot = this.database.getBot(botId) as BotRecord;
     const instance = new BotInstance(
       bot,
@@ -116,7 +118,7 @@ export class MultiBotManager {
         ...this.options,
         onDuplicateIdentity: async (duplicateBotId) => {
           const duplicateBot = this.database.getBot(duplicateBotId);
-          if (duplicateBot === null) return;
+          if (duplicateBot === null || duplicateBot.connectorType !== 'WHATSAPP_WEB') return;
           await this.sessions.clear(duplicateBot);
           this.instances.delete(duplicateBotId);
           this.started.delete(duplicateBotId);
@@ -143,10 +145,14 @@ export class MultiBotManager {
     menuType: MenuType;
     profile: Omit<AssistantProfile, 'id' | 'active' | 'createdAt' | 'updatedAt'>;
   }): Promise<BotRecord> {
+    const connectorType: ConnectorType =
+      input.mode === 'business' ? 'WHATSAPP_CLOUD_API' : input.connectorType;
     const bot = this.database.createBot({
       ...input,
+      connectorType,
       sessionPath: this.sessions.newBotPath(input.id),
     });
+    if (bot.mode === 'business') this.planService.set({ botId: bot.id, plan: 'BASIC' });
     this.database.recordTechnicalEvent({
       botId: bot.id,
       eventType: 'ASSISTANT_DRAFT_CREATED',
@@ -163,14 +169,24 @@ export class MultiBotManager {
       } catch (error) {
         this.recordInstanceFailure('BOT_START_FAILED', bot.id, error);
       }
-    } else {
-      this.database.recordTechnicalEvent({
-        botId: bot.id,
-        eventType: 'OPTIONAL_SERVICE_DISABLED',
-        result: 'connector_pending_configuration',
-      });
     }
     return bot;
+  }
+
+  public commercialPlanService(): CommercialPlanService {
+    return this.planService;
+  }
+
+  public metaBillingLedger(): MetaBillingLedger {
+    return this.billingLedger;
+  }
+
+  public metaCloudClientForPhoneNumberId(phoneNumberId: string): MetaCloudApiClient | null {
+    for (const instance of this.instances.values()) {
+      const client = instance.messagingClient();
+      if (client instanceof MetaCloudApiClient && client.phoneNumberId() === phoneNumberId) return client;
+    }
+    return null;
   }
 
   public moderationService(botId: string): ModerationService | null {
@@ -262,6 +278,45 @@ export class MultiBotManager {
     for (const instance of this.instances.values()) instance.resetTransientState();
   }
 
+  private createMessagingClient(bot: BotRecord): MessagingClient {
+    if (bot.connectorType === 'WHATSAPP_CLOUD_API') {
+      const primaryBotId = this.metaCloud.primaryBotId ?? 'neurobot';
+      const isPrimaryBot = bot.id === primaryBotId;
+      return new MetaCloudApiClient(
+        {
+          botId: bot.id,
+          graphApiVersion: this.metaCloud.graphApiVersion,
+          maxMessageLength: this.options.maxMessageLength,
+          planService: this.planService,
+          billingLedger: this.billingLedger,
+          customerReference: (recipient) => this.anonymizer.identifier(recipient),
+          ...(isPrimaryBot && this.metaCloud.phoneNumberId !== undefined
+            ? { phoneNumberId: this.metaCloud.phoneNumberId }
+            : {}),
+          ...(isPrimaryBot && this.metaCloud.accessToken !== undefined
+            ? { accessToken: this.metaCloud.accessToken }
+            : {}),
+        },
+        this.logger,
+      );
+    }
+    return new WhatsAppWebAdapter(
+      {
+        sessionPath: bot.sessionPath,
+        clientId: bot.clientId,
+        acceptPrivateMessages: bot.privateMessagesEnabled,
+        maxMessageLength: this.options.maxMessageLength,
+        developmentMode: this.options.developmentMode,
+        communityPollVotesNoAction: bot.capabilities.communitySingleTurnMode,
+        ...(this.options.chromeExecutablePath === undefined
+          ? {}
+          : { chromeExecutablePath: this.options.chromeExecutablePath }),
+      },
+      this.logger,
+      this.anonymizer,
+    );
+  }
+
   private recordInstanceFailure(operation: string, botId: string, error: unknown): void {
     const details = serializeError(error, operation, false);
     this.logger.error(
@@ -279,7 +334,7 @@ export class MultiBotManager {
   private canStart(bot: BotRecord): boolean {
     return (
       bot.enabled &&
-      bot.connectorType === 'WHATSAPP_WEB' &&
+      ['WHATSAPP_WEB', 'WHATSAPP_CLOUD_API'].includes(bot.connectorType) &&
       ![
         'ARCHIVED',
         'PENDING_DELETION',

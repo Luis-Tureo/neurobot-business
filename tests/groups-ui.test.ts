@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { readAdminServerSource } from './source-bundles.js';
 
 describe('Neurobot Business sin administración de grupos', () => {
   const html = readFileSync(resolve('public', 'index.html'), 'utf8');
   const panel = readFileSync(resolve('public', 'multibot-panel.js'), 'utf8');
-  const server = readFileSync(resolve('src', 'admin', 'server.ts'), 'utf8');
+  const server = readAdminServerSource();
   const index = readFileSync(resolve('src', 'index.ts'), 'utf8');
 
   it('no ofrece grupos como módulo navegable', () => {

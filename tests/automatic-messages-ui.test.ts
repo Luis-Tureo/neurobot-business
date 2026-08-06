@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { readAdminServerSource, readFriendlyPanelSource } from './source-bundles.js';
 
 describe('Neurobot Business sin automatizaciones comunitarias', () => {
   const html = readFileSync(resolve('public', 'index.html'), 'utf8');
   const panel = readFileSync(resolve('public', 'multibot-panel.js'), 'utf8');
-  const friendly = readFileSync(resolve('public', 'friendly-panel.js'), 'utf8');
-  const server = readFileSync(resolve('src', 'admin', 'server.ts'), 'utf8');
+  const friendly = readFriendlyPanelSource();
+  const server = readAdminServerSource();
 
   it('no ofrece mensajes automáticos para grupos en la navegación empresarial', () => {
     expect(html).not.toContain('<option value="automatic-messages"');

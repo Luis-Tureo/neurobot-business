@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
+import { readAdminServerSource, readFriendlyPanelSource } from './source-bundles.js';
 
 describe('Neurobot Business sin moderación comunitaria', () => {
   const html = readFileSync('public/index.html', 'utf8');
   const panel = readFileSync('public/multibot-panel.js', 'utf8');
-  const friendly = readFileSync('public/friendly-panel.js', 'utf8');
-  const server = readFileSync('src/admin/server.ts', 'utf8');
+  const friendly = readFriendlyPanelSource();
+  const server = readAdminServerSource();
 
   it('no ofrece moderación en la navegación empresarial', () => {
     expect(html).not.toContain('<option value="moderation"');

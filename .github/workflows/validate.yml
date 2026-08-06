@@ -34,7 +34,18 @@ jobs:
         run: npm run lint
 
       - name: Tests
-        run: npm test
+        shell: bash
+        run: |
+          set +e
+          npm test > test-report.txt 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "Las pruebas fallaron. Resumen relevante:"
+            grep -n -E -A 18 -B 6 "FAIL|AssertionError|Test Files|Tests|Error:" test-report.txt | tail -n 320 || tail -n 200 test-report.txt
+          else
+            tail -n 30 test-report.txt
+          fi
+          exit "$status"
 
       - name: Build
         run: npm run build

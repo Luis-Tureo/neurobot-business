@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { AssistantModuleVisibilityService } from '../src/core/assistant-module-visibility-service.js';
 import { createProfileFromPreset } from '../src/core/profile-presets.js';
 import { AppDatabase } from '../src/persistence/database.js';
+import { readAdminServerSource } from './source-bundles.js';
 
 describe('Neurobot Business', () => {
   it('expone solamente módulos comerciales para un asistente de negocio', () => {
@@ -37,7 +38,7 @@ describe('Neurobot Business', () => {
   });
 
   it('bloquea rutas de comunidad desde el servidor empresarial', () => {
-    const source = readFileSync('src/admin/server.ts', 'utf8');
+    const source = readAdminServerSource();
     expect(source).toContain("route.startsWith('/api/groups')");
     expect(source).toContain("route.startsWith('/api/polls')");
     expect(source).toContain("route.includes('/moderation')");
