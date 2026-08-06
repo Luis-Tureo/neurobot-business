@@ -35,7 +35,11 @@ jobs:
 
       - name: Format backup removal
         if: github.event_name == 'pull_request' && github.head_ref == 'agent/remove-backup-system' && github.actor != 'github-actions[bot]'
-        run: npx prettier --write src/core/maintenance-service.ts src/core/whatsapp-session-manager.ts src/index.ts src/admin/server.ts src/persistence/database.ts tests/maintenance-service.test.ts tests/maintenance-api.test.ts tests/no-backup-system.test.ts public README.md docs
+        shell: bash
+        run: |
+          paths=(src/core/maintenance-service.ts src/core/whatsapp-session-manager.ts src/index.ts src/admin/server.ts src/persistence/database.ts tests/maintenance-service.test.ts tests/maintenance-api.test.ts tests/no-backup-system.test.ts public README.md)
+          if [ -d docs ]; then paths+=(docs); fi
+          npx prettier --write "${paths[@]}"
 
       - name: Commit backup removal
         if: github.event_name == 'pull_request' && github.head_ref == 'agent/remove-backup-system' && github.actor != 'github-actions[bot]'
