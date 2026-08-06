@@ -7,17 +7,22 @@ on:
       - agent/**
   pull_request:
   workflow_dispatch:
+  issues:
+    types: [opened, reopened]
 
 permissions:
   contents: read
 
 jobs:
   validate:
+    if: github.event_name != 'issues' || github.event.issue.title == '[validate-neurobot-business]'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Checkout
+      - name: Checkout repair branch
         uses: actions/checkout@v4
+        with:
+          ref: agent/repair-business-readme
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
