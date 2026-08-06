@@ -9,7 +9,7 @@ describe('configuración de entorno', () => {
   it('aplica valores seguros y resuelve rutas', () => {
     const environment = loadEnvironment(valid, 'C:\\proyecto');
     expect(environment.panelHost).toBe('127.0.0.1');
-    expect(environment.panelPort).toBe(3000);
+    expect(environment.panelPort).toBe(3001);
     expect(environment.databasePath).toContain('data');
     expect(environment.developmentMode).toBe(false);
   });

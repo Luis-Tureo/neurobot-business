@@ -1468,7 +1468,6 @@ const maintenanceStageOrder = [
   'verifying_authorization',
   'stopping_whatsapp',
   'closing_database',
-  'creating_backup',
   'deleting_previous_state',
   'creating_database',
   'restoring_defaults',
@@ -1507,9 +1506,7 @@ function openMaintenanceDialog(kind) {
     item.classList.remove('active', 'complete', 'failed');
     const unlinkHidden =
       kind === 'unlink' &&
-      ['closing_database', 'creating_backup', 'creating_database', 'restoring_defaults'].includes(
-        item.dataset.stage,
-      );
+      ['closing_database', 'creating_database', 'restoring_defaults'].includes(item.dataset.stage);
     item.classList.toggle('hidden', unlinkHidden);
   });
   validateMaintenanceForm();
