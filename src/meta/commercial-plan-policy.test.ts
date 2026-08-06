@@ -3,6 +3,7 @@ import {
   CommercialMessagingPolicy,
   MessagingPolicyError,
   type CommercialPlan,
+  type MessagingPolicyErrorCode,
 } from './commercial-plan-policy.js';
 
 describe('CommercialMessagingPolicy', () => {
@@ -25,8 +26,9 @@ describe('CommercialMessagingPolicy', () => {
     now += 24 * 60 * 60 * 1000;
 
     expect(policy.isServiceWindowOpen('56911111111')).toBe(false);
-    expect(() => policy.assertFreeFormMessageAllowed('56911111111')).toThrowError(
-      expect.objectContaining({ code: 'META_SERVICE_WINDOW_CLOSED' }),
+    expectPolicyError(
+      () => policy.assertFreeFormMessageAllowed('56911111111'),
+      'META_SERVICE_WINDOW_CLOSED',
     );
   });
 
@@ -45,8 +47,9 @@ describe('CommercialMessagingPolicy', () => {
   it('impide usar plantillas en el plan básico aunque estén aprobadas', () => {
     const policy = new CommercialMessagingPolicy(() => 'BASIC');
 
-    expect(() => policy.assertTemplateMessageAllowed('APPROVED')).toThrowError(
-      expect.objectContaining({ code: 'ADVANCED_PLAN_REQUIRED' }),
+    expectPolicyError(
+      () => policy.assertTemplateMessageAllowed('APPROVED'),
+      'ADVANCED_PLAN_REQUIRED',
     );
   });
 
@@ -55,20 +58,28 @@ describe('CommercialMessagingPolicy', () => {
     const policy = new CommercialMessagingPolicy(() => plan);
 
     expect(() => policy.assertTemplateMessageAllowed('APPROVED')).not.toThrow();
-    expect(() => policy.assertTemplateMessageAllowed('PENDING')).toThrowError(
-      expect.objectContaining({ code: 'META_TEMPLATE_NOT_APPROVED' }),
+    expectPolicyError(
+      () => policy.assertTemplateMessageAllowed('PENDING'),
+      'META_TEMPLATE_NOT_APPROVED',
     );
   });
 
   it('expone errores reconocibles para que el panel informe el bloqueo', () => {
     const policy = new CommercialMessagingPolicy(() => 'BASIC');
 
-    try {
-      policy.assertFreeFormMessageAllowed('56911111111');
-      throw new Error('La política debía bloquear el mensaje.');
-    } catch (error) {
-      expect(error).toBeInstanceOf(MessagingPolicyError);
-      expect((error as MessagingPolicyError).code).toBe('META_SERVICE_WINDOW_CLOSED');
-    }
+    expectPolicyError(
+      () => policy.assertFreeFormMessageAllowed('56911111111'),
+      'META_SERVICE_WINDOW_CLOSED',
+    );
   });
 });
+
+function expectPolicyError(action: () => void, expectedCode: MessagingPolicyErrorCode): void {
+  try {
+    action();
+    throw new Error('La política debía bloquear la operación.');
+  } catch (error) {
+    expect(error).toBeInstanceOf(MessagingPolicyError);
+    expect((error as MessagingPolicyError).code).toBe(expectedCode);
+  }
+}
