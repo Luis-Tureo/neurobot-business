@@ -177,7 +177,7 @@ export class MultiBotManager {
     return this.planService;
   }
 
-  public billingLedger(): MetaBillingLedger {
+  public metaBillingLedger(): MetaBillingLedger {
     return this.billingLedger;
   }
 
