@@ -4,26 +4,19 @@ on:
   push:
     branches:
       - master
-      - agent/**
   pull_request:
   workflow_dispatch:
-  issues:
-    types: [opened, reopened]
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   validate:
-    if: github.event_name != 'issues' || github.event.issue.title == '[validate-neurobot-business]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout repair branch
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: agent/repair-business-readme
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -31,74 +24,17 @@ jobs:
           node-version: '24'
           cache: npm
 
-      - name: Run validation and capture report
-        id: validate
-        shell: bash
-        run: |
-          set +e
-          : > validation-report.txt
+      - name: Install dependencies
+        run: npm ci
 
-          run_step() {
-            name="$1"
-            shift
-            echo "## $name" >> validation-report.txt
-            echo '```text' >> validation-report.txt
-            "$@" >> validation-report.txt 2>&1
-            status=$?
-            echo '```' >> validation-report.txt
-            echo "Exit code: $status" >> validation-report.txt
-            echo >> validation-report.txt
-            return $status
-          }
+      - name: Typecheck
+        run: npm run typecheck
 
-          overall=0
-          run_step "npm ci" npm ci || overall=1
-          if [ "$overall" -eq 0 ]; then
-            run_step "Typecheck" npm run typecheck || overall=1
-          fi
-          if [ "$overall" -eq 0 ]; then
-            run_step "Lint" npm run lint || overall=1
-          fi
-          if [ "$overall" -eq 0 ]; then
-            run_step "Tests" npm test || overall=1
-          fi
-          if [ "$overall" -eq 0 ]; then
-            run_step "Build" npm run build || overall=1
-          fi
+      - name: Lint
+        run: npm run lint
 
-          echo "overall=$overall" >> "$GITHUB_OUTPUT"
-          exit 0
+      - name: Tests
+        run: npm test
 
-      - name: Publish issue report
-        if: github.event_name == 'issues'
-        uses: actions/github-script@v7
-        env:
-          VALIDATION_RESULT: ${{ steps.validate.outputs.overall }}
-        with:
-          script: |
-            const fs = require('fs');
-            let report = fs.readFileSync('validation-report.txt', 'utf8');
-            const limit = 60000;
-            if (report.length > limit) {
-              report = `${report.slice(0, limit)}\n\n[Registro truncado después de ${limit} caracteres]`;
-            }
-            const heading = process.env.VALIDATION_RESULT === '0'
-              ? '✅ Validación completada correctamente'
-              : '❌ La validación encontró errores';
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: `${heading}\n\n${report}`
-            });
-            await github.rest.issues.update({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              state: 'closed',
-              state_reason: 'completed'
-            });
-
-      - name: Fail workflow when validation failed
-        if: steps.validate.outputs.overall != '0'
-        run: exit 1
+      - name: Build
+        run: npm run build
