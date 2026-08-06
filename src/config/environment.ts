@@ -42,6 +42,8 @@ const environmentSchema = z.object({
   META_WEBHOOK_VERIFY_TOKEN: optionalTrimmedString,
   META_APP_SECRET: optionalTrimmedString,
   META_BILLING_LEDGER_PATH: z.string().trim().default('./data/meta-billing-events.jsonl'),
+  COMMERCIAL_PLAN: z.enum(['BASIC', 'ADVANCED']).default('BASIC'),
+  COMMERCIAL_QUOTE_REFERENCE: optionalTrimmedString,
   AI_PROVIDER: z.enum(['groq', 'disabled']).default('groq'),
   GROQ_API_KEY: optionalTrimmedString,
   GROQ_MODEL: z.string().trim().min(1).max(120).default('llama-3.1-8b-instant'),
@@ -74,6 +76,8 @@ export type Environment = {
   metaWebhookVerifyToken?: string;
   metaAppSecret?: string;
   metaBillingLedgerPath: string;
+  commercialPlan: 'BASIC' | 'ADVANCED';
+  commercialQuoteReference?: string;
   aiProvider: 'groq' | 'disabled';
   groqApiKey?: string;
   groqModel: string;
@@ -115,6 +119,10 @@ export function loadEnvironment(
     developmentMode: value.DEVELOPMENT_MODE,
     metaGraphApiVersion: value.META_GRAPH_API_VERSION,
     metaBillingLedgerPath: resolve(baseDirectory, value.META_BILLING_LEDGER_PATH),
+    commercialPlan: value.COMMERCIAL_PLAN,
+    ...(value.COMMERCIAL_QUOTE_REFERENCE === undefined
+      ? {}
+      : { commercialQuoteReference: value.COMMERCIAL_QUOTE_REFERENCE }),
     ...(value.META_PHONE_NUMBER_ID === undefined
       ? {}
       : { metaPhoneNumberId: value.META_PHONE_NUMBER_ID }),
