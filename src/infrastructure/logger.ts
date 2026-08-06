@@ -1,4 +1,5 @@
 import pino, { type Logger } from 'pino';
+
 const sensitivePaths = [
   'password',
   '*.password',
@@ -19,6 +20,7 @@ const sensitivePaths = [
   'authorization',
   'req.headers.authorization',
 ];
+
 export function createLogger(level = 'info'): Logger {
   return pino({
     level,

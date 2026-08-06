@@ -126,7 +126,13 @@ describe('cola de solicitudes de IA por asistente', () => {
 
   it('mantiene colas independientes por asistente', async () => {
     const community = new AIRequestQueueService(database, createLogger('silent'), 'neurobot');
+    const otherBot = database.createBot({
+      id: 'otro-asistente-cola', mode: 'business', sessionPath: 'data/sessions/otro-asistente-cola',
+      profile: database.getBotProfile('neurobot'),
+    });
+    const business = new AIRequestQueueService(database, createLogger('silent'), otherBot.id);
     expect(community).not.toBe(business);
+    expect(community.snapshot().settings).toMatchObject({ maxConcurrent: 3 });
     expect(business.snapshot().settings).toMatchObject({ maxConcurrent: 3 });
   });
 
@@ -221,6 +227,10 @@ describe('cola de salida por chat', () => {
     const client = new SimulatedMessagingClient();
     const outbound = new OutboundMessageQueueService(client, database, createLogger('silent'), 'neurobot', async () => undefined);
     try {
+      await Promise.all([
+        outbound.send('grupo-a@g.us', 'primero'), outbound.send('grupo-a@g.us', 'segundo'),
+        outbound.send('grupo-b@g.us', 'independiente'),
+      ]);
       expect(client.sentMessages.filter((item) => item.chatId === 'grupo-a@g.us').map((item) => item.text)).toEqual(['primero', 'segundo']);
       expect(client.sentMessages.filter((item) => item.chatId === 'grupo-b@g.us')).toHaveLength(1);
     } finally {

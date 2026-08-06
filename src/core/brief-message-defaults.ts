@@ -48,10 +48,12 @@ export const BRIEF_COMMAND_DEFAULTS = [
     priority: 30,
   },
 ] as const;
+
 export const BRIEF_COMMAND_DEFAULTS_BY_NAME: ReadonlyMap<
   string,
   (typeof BRIEF_COMMAND_DEFAULTS)[number]
 > = new Map(BRIEF_COMMAND_DEFAULTS.map((command) => [command.name, command]));
+
 export const LEGACY_COMMAND_RESPONSES: Record<string, string> = {
   ayuda:
     'Hola. Soy el asistente de la Comunidad Neurodivergente – Autismo y TDAH. Puedo mostrarte las reglas, información de bienvenida, actividades y formas de contacto. Escribe !reglas, !bienvenida, !actividades o !contacto. Entrego orientación general y no reemplazo la atención de profesionales.',
@@ -68,6 +70,7 @@ export const LEGACY_COMMAND_RESPONSES: Record<string, string> = {
   administrador:
     'Si necesitas ayuda administrativa, contacta de forma respetuosa a una persona administradora del grupo. No publico sus números ni datos personales.',
 };
+
 export function messageMetrics(value: string): { characters: number; lines: number } {
   return {
     characters: value.length,

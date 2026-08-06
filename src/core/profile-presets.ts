@@ -1,4 +1,5 @@
 import type { AssistantProfile, OrganizationType } from '../domain/types.js';
+
 export type ProfilePresetKey =
   | 'community'
   | 'store'
@@ -6,6 +7,7 @@ export type ProfilePresetKey =
   | 'distributor'
   | 'service'
   | 'empty';
+
 export type ProfilePreset = {
   key: ProfilePresetKey;
   label: string;
@@ -16,6 +18,7 @@ export type ProfilePreset = {
   excludedTopics: string[];
   tone: string;
 };
+
 export const PROFILE_PRESETS: ProfilePreset[] = [
   {
     key: 'community',
@@ -78,6 +81,7 @@ export const PROFILE_PRESETS: ProfilePreset[] = [
     tone: 'Claro y breve.',
   },
 ];
+
 export function applyProfilePreset(
   current: AssistantProfile,
   key: ProfilePresetKey,
@@ -94,6 +98,7 @@ export function applyProfilePreset(
     tone: preset.tone,
   };
 }
+
 export function createProfileFromPreset(input: {
   organizationName: string;
   botName: string;
@@ -144,6 +149,7 @@ export function createProfileFromPreset(input: {
     supportInformation: '',
   };
 }
+
 function outOfScopeMessage(preset: ProfilePresetKey): string {
   if (preset === 'store' || preset === 'distributor') {
     return 'Puedo ayudarte con nuestros productos, precios, horarios y servicios.';

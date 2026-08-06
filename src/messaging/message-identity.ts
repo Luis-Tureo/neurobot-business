@@ -1,24 +1,28 @@
 import type { Anonymizer } from '../security/anonymizer.js';
 import { normalizeText } from '../utils/text.js';
 import { getSerializedId } from './identifiers.js';
+
 export type MessageIdentitySource =
   | 'serialized'
   | 'public_fields'
   | 'compatibility_data_serialized'
   | 'compatibility_data_fields'
   | 'hmac_fallback';
+
 export type MessageIdentityResolution = {
   deduplicationId: string;
   replyToMessageId?: string;
   source: MessageIdentitySource;
   code: 'MESSAGE_ID_RESOLVED' | 'MESSAGE_ID_FALLBACK_CREATED';
 };
+
 export type MessageIdentityContext = {
   groupId: string;
   participantId: string | null;
   messageType: string;
   body: string;
 };
+
 export type MessageIdStructure = {
   idType: string;
   constructorName: string;
@@ -29,14 +33,18 @@ export type MessageIdStructure = {
   hasFromMe: boolean;
   hasDataId: boolean;
 };
+
 export class MessageIdentityResolver {
   public constructor(private readonly anonymizer: Anonymizer) {}
+
   public resolve(message: object, context: MessageIdentityContext): MessageIdentityResolution {
     const publicId = safeRead(message, 'id');
     const publicResolution = resolveIdValue(publicId, 'serialized', 'public_fields');
     if (publicResolution !== null) return publicResolution;
+
     const compatibilityResolution = resolveCompatibilityDataIdentity(message);
     if (compatibilityResolution !== null) return compatibilityResolution;
+
     const timestamp = readTimestamp(message);
     const publicIdParts = readPublicIdParts(publicId);
     const bodyFingerprint = this.anonymizer.fingerprint([
@@ -68,6 +76,7 @@ export class MessageIdentityResolver {
     };
   }
 }
+
 export function describeMessageIdStructure(message: unknown): MessageIdStructure {
   if (typeof message !== 'object' || message === null) {
     return emptyStructure('missing');
@@ -90,6 +99,7 @@ export function describeMessageIdStructure(message: unknown): MessageIdStructure
     hasDataId: hasCompatibilityDataId(message),
   };
 }
+
 function resolveCompatibilityDataIdentity(message: object): MessageIdentityResolution | null {
   const data = safeRead(message, '_data');
   if (typeof data !== 'object' || data === null) return null;
@@ -99,6 +109,7 @@ function resolveCompatibilityDataIdentity(message: object): MessageIdentityResol
     'compatibility_data_fields',
   );
 }
+
 function resolveIdValue(
   value: unknown,
   serializedSource: Extract<MessageIdentitySource, 'serialized' | 'compatibility_data_serialized'>,
@@ -123,6 +134,7 @@ function resolveIdValue(
     code: 'MESSAGE_ID_RESOLVED',
   };
 }
+
 function readSerializedMessageId(value: unknown): string | null {
   try {
     if (typeof value === 'string') return normalizeOpaqueId(value);
@@ -133,6 +145,7 @@ function readSerializedMessageId(value: unknown): string | null {
     return null;
   }
 }
+
 function readPublicIdParts(value: unknown): {
   localId: string | null;
   remote: string | null;
@@ -150,6 +163,7 @@ function readPublicIdParts(value: unknown): {
     fromMe: typeof fromMeValue === 'boolean' ? fromMeValue : null,
   };
 }
+
 function readTimestamp(message: object): string {
   const timestamp = safeRead(message, 'timestamp');
   if (typeof timestamp === 'number' && Number.isFinite(timestamp)) return String(timestamp);
@@ -164,10 +178,12 @@ function readTimestamp(message: object): string {
   }
   return 'timestamp-missing';
 }
+
 function readBooleanText(message: object, key: string): string {
   const value = safeRead(message, key);
   return typeof value === 'boolean' ? String(value) : `${key}-missing`;
 }
+
 function normalizeOpaqueId(value: string): string | null {
   const normalized = value.trim();
   const hasControlCharacter = Array.from(normalized).some(
@@ -178,6 +194,7 @@ function normalizeOpaqueId(value: string): string | null {
   }
   return normalized;
 }
+
 function safeRead(value: object, key: string): unknown {
   try {
     return Reflect.get(value, key);
@@ -185,6 +202,7 @@ function safeRead(value: object, key: string): unknown {
     return undefined;
   }
 }
+
 function safeHas(value: object, key: string): boolean {
   try {
     return Reflect.has(value, key);
@@ -192,6 +210,7 @@ function safeHas(value: object, key: string): boolean {
     return false;
   }
 }
+
 function safePropertyNames(value: object): string[] {
   try {
     return Object.getOwnPropertyNames(value)
@@ -202,6 +221,7 @@ function safePropertyNames(value: object): string[] {
     return [];
   }
 }
+
 function safeConstructorName(value: object): string {
   try {
     const constructor = Reflect.get(value, 'constructor');
@@ -211,10 +231,12 @@ function safeConstructorName(value: object): string {
     return 'UnknownMessageId';
   }
 }
+
 function hasCompatibilityDataId(message: object): boolean {
   const data = safeRead(message, '_data');
   return typeof data === 'object' && data !== null && safeHas(data, 'id');
 }
+
 function emptyStructure(idType: string): MessageIdStructure {
   return {
     idType,

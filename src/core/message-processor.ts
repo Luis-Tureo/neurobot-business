@@ -80,6 +80,7 @@ export class MessageProcessor {
       return 'responded';
     }
     if (!bot.groupsEnabled) return 'ignored';
+    const groupAuthorized = this.database.canBotSendToGroup(this.botId, message.chatId);
     this.logger.info(
       {
         operation: 'groupAuthorizationCheck',

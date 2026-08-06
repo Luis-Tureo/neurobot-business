@@ -1,9 +1,11 @@
 import type { AppDatabase } from '../persistence/database.js';
+
 export class BusinessHoursService {
   public constructor(
     private readonly database: AppDatabase,
     private readonly botId: string,
   ) {}
+
   public summary(): string {
     const hours = this.database.listBusinessHours(this.botId).filter((entry) => entry.localDate === null);
     if (hours.length === 0) return 'No tengo horarios de atención confirmados. Consulta directamente con el negocio.';

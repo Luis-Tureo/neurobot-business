@@ -37,6 +37,7 @@ export class ConversationFlowService {
       menu,
       this.database.listMenuOptions(this.botId, menu.id),
       bot.menuType,
+      bot.capabilities.pollsAsMenusEnabled,
     );
     this.saveState(chatHash, userHash, menu.id, null, menu.expirationMinutes, now);
     this.logger.info({ operation: 'PRIVATE_MENU_STARTED', botId: this.botId, chatHash, userHash }, 'Se inició un menú local');
@@ -228,6 +229,7 @@ export class ConversationFlowService {
       menu,
       options,
       bot?.menuType ?? 'numbered',
+      bot?.capabilities.pollsAsMenusEnabled ?? false,
     );
   }
 

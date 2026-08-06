@@ -2,18 +2,21 @@ import type { Logger } from 'pino';
 import type { AIQueueMetrics, AIQueueSettings } from '../domain/types.js';
 import type { AppDatabase } from '../persistence/database.js';
 import { AIProviderError, type AIProviderErrorCode } from './ai-provider.js';
+
 export type AIQueueErrorCode =
   | 'AI_QUEUE_FULL'
   | 'AI_QUEUE_EXPIRED'
   | 'AI_USER_COOLDOWN'
   | 'AI_CIRCUIT_OPEN'
   | 'AI_QUEUE_CANCELLED';
+
 export class AIQueueError extends Error {
   public constructor(public readonly code: AIQueueErrorCode, public readonly retryAfterSeconds: number) {
     super(code);
     this.name = 'AIQueueError';
   }
 }
+
 type QueueItem = {
   createdAt: number;
   execute: () => Promise<unknown>;
@@ -22,6 +25,7 @@ type QueueItem = {
   waitTimer: ReturnType<typeof setTimeout>;
   expiryTimer: ReturnType<typeof setTimeout>;
 };
+
 type RunInput<T> = {
   flightKey: string;
   userKey: string;
@@ -29,6 +33,7 @@ type RunInput<T> = {
   classifyError: (error: unknown) => AIProviderErrorCode;
   onWaitNotice?: () => Promise<void>;
 };
+
 export class AIRequestQueueService {
   private readonly waiting: QueueItem[] = [];
   private readonly flights = new Map<string, Promise<{ value: unknown; coalesced: boolean }>>();
@@ -43,6 +48,7 @@ export class AIRequestQueueService {
   private lastSuccessAt: string | null = null;
   private lastFailureAt: string | null = null;
   private lastSafeErrorCode: string | null = null;
+
   public constructor(
     private readonly database: AppDatabase,
     private readonly logger: Logger,
@@ -52,6 +58,7 @@ export class AIRequestQueueService {
       new Promise((resolve) => setTimeout(resolve, milliseconds)),
     private readonly random: () => number = Math.random,
   ) {}
+
   public async run<T>(input: RunInput<T>): Promise<{ value: T; coalesced: boolean }> {
     const settings = this.settings();
     this.cleanupExpired(settings);
@@ -107,6 +114,7 @@ export class AIRequestQueueService {
       }
     }
   }
+
   public snapshot(): { processing: number; waiting: number; settings: AIQueueSettings; metrics: AIQueueMetrics; providerHealth: Record<string, unknown> } {
     const localDate = new Date(this.now()).toISOString().slice(0, 10);
     const providerHealth = this.database.getAIProviderQueueHealth(this.botId);
@@ -120,6 +128,7 @@ export class AIRequestQueueService {
         : providerHealth,
     };
   }
+
   public shutdown(): void {
     const cancelled = this.waiting.splice(0);
     for (const item of cancelled) {
@@ -130,6 +139,7 @@ export class AIRequestQueueService {
     }
     if (cancelled.length > 0) this.event('AI_PENDING_REQUESTS_CANCELLED_ON_RESTART', String(cancelled.length));
   }
+
   private enqueue<T>(input: RunInput<T>, settings: AIQueueSettings): Promise<{ value: T; coalesced: boolean }> {
     return new Promise((resolve, reject) => {
       const createdAt = this.now();
@@ -151,6 +161,7 @@ export class AIRequestQueueService {
       this.drain();
     });
   }
+
   private expire(item: QueueItem): void {
     const index = this.waiting.indexOf(item);
     if (index < 0) return;
@@ -160,6 +171,7 @@ export class AIRequestQueueService {
     this.event('AI_QUEUE_REQUEST_EXPIRED', 'expired');
     item.reject(new AIQueueError('AI_QUEUE_EXPIRED', this.settings().suggestedRetrySeconds));
   }
+
   private drain(): void {
     const settings = this.settings();
     while (this.active < settings.maxConcurrent && this.waiting.length > 0) {
@@ -188,6 +200,7 @@ export class AIRequestQueueService {
       });
     }
   }
+
   private async executeWithRetries<T>(
     operation: () => Promise<T>,
     classifyError: (error: unknown) => AIProviderErrorCode,
@@ -233,6 +246,7 @@ export class AIRequestQueueService {
     }
     throw new Error('AI_RETRY_STATE_INVALID');
   }
+
   private assertCircuit(retryAfterSeconds: number): void {
     if (this.circuitState === 'HALF_OPEN') {
       if (this.halfOpenProbeActive) throw new AIQueueError('AI_CIRCUIT_OPEN', retryAfterSeconds);
@@ -249,6 +263,7 @@ export class AIRequestQueueService {
     }
     throw new AIQueueError('AI_CIRCUIT_OPEN', retryAfterSeconds);
   }
+
   private onSuccess(): void {
     const recovered = this.circuitState !== 'CLOSED';
     this.consecutiveFailures = 0;
@@ -259,6 +274,7 @@ export class AIRequestQueueService {
     if (recovered) this.event('AI_CIRCUIT_CLOSED', 'closed');
     this.persistHealth('AVAILABLE');
   }
+
   private onFailure(code: string, temporary: boolean): void {
     if (temporary) this.consecutiveFailures += 1;
     if (temporary && this.consecutiveFailures >= 5) {
@@ -271,6 +287,7 @@ export class AIRequestQueueService {
       this.circuitState === 'OPEN' ? 'UNAVAILABLE' : code === 'AI_PROVIDER_RATE_LIMITED' ? 'RATE_LIMITED' : temporary ? 'DEGRADED' : 'UNAVAILABLE',
     );
   }
+
   private persistHealth(state: 'AVAILABLE' | 'RATE_LIMITED' | 'DEGRADED' | 'UNAVAILABLE'): void {
     this.database.saveAIProviderQueueHealth({
       botId: this.botId, provider: 'groq', state, consecutiveFailures: this.consecutiveFailures,
@@ -280,9 +297,11 @@ export class AIRequestQueueService {
       lastSuccessAt: this.lastSuccessAt, lastFailureAt: this.lastFailureAt, lastSafeErrorCode: this.lastSafeErrorCode,
     });
   }
+
   private settings(): AIQueueSettings {
     return this.database.getAIQueueSettings(this.botId);
   }
+
   private cleanupExpired(settings: AIQueueSettings): void {
     const now = this.now();
     for (const [key, completed] of this.completedFlights) {
@@ -293,14 +312,17 @@ export class AIRequestQueueService {
       if (now - acceptedAt >= userRetentionMs) this.userAcceptedAt.delete(key);
     }
   }
+
   private metric(field: keyof Omit<AIQueueMetrics, 'averageWaitMs' | 'maximumWaitMs'>, waitMs = 0): void {
     this.database.recordAIQueueMetric(this.botId, new Date(this.now()).toISOString().slice(0, 10), field, waitMs);
   }
+
   private event(eventType: string, result: string): void {
     this.database.recordTechnicalEvent({ botId: this.botId, eventType, result });
     this.logger.info({ operation: eventType, botId: this.botId, result }, 'Evento seguro de cola de IA');
   }
 }
+
 function safeCode(error: unknown): string {
   if (error instanceof AIQueueError) return error.code;
   return error instanceof Error && /^AI_[A-Z_]+$/u.test(error.message) ? error.message : 'AI_PROVIDER_ERROR';

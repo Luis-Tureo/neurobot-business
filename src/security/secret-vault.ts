@@ -1,12 +1,16 @@
 import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+
 export class SecretVault {
   private readonly key: Buffer | null;
+
   public constructor(secret: string | undefined) {
     this.key = secret === undefined || secret.trim() === '' ? null : createHash('sha256').update(secret, 'utf8').digest();
   }
+
   public isConfigured(): boolean {
     return this.key !== null;
   }
+
   public encrypt(value: string, scope: string): { encrypted: string; fingerprint: string } {
     if (this.key === null) throw new Error('APP_ENCRYPTION_KEY no está configurada.');
     const normalized = value.trim();
@@ -20,6 +24,7 @@ export class SecretVault {
     const fingerprint = createHmac('sha256', this.key).update(`${scope}\0${normalized}`, 'utf8').digest('base64url');
     return { encrypted, fingerprint };
   }
+
   public decrypt(encrypted: string, scope: string): string {
     if (this.key === null) throw new Error('APP_ENCRYPTION_KEY no está configurada.');
     const [version, ivValue, tagValue, dataValue] = encrypted.split('.');

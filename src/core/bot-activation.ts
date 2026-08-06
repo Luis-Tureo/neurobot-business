@@ -1,11 +1,14 @@
 import type { IncomingMessage } from '../domain/types.js';
+
 export type BotActivationType = 'REAL_MENTION' | 'TEXT_ALIAS' | 'NOT_ACTIVATED';
+
 export type BotActivationResult = {
   type: BotActivationType;
   question: string;
   detectedAlias: string | null;
   rejectionReason: 'NO_ACTIVATION' | 'ALIAS_NOT_AT_START' | null;
 };
+
 export function detectBotActivation(
   message: IncomingMessage,
   botIdentity: string | readonly string[] | null,
@@ -13,6 +16,7 @@ export function detectBotActivation(
 ): BotActivationResult {
   const identities = typeof botIdentity === 'string' ? [botIdentity] : botIdentity ?? [];
   const aliases = normalizedAliases(configuredAliases);
+
   if (message.mentionsBot || identities.some((identity) => sameIdentity(identity, message.botMentionToken))) {
     return {
       type: 'REAL_MENTION',
@@ -21,6 +25,7 @@ export function detectBotActivation(
       rejectionReason: null,
     };
   }
+
   for (const alias of aliases) {
     const match = matchLeadingAlias(message.body, alias);
     if (match !== null) {
@@ -32,6 +37,7 @@ export function detectBotActivation(
       };
     }
   }
+
   const normalizedBody = message.body.toLocaleLowerCase('es');
   const aliasAppearsLater = aliases.some((alias) => normalizedBody.includes(alias.toLocaleLowerCase('es')));
   return {
@@ -41,9 +47,11 @@ export function detectBotActivation(
     rejectionReason: aliasAppearsLater ? 'ALIAS_NOT_AT_START' : 'NO_ACTIVATION',
   };
 }
+
 export function containsActivationAliasAtStart(body: string, aliases: readonly string[]): boolean {
   return normalizedAliases(aliases).some((alias) => matchLeadingAlias(body, alias) !== null);
 }
+
 function extractRealMentionQuestion(
   body: string,
   mentionToken: string | undefined,
@@ -60,6 +68,7 @@ function extractRealMentionQuestion(
   const visualMention = /^\s*@[\p{L}\p{N}_.+-]+(?=$|[\s,:;!?¿¡])/u.exec(body);
   return visualMention === null ? cleanQuestion(body) : cleanQuestion(body.slice(visualMention[0].length));
 }
+
 function matchLeadingAlias(body: string, alias: string): { end: number } | null {
   const escaped = escapeExpression(alias);
   const match = new RegExp(`^\\s*${escaped}(?=$|[\\s,:;!?¿¡])`, 'iu').exec(body);
@@ -67,6 +76,7 @@ function matchLeadingAlias(body: string, alias: string): { end: number } | null 
   const punctuation = /^[\s,:;]+/u.exec(body.slice(match[0].length));
   return { end: match[0].length + (punctuation?.[0].length ?? 0) };
 }
+
 function findToken(body: string, token: string): { start: number; end: number } | null {
   const escaped = escapeExpression(token.trim());
   const match = new RegExp(`(?:^|\\s)(${escaped})(?=$|[\\s,:;!?¿¡])`, 'iu').exec(body);
@@ -74,15 +84,19 @@ function findToken(body: string, token: string): { start: number; end: number } 
   const start = match.index + match[0].indexOf(match[1]);
   return { start, end: start + match[1].length };
 }
+
 function cleanQuestion(value: string): string {
   return value.replace(/^[\s,:;.!?\-–—]+/u, '').trim();
 }
+
 function normalizedAliases(aliases: readonly string[]): string[] {
   return [...new Set(aliases.map((alias) => alias.normalize('NFKC').trim()).filter((alias) => alias.startsWith('@')))];
 }
+
 function escapeExpression(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 }
+
 function sameIdentity(left: string, right: string | undefined): boolean {
   return right !== undefined && left.trim().toLocaleLowerCase('en') === right.trim().toLocaleLowerCase('en');
 }
