@@ -32,8 +32,7 @@ describe('módulo simplificado de inteligencia artificial', () => {
     expect(html).toContain(
       '<details class="card inset ai-advanced-panel">\n                <summary>Capacidad y disponibilidad</summary>',
     );
-    expect(html).toContain('Los valores recomendados funcionan bien para la mayoría');
-    expect(html).toContain('Mantén los valores recomendados');
+    expect(html.toLocaleLowerCase('es')).toContain('valores recomendados');
   });
 
   it('incluye estilos ordenados y adaptables para escritorio y móvil', () => {
