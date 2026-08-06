@@ -8,9 +8,9 @@ const optionalTrimmedString = z.preprocess(
 
 const environmentSchema = z.object({
   PANEL_HOST: z.string().trim().default('127.0.0.1'),
-  PANEL_PORT: z.coerce.number().int().min(1024).max(65_535).default(3000),
-  DATABASE_PATH: z.string().trim().default('./data/asistente.db'),
-  WHATSAPP_SESSION_PATH: z.string().trim().default('./data/whatsapp-session'),
+  PANEL_PORT: z.coerce.number().int().min(1024).max(65_535).default(3001),
+  DATABASE_PATH: z.string().trim().default('./data/asistente-negocio.db'),
+  WHATSAPP_SESSION_PATH: z.string().trim().default('./data/whatsapp-session-negocio'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   ANONYMIZATION_SECRET: z.string().min(32),
   PANEL_SESSION_SECRET: z.string().min(32),
