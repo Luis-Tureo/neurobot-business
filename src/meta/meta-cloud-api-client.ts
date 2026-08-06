@@ -11,10 +11,12 @@ import type {
   MessagingClientEvents,
   SelectableMenuPayload,
 } from '../messaging/messaging-client.js';
-import type { CommercialPlanService, MetaTemplateApprovalStatus } from './commercial-plan-policy.js';
 import { CommercialMessagingPolicy } from './commercial-plan-policy.js';
-import type { MetaMessageDeliveryStatus } from './meta-billing-ledger.js';
-import type { MetaBillingLedger } from './meta-billing-ledger.js';
+import type {
+  CommercialPlanService,
+  MetaTemplateApprovalStatus,
+} from './commercial-plan-policy.js';
+import type { MetaBillingLedger, MetaMessageDeliveryStatus } from './meta-billing-ledger.js';
 import type { MetaTemplateCategory } from './template-library.js';
 
 type FetchImplementation = typeof fetch;
@@ -223,8 +225,7 @@ export class MetaCloudApiClient implements MessagingClient {
         const recipient = normalizeRecipient(message.from);
         const timestampMs = parseTimestamp(message.timestamp);
         this.policy.recordCustomerMessage(recipient, timestampMs);
-        const incoming = toIncomingMessage(message, recipient);
-        await this.events?.onMessage(incoming);
+        await this.events?.onMessage(toIncomingMessage(message, recipient));
         receivedMessages += 1;
       }
     }
@@ -257,7 +258,12 @@ export class MetaCloudApiClient implements MessagingClient {
   }
 
   public isOwnIdentifier(identifier: string): boolean {
-    return normalizeRecipient(identifier) === normalizeRecipient(this.options.phoneNumberId ?? '');
+    if (this.options.phoneNumberId === undefined) return false;
+    try {
+      return normalizeRecipient(identifier) === normalizeRecipient(this.options.phoneNumberId);
+    } catch {
+      return false;
+    }
   }
 
   public getOwnIdentifier(): string | null {
@@ -309,8 +315,7 @@ export class MetaCloudApiClient implements MessagingClient {
         body: JSON.stringify(body),
       },
     );
-    const raw = await response.text();
-    const parsed = parseJson(raw);
+    const parsed = parseJson(await response.text());
     if (!response.ok) {
       const message = errorMessage(parsed) ?? `Meta respondió HTTP ${response.status}.`;
       this.logger.error(
@@ -443,7 +448,8 @@ function timestampToIso(timestamp: string): string {
 }
 
 function isDeliveryStatus(value: string): value is MetaMessageDeliveryStatus {
-  return ['sent', 'delivered', 'read', 'failed', 'deleted'].includes(value);
+  const statuses: readonly string[] = ['sent', 'delivered', 'read', 'failed', 'deleted'];
+  return statuses.includes(value);
 }
 
 function parseJson(value: string): unknown {
@@ -460,6 +466,6 @@ function errorMessage(value: unknown): string | null {
   return typeof value.error.message === 'string' ? value.error.message : null;
 }
 
-function isRecord(value: unknown): value is Record<string, any> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
