@@ -39,19 +39,33 @@ import type {
   ConversationState,
   ConnectorType,
   DeliverySource,
+  DetectedGroup,
   GroupRecord,
+  GroupStatus,
   KeywordRecord,
   KnowledgeCategory,
   KnowledgeEntry,
   KnowledgeFragment,
   LinkedGroupRecord,
   HumanAssistanceRequest,
+  HiddenPollTemplate,
   MediaAsset,
   MenuActionType,
   MenuDefinition,
   MenuOption,
   MenuType,
+  ModerationGroupMode,
+  ModerationRule,
+  ModerationSettings,
+  ModerationSeverity,
   OrganizationType,
+  PollConfiguration,
+  PollDateOverride,
+  PollDeliverySource,
+  PollDeliveryStatus,
+  PollSelectionMode,
+  PollSendHistoryRecord,
+  PollTemplate,
   ScheduledDeliveryRecord,
   ScheduledDeliveryStatus,
 } from '../domain/types.js';
@@ -859,7 +873,8 @@ export class AppDatabase {
             PRIMARY KEY(bot_id, group_id)
           );
           INSERT INTO bot_groups(
-            bot_id, group_id, name, active, blocked, bot_is_member,            first_seen_at, last_seen_at, deactivated_at
+            bot_id, group_id, name, active, blocked, bot_is_member, status,
+            first_seen_at, last_seen_at, deactivated_at
           )
           SELECT 'neurobot', groups.chat_id, groups.name,
             CASE WHEN groups.status = 'ACTIVE' AND groups.bot_is_member = 1 THEN 1 ELSE 0 END,
@@ -3499,7 +3514,9 @@ export class AppDatabase {
         conversationContinuationEnabled: row.conversation_continuation_enabled === 1,
         interactiveMenusEnabled: row.interactive_menus_enabled === 1,
         numericMenuRepliesEnabled: row.numeric_menu_replies_enabled === 1,
-                        catalogEnabled: row.catalog_enabled === 1,
+        pollsAsMenusEnabled: row.polls_as_menus_enabled === 1,
+        pollsForCommunityEngagementEnabled: row.polls_for_community_engagement_enabled === 1,
+        catalogEnabled: row.catalog_enabled === 1,
         humanAssistanceEnabled: row.human_assistance_enabled === 1,
       },
       enabled: row.enabled === 1,
@@ -6068,7 +6085,8 @@ export class AppDatabase {
     this.db
       .prepare(
         `INSERT INTO bot_groups(
-           bot_id, group_id, name, active, blocked, bot_is_member,           first_seen_at, last_seen_at, deactivated_at
+           bot_id, group_id, name, active, blocked, bot_is_member, status,
+           first_seen_at, last_seen_at, deactivated_at
          ) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
          ON CONFLICT(bot_id, group_id) DO UPDATE SET name = excluded.name,
            active = CASE WHEN bot_groups.blocked = 1 THEN 0 ELSE excluded.active END,
@@ -6240,6 +6258,7 @@ export class AppDatabase {
           group.id,
           group.name,
           botIsMember && !blocked ? 1 : 0,
+          status,
           botIsMember ? 1 : 0,
           hasAuthorizedAdmin === null ? null : hasAuthorizedAdmin ? 1 : 0,
           timestamp,
@@ -6270,6 +6289,7 @@ export class AppDatabase {
     this.synchronizeBotGroup('neurobot', group, now);
     return {
       discovered: existing === null,
+      status,
       authorizationRevoked: revokeAuthorization && existing?.authorized === true,
       autoActivated:
         botIsMember &&
@@ -7858,7 +7878,9 @@ function capabilitiesFor(mode: BotMode): BotCapabilities {
     conversationContinuationEnabled: commercial,
     interactiveMenusEnabled: commercial,
     numericMenuRepliesEnabled: commercial,
-            catalogEnabled: commercial,
+    pollsAsMenusEnabled: false,
+    pollsForCommunityEngagementEnabled: community,
+    catalogEnabled: commercial,
     humanAssistanceEnabled: commercial,
   };
 }

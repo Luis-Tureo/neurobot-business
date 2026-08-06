@@ -9,6 +9,7 @@ import type {
 } from './ai-provider.js';
 import { DisabledAIProvider } from './disabled-ai-provider.js';
 import { GroqAIProvider } from './groq-ai-provider.js';
+
 export class AIProviderFactory {
   public constructor(
     private readonly database: AppDatabase,
@@ -18,9 +19,11 @@ export class AIProviderFactory {
     private readonly providerName: 'groq' | 'disabled',
     private readonly fetchImplementation: typeof fetch = fetch,
   ) {}
+
   public forBot(botId: string): AIProvider {
     return new ScopedBotAIProvider(() => this.resolve(botId), this.model);
   }
+
   private resolve(botId: string): AIProvider {
     if (this.providerName === 'disabled') return new DisabledAIProvider();
     const credential = this.database.getBotEncryptedCredential(botId);
@@ -36,27 +39,34 @@ export class AIProviderFactory {
     }
   }
 }
+
 class ScopedBotAIProvider implements AIProvider {
   public constructor(
     private readonly resolve: () => AIProvider,
     private readonly model: string,
   ) {}
+
   public isConfigured(): boolean {
     return this.resolve().isConfigured();
   }
+
   public testConnection(timeoutMs?: number): Promise<AIProviderConnectionResult> {
     return this.resolve().testConnection(timeoutMs);
   }
+
   public generateGroundedResponse(request: GroundedResponseRequest): Promise<GroundedResponseResult> {
     return this.resolve().generateGroundedResponse(request);
   }
+
   public getModelInformation(): { provider: string; model: string } {
     const provider = this.resolve();
     return { provider: provider.getModelInformation().provider, model: this.model };
   }
+
   public normalizeUsage(value: unknown): { inputTokens: number; outputTokens: number; totalTokens: number } {
     return this.resolve().normalizeUsage(value);
   }
+
   public classifyProviderError(error: unknown): AIProviderErrorCode {
     return this.resolve().classifyProviderError(error);
   }

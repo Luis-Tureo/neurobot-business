@@ -1,9 +1,11 @@
 import type { Logger } from 'pino';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import type { AppDatabase } from '../persistence/database.js';
+
 export class OutboundMessageQueueService {
   private readonly tails = new Map<string, Promise<void>>();
   private readonly lastSentAt = new Map<string, number>();
+
   public constructor(
     private readonly client: MessagingClient,
     private readonly database: AppDatabase,
@@ -12,6 +14,7 @@ export class OutboundMessageQueueService {
     private readonly sleep: (milliseconds: number) => Promise<void> = (milliseconds) =>
       new Promise((resolve) => setTimeout(resolve, milliseconds)),
   ) {}
+
   public send(chatId: string, text: string): Promise<void> {
     const previous = this.tails.get(chatId) ?? Promise.resolve();
     this.event('OUTBOUND_MESSAGE_QUEUED', 'queued');
@@ -39,6 +42,7 @@ export class OutboundMessageQueueService {
     this.tails.set(chatId, current);
     return current;
   }
+
   private event(eventType: string, result: string): void {
     this.database.recordTechnicalEvent({ botId: this.botId, eventType, result });
     this.logger.info({ operation: eventType, botId: this.botId, result }, 'Evento seguro de cola de salida');

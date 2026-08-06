@@ -1,13 +1,16 @@
 import type { Logger } from 'pino';
 import type { MenuDefinition, MenuOption, MenuType } from '../domain/types.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
+
 export type InteractiveDelivery = 'native_poll' | 'native_buttons' | 'native_list' | 'numbered';
+
 export class InteractiveMessageAdapter {
   public constructor(
     private readonly client: MessagingClient,
     private readonly logger: Logger,
     private readonly botId: string,
   ) {}
+
   public async sendMenu(
     chatId: string,
     menu: MenuDefinition,
@@ -70,12 +73,14 @@ export class InteractiveMessageAdapter {
     return 'numbered';
   }
 }
+
 export function formatNumberedMenu(menu: MenuDefinition, options: MenuOption[]): string {
   const lines = [menu.message, '', 'Selecciona una opción:'];
   options.forEach((option, index) => lines.push(`${index + 1}. ${option.label}`));
   if (menu.helpText.trim() !== '') lines.push('', menu.helpText);
   return lines.join('\n').slice(0, 1800);
 }
+
 function chooseNativeKind(
   configuredType: MenuType,
   optionCount: number,

@@ -4,7 +4,7 @@ const html = readFileSync('public/index.html', 'utf8');
 const css = readFileSync('public/styles.css', 'utf8');
 
 describe('módulo simplificado de inteligencia artificial', () => {
-  it('muestra primero las opciones principales y conserva todos los controles funcionales', () => {
+  it('muestra primero las opciones principales y conserva los controles funcionales', () => {
     expect(html).toContain('<h2>Inteligencia artificial</h2>');
     expect(html).toContain('<h3>Opciones principales</h3>');
     expect(html.indexOf('Opciones principales')).toBeLessThan(
@@ -25,11 +25,14 @@ describe('módulo simplificado de inteligencia artificial', () => {
     ].forEach((id) => expect(html).toContain(`id="${id}"`));
   });
 
-  it('mantiene cerradas por defecto las opciones técnicas y ofrece valores recomendados', () => {
-    expect(html).toContain('<summary>Configuración avanzada del modelo y los límites</summary>');
-    expect(html).toContain('<summary>Capacidad y disponibilidad</summary>');
-    expect(html).toContain('Restaurar valores recomendados');
-    expect(html).not.toMatch(/<details[^>]*\sopen(?:\s|>)/u);
+  it('mantiene cerradas las opciones técnicas y explica los valores recomendados', () => {
+    expect(html).toContain(
+      '<details class="advanced-settings ai-advanced-panel">\n                  <summary>Configuración avanzada del modelo y los límites</summary>',
+    );
+    expect(html).toContain(
+      '<details class="card inset ai-advanced-panel">\n                <summary>Capacidad y disponibilidad</summary>',
+    );
+    expect(html.toLocaleLowerCase('es')).toContain('valores recomendados');
   });
 
   it('incluye estilos ordenados y adaptables para escritorio y móvil', () => {

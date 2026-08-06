@@ -2,17 +2,21 @@ import { createHash } from 'node:crypto';
 import type { Logger } from 'pino';
 import type { CachedAnswer, KnowledgeFragment } from '../domain/types.js';
 import type { AppDatabase } from '../persistence/database.js';
+
 export type CacheMatch = {
   answer: CachedAnswer;
   kind: 'FAQ' | 'EXACT' | 'EQUIVALENT';
 };
+
 const activeFlights = new Map<string, Promise<unknown>>();
+
 export class AnswerCacheService {
   public constructor(
     private readonly database: AppDatabase,
     private readonly logger: Logger,
     private readonly botId: string,
   ) {}
+
   public find(profileId: number, question: string, now = new Date()): CacheMatch | null {
     const normalized = normalizeQuestionForCache(question);
     const exact = this.database.findExactCachedAnswer(this.botId, hashNormalizedQuestion(normalized), now);
@@ -33,6 +37,7 @@ export class AnswerCacheService {
     if (equivalent === undefined) return null;
     return this.use(equivalent.answer, equivalent.answer.sourceType === 'ADMIN_FAQ' ? 'FAQ' : 'EQUIVALENT');
   }
+
   public saveGenerated(question: string, answer: string, fragments: KnowledgeFragment[]): CachedAnswer | null {
     if (!isSafeReusableAnswer(question, answer) || fragments.length === 0) return null;
     const normalized = normalizeQuestionForCache(question);
@@ -52,6 +57,7 @@ export class AnswerCacheService {
     this.event('ANSWER_CACHE_CREATED', 'CREATED');
     return saved;
   }
+
   public async singleFlight<T>(question: string, operation: () => Promise<T>): Promise<{ value: T; coalesced: boolean }> {
     const key = `${this.botId}:${hashNormalizedQuestion(normalizeQuestionForCache(question))}`;
     const current = activeFlights.get(key) as Promise<T> | undefined;
@@ -67,6 +73,7 @@ export class AnswerCacheService {
       if (activeFlights.get(key) === flight) activeFlights.delete(key);
     }
   }
+
   private isCurrent(profileId: number, answer: CachedAnswer): boolean {
     if (hasIncorrectTlpExpansion(answer.answer)) {
       this.database.setCachedAnswerStatus(this.botId, answer.id, 'DISABLED');
@@ -85,6 +92,7 @@ export class AnswerCacheService {
     this.event('ANSWER_CACHE_INVALIDATED', 'KNOWLEDGE_SOURCE_CHANGED');
     return false;
   }
+
   private use(answer: CachedAnswer, kind: CacheMatch['kind']): CacheMatch {
     this.database.recordCachedAnswerHit(this.botId, answer.id);
     this.event(
@@ -93,11 +101,13 @@ export class AnswerCacheService {
     );
     return { answer, kind };
   }
+
   private event(eventType: string, result: string): void {
     this.database.recordTechnicalEvent({ botId: this.botId, eventType, result });
     this.logger.info({ operation: eventType, botId: this.botId, result }, 'Evento seguro de respuestas guardadas');
   }
 }
+
 export function normalizeQuestionForCache(value: string): string {
   return value
     .normalize('NFD')
@@ -107,9 +117,11 @@ export function normalizeQuestionForCache(value: string): string {
     .replace(/\s+/gu, ' ')
     .trim();
 }
+
 export function hashNormalizedQuestion(normalizedQuestion: string): string {
   return createHash('sha256').update(normalizedQuestion, 'utf8').digest('hex');
 }
+
 export function isCommunityGreeting(question: string): boolean {
   const normalized = normalizeQuestionForCache(question).replace(/\s*,\s*/gu, ' ');
   return new Set([
@@ -117,9 +129,11 @@ export function isCommunityGreeting(question: string): boolean {
     'hola neurobot', 'hola bot', 'quien eres', 'para que sirves', 'que puedes hacer', 'como funcionas',
   ]).has(normalized);
 }
+
 export function containsRestrictedClinicalAcronym(question: string): boolean {
   return /\b(?:tlp|tdah)\b/iu.test(question);
 }
+
 export function hasReviewedAcronymSource(question: string, fragments: KnowledgeFragment[]): boolean {
   const acronym = /\b(tlp|tdah)\b/iu.exec(question)?.[1]?.toLocaleLowerCase('es');
   if (acronym === undefined) return true;
@@ -128,6 +142,7 @@ export function hasReviewedAcronymSource(question: string, fragments: KnowledgeF
     new RegExp(`\\b${acronym}\\b`, 'iu').test(`${fragment.title} ${fragment.content} ${fragment.keywords.join(' ')}`),
   );
 }
+
 export function isSafeReusableAnswer(question: string, answer: string): boolean {
   const combined = `${question}\n${answer}`;
   if (containsRestrictedClinicalAcronym(question)) return false;
@@ -137,16 +152,19 @@ export function isSafeReusableAnswer(question: string, answer: string): boolean 
   if (/\b(?:mi|me llamo|soy|vivo en|direcci[oó]n|rut|pasaporte)\b/iu.test(question)) return false;
   return !hasIncorrectTlpExpansion(answer);
 }
+
 export function hasIncorrectTlpExpansion(value: string): boolean {
   const normalized = normalizeQuestionForCache(value);
   return normalized.includes('tlp') && normalized.includes('trastorno por deficit de atencion');
 }
+
 export function knowledgeVersion(fragments: Array<Pick<KnowledgeFragment, 'entryId' | 'updatedAt'>>): string {
   return createHash('sha256')
     .update([...fragments].sort((left, right) => left.entryId - right.entryId)
       .map((fragment) => `${fragment.entryId}:${fragment.updatedAt}`).join('|'))
     .digest('hex');
 }
+
 function semanticQuestion(value: string): string {
   const stopWords = new Set([
     'a', 'al', 'como', 'cual', 'cuales', 'de', 'del', 'dime', 'el', 'en', 'es', 'la', 'las',
@@ -162,9 +180,11 @@ function semanticQuestion(value: string): string {
     .sort()
     .join(' ');
 }
+
 function bestSimilarity(question: string, candidates: string[]): number {
   return Math.max(...candidates.map((candidate) => similarity(question, semanticQuestion(candidate))), 0);
 }
+
 function similarity(left: string, right: string): number {
   if (left === '' || right === '') return 0;
   if (left === right) return 1;

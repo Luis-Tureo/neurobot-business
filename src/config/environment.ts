@@ -1,12 +1,14 @@
 import { resolve } from 'node:path';
 import { z } from 'zod';
+
 const optionalTrimmedString = z.preprocess(
   (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
   z.string().trim().optional(),
 );
+
 const environmentSchema = z.object({
   PANEL_HOST: z.string().trim().default('127.0.0.1'),
-  PANEL_PORT: z.coerce.number().int().min(1024).max(65_535).default(3001),
+  PANEL_PORT: z.coerce.number().int().min(1024).max(65_535).default(3000),
   DATABASE_PATH: z.string().trim().default('./data/asistente.db'),
   WHATSAPP_SESSION_PATH: z.string().trim().default('./data/whatsapp-session'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
@@ -34,6 +36,7 @@ const environmentSchema = z.object({
   GROQ_MODEL: z.string().trim().min(1).max(120).default('llama-3.1-8b-instant'),
   APP_ENCRYPTION_KEY: optionalTrimmedString,
 });
+
 export type Environment = {
   panelHost: string;
   panelPort: number;
@@ -58,6 +61,7 @@ export type Environment = {
   groqModel: string;
   appEncryptionKey?: string;
 };
+
 export function loadEnvironment(
   values: Record<string, string | undefined> = process.env,
   baseDirectory = process.cwd(),
@@ -69,6 +73,7 @@ export function loadEnvironment(
       .join('; ');
     throw new Error(`Configuración inválida: ${details}`);
   }
+
   const value = parsed.data;
   return {
     panelHost: value.PANEL_HOST,

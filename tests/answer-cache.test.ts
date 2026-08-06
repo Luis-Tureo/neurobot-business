@@ -38,13 +38,15 @@ class CountingProvider implements AIProvider {
 function setup(): { database: AppDatabase; provider: CountingProvider; service: AssistantQueryService; profileId: number } {
   const database = new AppDatabase(':memory:');
   database.migrate();
+  const profile = database.getBotProfile('neurobot');
+  const settings = database.getAISettings(profile.id);
   database.saveAISettings({ ...settings, enabled: true });
   const provider = new CountingProvider();
   const service = new AssistantQueryService(database, provider, createLogger('silent'), 'neurobot');
   return { database, provider, service, profileId: profile.id };
 }
 
-function addKnowledge(profileId: number, input: { title: string; content: string; keywords?: string[] }) {
+function addKnowledge(database: AppDatabase, profileId: number, input: { title: string; content: string; keywords?: string[] }) {
   const category = database.listKnowledgeCategories(profileId)[0];
   if (category === undefined) throw new Error('Falta la categoría de prueba.');
   return database.saveKnowledgeEntry({
@@ -224,16 +226,34 @@ describe('respuestas locales, caché y consumo real de IA', () => {
 
   it('separa el antispam de las cuotas de IA y suprime duplicados durante 15 segundos', () => {
     const { database, profileId } = setup();
+    const base = { botId: 'neurobot', profileId, userHash: 'user', queryHash: 'a'.repeat(64), localDate: '2026-08-03', hourBucket: '2026-08-03T01' };
+    expect(database.registerCommunityInteraction({ ...base, now: new Date('2026-08-03T01:00:00Z') })).toEqual({ allowed: true });
+    expect(database.registerCommunityInteraction({ ...base, now: new Date('2026-08-03T01:00:10Z') })).toEqual({ allowed: false, reason: 'DUPLICATE_QUERY' });
+    expect(database.registerCommunityInteraction({ ...base, queryHash: 'b'.repeat(64), now: new Date('2026-08-03T01:00:10Z') })).toEqual({ allowed: true });
     database.close();
   });
 
   it('aplica tres segundos de espera a preguntas distintas', () => {
     const { database, profileId } = setup();
+    const base = { botId: 'neurobot', profileId, userHash: 'user', localDate: '2026-08-03', hourBucket: '2026-08-03T01' };
+    expect(database.registerCommunityInteraction({ ...base, queryHash: 'a'.repeat(64), now: new Date('2026-08-03T01:00:00Z') })).toEqual({ allowed: true });
+    expect(database.registerCommunityInteraction({ ...base, queryHash: 'b'.repeat(64), now: new Date('2026-08-03T01:00:01Z') })).toEqual({ allowed: false, reason: 'INTERACTION_COOLDOWN' });
     database.close();
   });
 
   it('aplica el máximo de 60 activaciones por usuario y hora', () => {
     const { database, profileId } = setup();
+    for (let index = 0; index < 60; index += 1) {
+      expect(database.registerCommunityInteraction({
+        botId: 'neurobot', profileId, userHash: 'user', queryHash: index.toString(16).padStart(64, '0'),
+        localDate: '2026-08-03', hourBucket: '2026-08-03T01',
+        now: new Date(Date.parse('2026-08-03T01:00:00Z') + index * 3000),
+      })).toEqual({ allowed: true });
+    }
+    expect(database.registerCommunityInteraction({
+      botId: 'neurobot', profileId, userHash: 'user', queryHash: 'f'.repeat(64),
+      localDate: '2026-08-03', hourBucket: '2026-08-03T01', now: new Date('2026-08-03T01:04:00Z'),
+    })).toEqual({ allowed: false, reason: 'INTERACTION_HOURLY_LIMIT' });
     database.close();
   });
 
@@ -289,11 +309,19 @@ describe('respuestas locales, caché y consumo real de IA', () => {
     const knowledgeCount = database.listKnowledgeEntries(profileId).length;
     addFaq(database, 'Pregunta persistente', 'Respuesta persistente');
     completeReservations(database, profileId, [{ userHash: 'user', groupHash: 'group' }]);
+    database.registerCommunityInteraction({
+      botId: 'neurobot', profileId, userHash: 'user', queryHash: 'a'.repeat(64),
+      localDate: '2026-08-03', hourBucket: '2026-08-03T01', now: new Date('2026-08-03T01:00:00Z'),
+    });
     database.resetAIUsageForDevelopment(profileId);
     expect(database.listCachedAnswers('neurobot')).toHaveLength(1);
     expect(database.listKnowledgeEntries(profileId)).toHaveLength(knowledgeCount);
     expect(database.getAISettings(profileId).userHourlyLimit).toBe(20);
     expect(database.getAIUsageSummary(profileId, '2026-08-03', '2026-08').requests).toBe(0);
+    expect(database.registerCommunityInteraction({
+      botId: 'neurobot', profileId, userHash: 'user', queryHash: 'a'.repeat(64),
+      localDate: '2026-08-03', hourBucket: '2026-08-03T01', now: new Date('2026-08-03T01:00:01Z'),
+    })).toEqual({ allowed: true });
     database.close();
   });
 });

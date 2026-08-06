@@ -1,5 +1,7 @@
 import type { AutomaticMessageConfiguration } from '../domain/types.js';
+
 export const AUTOMATIC_MESSAGE_TIMEZONE = 'America/Santiago' as const;
+
 export const LEGACY_AUTOMATIC_TEMPLATES = {
   WELCOME:
     '👋 ¡Te damos la bienvenida a Comunidad Neurodivergente – Autismo y TDAH!\n\nEste es un espacio de respeto, apoyo mutuo e inclusión. Puedes participar cuando te sientas cómodo/a. Escribe !reglas para conocer nuestras normas y !ayuda para ver las opciones disponibles.',
@@ -14,6 +16,7 @@ export const LEGACY_AUTOMATIC_TEMPLATES = {
   GREETING_WEEKEND:
     '☀️ ¡Muy buenos días!\n\nEsperamos que puedan descansar, compartir o dedicar tiempo a aquello que les haga bien.\n\nQue tengan un excelente día. 💙',
 } as const;
+
 export const DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION: AutomaticMessageConfiguration = {
   timezone: AUTOMATIC_MESSAGE_TIMEZONE,
   welcome: {
@@ -53,6 +56,7 @@ export const DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION: AutomaticMessageConfigurat
       '📌 Normas de la comunidad\n• Tratar a todos con respeto y empatía.\n• No discriminar, insultar, acosar ni realizar comentarios xenófobos.\n• No compartir datos personales, spam ni publicidad reiterada.\n• Prohibido el contenido sexual, violento, ilegal o inapropiado para menores.\n• La información del grupo no reemplaza atención profesional.\n• Ante un problema, avisa a la administración.',
   },
 };
+
 export const AUTOMATIC_TEMPLATE_KEYS = {
   welcome: 'WELCOME',
   dailyRules: 'DAILY_RULES',

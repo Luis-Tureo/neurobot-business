@@ -9,7 +9,10 @@ import type {
 import { ExpiringSet } from '../core/expiring-cache.js';
 import { resolvePublicWhatsAppName } from '../core/welcome-personalization.js';
 import type {
+  DetectedGroup,
+  GroupListSource,
   IncomingMessage,
+  NativePoll,
   WelcomeParticipant,
 } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
@@ -707,7 +710,8 @@ export class WhatsAppWebAdapter implements MessagingClient {
       if (participantIds.length > 0 && this.events?.onGroupJoin !== undefined) {
         const eventId = getSerializedId(notification.id);
         try {
-          await            groupId,
+          await this.events.onGroupJoin({
+            groupId,
             participantIds,
             ...(participants.length === 0 ? {} : { participants }),
             ...(eventId === null ? {} : { eventId }),
@@ -1311,7 +1315,8 @@ export class WhatsAppWebAdapter implements MessagingClient {
   ): Promise<void> {
     if (this.events?.onGroupChanged === undefined) return;
     try {
-      await    } catch (error) {
+      await this.events.onGroupChanged({ groupId, type, botAffected });
+    } catch (error) {
       this.logger.error(
         {
           ...serializeError(error, 'GROUP_CHANGE_PROCESSING_FAILED', false),

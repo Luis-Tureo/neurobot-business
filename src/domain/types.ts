@@ -1,5 +1,16 @@
-export type ConnectionState = 'disconnected' | 'initializing' | 'waiting_qr' | 'authenticated' | 'loading_chats' | 'connected' | 'auth_failure' | 'reconnecting' | 'resetting';
+export type ConnectionState =
+  | 'disconnected'
+  | 'initializing'
+  | 'waiting_qr'
+  | 'authenticated'
+  | 'loading_chats'
+  | 'connected'
+  | 'auth_failure'
+  | 'reconnecting'
+  | 'resetting';
+
 export type ActivationType = 'command' | 'mention' | 'reply';
+
 export type IncomingMessage = {
   id: string;
   replyToMessageId?: string;
@@ -20,11 +31,32 @@ export type IncomingMessage = {
   botMentionToken?: string;
   isReplyToBot: boolean;
 };
+
+export type DetectedGroup = {
+  id: string;
+  name: string;
+  source?: GroupListSource;
+  botIsMember?: boolean | null;
+  participantIds?: string[] | null;
+};
+
+export type GroupListSource = 'GET_CHATS' | 'MINIMAL_CHAT_SNAPSHOT' | 'SIMULATED';
+
+export type GroupStatus =
+  | 'ACTIVE'
+  | 'BOT_NOT_MEMBER'
+  | 'NO_AUTHORIZED_ADMIN'
+  | 'PENDING_RECHECK'
+  | 'NOT_FOUND'
+  | 'INACCESSIBLE'
+  | 'ARCHIVED';
+
 export type GroupChangeEvent = {
   groupId: string;
   type: 'JOIN' | 'LEAVE' | 'UPDATE';
   botAffected: boolean;
 };
+
 export type GroupJoinEvent = {
   groupId: string;
   participantIds: string[];
@@ -34,16 +66,19 @@ export type GroupJoinEvent = {
   source?: 'group_join' | 'notification' | 'reconciliation';
   subtype?: 'add' | 'invite' | 'linked_group_join' | 'unknown';
 };
+
 export type WelcomeParticipant = {
   participantId: string;
   displayName: string | null;
   nameSource: 'PUSHNAME' | 'FALLBACK';
   mentionId: string;
 };
+
 export type AutomaticTaskType = 'DAILY_GREETING' | 'DAILY_RULES';
 export type AutomaticMessageType = 'WELCOME' | AutomaticTaskType;
 export type ScheduledDeliveryStatus = 'PENDING' | 'SENT' | 'SKIPPED' | 'FAILED';
 export type DeliverySource = 'scheduled' | 'manual';
+
 export type AutomaticMessageConfiguration = {
   timezone: string;
   welcome: {
@@ -77,6 +112,7 @@ export type AutomaticMessageConfiguration = {
     template: string;
   };
 };
+
 export type ScheduledDeliveryRecord = {
   id: number;
   taskType: AutomaticMessageType;
@@ -90,6 +126,7 @@ export type ScheduledDeliveryRecord = {
   updatedAt: string;
   sentAt: string | null;
 };
+
 export type CommandRecord = {
   id: number;
   name: string;
@@ -100,6 +137,7 @@ export type CommandRecord = {
   priority: number;
   healthRelated: boolean;
 };
+
 export type KeywordRecord = {
   id: number;
   commandId: number;
@@ -107,13 +145,14 @@ export type KeywordRecord = {
   priority: number;
   enabled: boolean;
 };
+
 export type GroupRecord = {
   id: string;
   name: string;
   publicName: string | null;
   listedPublicly: boolean;
   authorized: boolean;
-  
+  status: GroupStatus;
   botIsMember: boolean | null;
   hasAuthorizedAdmin: boolean | null;
   firstSeenAt: string;
@@ -126,7 +165,105 @@ export type GroupRecord = {
   detectedAt: string;
   updatedAt: string;
 };
-export type OrganizationType = 'Comunidad' | 'Tienda' | 'Restaurante' | 'Distribuidora' | 'Servicio profesional' | 'Organización social' | 'Institución educativa' | 'Otro';
+
+export type GroupSynchronizationSummary = {
+  active: number;
+  discovered: number;
+  archived: number;
+  missing: number;
+  withoutAuthorizedAdmin: number;
+  temporaryErrors: number;
+  source: GroupListSource | null;
+};
+
+export type ConnectionSnapshot = {
+  state: ConnectionState;
+  lastConnectedAt: string | null;
+  reconnectAttempt: number;
+  lastErrorCode: string | null;
+};
+
+export type GroupDiscoveryState = 'idle' | 'waiting' | 'loading' | 'ready' | 'failed';
+
+export type GroupDiscoverySnapshot = {
+  state: GroupDiscoveryState;
+  retryAttempt: number;
+  detectedGroups: number;
+  skippedChats: number;
+  lastUpdatedAt: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  summary?: GroupSynchronizationSummary;
+};
+
+export type PollSelectionMode = 'SAME_FOR_ALL' | 'PER_GROUP';
+export type PollDeliverySource = 'scheduled' | 'manual';
+export type PollDeliveryStatus = 'PENDING' | 'SENDING' | 'SENT' | 'FAILED' | 'SKIPPED';
+
+export type NativePoll = {
+  question: string;
+  options: string[];
+  allowMultipleAnswers: boolean;
+};
+
+export type PollTemplate = NativePoll & {
+  id: number;
+  defaultKey: string | null;
+  category: string;
+  enabled: boolean;
+  isDefault: boolean;
+  favorite: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt: string | null;
+  disabledUntil: string | null;
+};
+
+export type HiddenPollTemplate = PollTemplate & {
+  hiddenAt: string;
+  removalReason: string | null;
+};
+
+export type PollConfiguration = {
+  enabled: boolean;
+  sendTime: string;
+  timezone: string;
+  toleranceMinutes: number;
+  selectionMode: PollSelectionMode;
+};
+
+export type PollSendHistoryRecord = {
+  id: number;
+  groupId: string;
+  localDate: string;
+  templateId: number;
+  source: PollDeliverySource;
+  countsAsDaily: boolean;
+  status: PollDeliveryStatus;
+  attempts: number;
+  scheduledAt: string;
+  attemptedAt: string | null;
+  sentAt: string | null;
+  failureCode: string | null;
+};
+
+export type PollDateOverride = {
+  localDate: string;
+  templateId: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OrganizationType =
+  | 'Comunidad'
+  | 'Tienda'
+  | 'Restaurante'
+  | 'Distribuidora'
+  | 'Servicio profesional'
+  | 'Organización social'
+  | 'Institución educativa'
+  | 'Otro';
+
 export type AssistantProfile = {
   id: number;
   internalName: string;
@@ -162,6 +299,7 @@ export type AssistantProfile = {
   createdAt: string;
   updatedAt: string;
 };
+
 export type KnowledgeCategory = {
   id: number;
   profileId: number;
@@ -170,6 +308,7 @@ export type KnowledgeCategory = {
   createdAt: string;
   updatedAt: string;
 };
+
 export type KnowledgeEntry = {
   id: number;
   profileId: number;
@@ -185,6 +324,7 @@ export type KnowledgeEntry = {
   createdAt: string;
   updatedAt: string;
 };
+
 export type KnowledgeFragment = {
   entryId: number;
   title: string;
@@ -195,8 +335,16 @@ export type KnowledgeFragment = {
   internalSource: string | null;
   updatedAt: string;
 };
-export type CachedAnswerStatus = 'AUTO_VERIFIED' | 'ADMIN_APPROVED' | 'ADMIN_EDITED' | 'DISABLED' | 'INVALIDATED';
+
+export type CachedAnswerStatus =
+  | 'AUTO_VERIFIED'
+  | 'ADMIN_APPROVED'
+  | 'ADMIN_EDITED'
+  | 'DISABLED'
+  | 'INVALIDATED';
+
 export type CachedAnswerSourceType = 'AI_GENERATED' | 'ADMIN_FAQ' | 'MANUAL';
+
 export type CachedAnswer = {
   id: number;
   botId: string;
@@ -220,6 +368,7 @@ export type CachedAnswer = {
   invalidatedAt: string | null;
   invalidationReason: string | null;
 };
+
 export type AISettings = {
   profileId: number;
   enabled: boolean;
@@ -246,17 +395,20 @@ export type AISettings = {
   timeoutMs: number;
   updatedAt: string;
 };
+
 export type AIUsage = {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
 };
+
 export type AIUsageSummary = AIUsage & {
   requests: number;
   failedRequests: number;
   dailyBudgetPercent: number;
   monthlyBudgetPercent: number;
 };
+
 export type AIQueueSettings = {
   maxConcurrent: number;
   maxQueueSize: number;
@@ -272,6 +424,7 @@ export type AIQueueSettings = {
   outboundMessageIntervalMs: number;
   suggestedRetrySeconds: number;
 };
+
 export type AIQueueMetrics = {
   queuedCount: number;
   processedCount: number;
@@ -288,7 +441,82 @@ export type AIQueueMetrics = {
   averageWaitMs: number;
   maximumWaitMs: number;
 };
+
 export type AIProviderHealthState = 'AVAILABLE' | 'BUSY' | 'RATE_LIMITED' | 'DEGRADED' | 'UNAVAILABLE' | 'NOT_CONFIGURED';
+
+export type ModerationSeverity = 'INFORMATIVA' | 'LEVE' | 'MEDIA' | 'ALTA' | 'CRITICA';
+export type ModerationAction = 'NO_ACTION' | 'ADMIN_REVIEW' | 'WARNING' | 'WARNING_AND_NOTIFY';
+export type ModerationGroupMode = 'INHERIT' | 'ENABLED' | 'DISABLED';
+
+export type ModerationSettings = {
+  enabled: boolean;
+  defaultGroupMode: ModerationGroupMode;
+  reviewThreshold: number;
+  warningThreshold: number;
+  adminNotificationThreshold: number;
+  recurrenceWindowDays: number;
+  warningCooldownMinutes: number;
+  publicWarningLimit: number;
+  publicWarningWindowMinutes: number;
+  temporaryEvidenceEnabled: boolean;
+  temporaryEvidenceHours: number;
+  warningMode: 'GROUP_GENERAL' | 'GROUP_MENTION' | 'ADMIN_ONLY';
+  automaticAIReviewEnabled: false;
+  manualAIReviewEnabled: false;
+  automaticBanEnabled: false;
+  automaticDeletionEnabled: false;
+  firstWarningMessage: string;
+  secondWarningMessage: string;
+  repeatedWarningMessage: string;
+};
+
+export type ModerationCondition = {
+  id: number;
+  conditionType: string;
+  operator: 'ALL' | 'ANY' | 'EXCLUDE';
+  normalizedValue: string;
+  configuration: Record<string, unknown>;
+  enabled: boolean;
+};
+
+export type ModerationException = {
+  id: number;
+  exceptionType: string;
+  normalizedValue: string;
+  enabled: boolean;
+};
+
+export type ModerationRule = {
+  id: number;
+  assistantId: string;
+  name: string;
+  description: string;
+  category: string;
+  severity: ModerationSeverity;
+  detectionType: string;
+  score: number;
+  reviewThreshold: number;
+  warningThreshold: number;
+  adminNotificationThreshold: number;
+  enabled: boolean;
+  appliesToAllGroups: boolean;
+  conditions: ModerationCondition[];
+  exceptions: ModerationException[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ModerationResult = {
+  allowed: boolean;
+  matchedRules: Array<{ id: number; name: string; category: string; severity: ModerationSeverity; score: number }>;
+  categories: string[];
+  totalScore: number;
+  severity: ModerationSeverity;
+  action: ModerationAction;
+  exceptionsApplied: string[];
+  duplicate: boolean;
+};
+
 export type AIProviderStatus = {
   configured: boolean;
   enabled: boolean;
@@ -298,43 +526,66 @@ export type AIProviderStatus = {
   lastCheckedAt: string | null;
   lastErrorCode: string | null;
 };
+
 export type AIReservation = {
   id: string;
   profileId: number;
   estimatedInputTokens: number;
   reservedOutputTokens: number;
 };
-export type AILimitCode = 'AI_LIMIT_USER_HOURLY_REACHED' | 'AI_LIMIT_USER_DAILY_REACHED' | 'AI_LIMIT_USER_COOLDOWN' | 'AI_LIMIT_GROUP_HOURLY_REACHED' | 'AI_LIMIT_GROUP_DAILY_REACHED' | 'AI_LIMIT_DAILY_REACHED' | 'AI_LIMIT_MONTHLY_REACHED' | 'AI_LIMIT_DAILY_TOKENS_REACHED' | 'AI_LIMIT_MONTHLY_TOKENS_REACHED';
-export type AIReservationDecision = {
-  allowed: true;
-  reservation: AIReservation;
-} | {
-  allowed: false;
-  code: AILimitCode;
-};
+
+export type AILimitCode =
+  | 'AI_LIMIT_USER_HOURLY_REACHED'
+  | 'AI_LIMIT_USER_DAILY_REACHED'
+  | 'AI_LIMIT_USER_COOLDOWN'
+  | 'AI_LIMIT_GROUP_HOURLY_REACHED'
+  | 'AI_LIMIT_GROUP_DAILY_REACHED'
+  | 'AI_LIMIT_DAILY_REACHED'
+  | 'AI_LIMIT_MONTHLY_REACHED'
+  | 'AI_LIMIT_DAILY_TOKENS_REACHED'
+  | 'AI_LIMIT_MONTHLY_TOKENS_REACHED';
+
+export type AIReservationDecision =
+  | { allowed: true; reservation: AIReservation }
+  | { allowed: false; code: AILimitCode };
+
 export type LinkedGroupRecord = {
   groupHash: string;
   name: string;
   active: boolean;
   blocked: boolean;
   botIsMember: boolean | null;
-  
+  status: GroupStatus;
   lastVerifiedAt: string;
 };
+
 export type BotMode = 'community' | 'business' | 'mixed';
 export type MenuType = 'automatic' | 'native_buttons' | 'native_list' | 'numbered';
 export type ConnectorType = 'WHATSAPP_WEB' | 'WHATSAPP_CLOUD_API';
 export type BotOperatingMode = 'COMMUNITY_GROUPS' | 'BUSINESS_PRIVATE' | 'BUSINESS_MIXED';
-export type AssistantLifecycleStatus = 'DRAFT' | 'UNLINKED' | 'LINKING' | 'CONNECTED' | 'DUPLICATE_CONFIGURATION' | 'DISABLED' | 'ARCHIVED' | 'PENDING_DELETION' | 'DELETED';
+export type AssistantLifecycleStatus =
+  | 'DRAFT'
+  | 'UNLINKED'
+  | 'LINKING'
+  | 'CONNECTED'
+  | 'DUPLICATE_CONFIGURATION'
+  | 'DISABLED'
+  | 'ARCHIVED'
+  | 'PENDING_DELETION'
+  | 'DELETED';
+
 export type BotCapabilities = {
   communitySingleTurnMode: boolean;
   privateChatsEnabled: boolean;
   conversationContinuationEnabled: boolean;
   interactiveMenusEnabled: boolean;
   numericMenuRepliesEnabled: boolean;
+  pollsAsMenusEnabled: boolean;
+  pollsForCommunityEngagementEnabled: boolean;
   catalogEnabled: boolean;
   humanAssistanceEnabled: boolean;
 };
+
 export type BotRecord = {
   id: string;
   internalIdentifier: string;
@@ -372,6 +623,7 @@ export type BotRecord = {
   createdAt: string;
   updatedAt: string;
 };
+
 export type MenuDefinition = {
   id: number;
   botId: string;
@@ -385,7 +637,24 @@ export type MenuDefinition = {
   createdAt: string;
   updatedAt: string;
 };
-export type MenuActionType = 'text' | 'catalog_item' | 'catalog_category' | 'media' | 'submenu' | 'knowledge' | 'ai' | 'hours' | 'address' | 'payments' | 'shipping' | 'human_assistance' | 'reservation_request' | 'back' | 'exit';
+
+export type MenuActionType =
+  | 'text'
+  | 'catalog_item'
+  | 'catalog_category'
+  | 'media'
+  | 'submenu'
+  | 'knowledge'
+  | 'ai'
+  | 'hours'
+  | 'address'
+  | 'payments'
+  | 'shipping'
+  | 'human_assistance'
+  | 'reservation_request'
+  | 'back'
+  | 'exit';
+
 export type MenuOption = {
   id: number;
   botId: string;
@@ -399,6 +668,7 @@ export type MenuOption = {
   createdAt: string;
   updatedAt: string;
 };
+
 export type ConversationState = {
   botId: string;
   chatHash: string;
@@ -410,6 +680,7 @@ export type ConversationState = {
   expiresAt: string;
   updatedAt: string;
 };
+
 export type CatalogCategory = {
   id: number;
   botId: string;
@@ -419,6 +690,7 @@ export type CatalogCategory = {
   createdAt: string;
   updatedAt: string;
 };
+
 export type CatalogItem = {
   id: number;
   botId: string;
@@ -440,6 +712,7 @@ export type CatalogItem = {
   createdAt: string;
   updatedAt: string;
 };
+
 export type MediaAsset = {
   id: number;
   botId: string;
@@ -453,6 +726,7 @@ export type MediaAsset = {
   createdAt: string;
   updatedAt: string;
 };
+
 export type BusinessHour = {
   id: number;
   botId: string;
@@ -465,6 +739,7 @@ export type BusinessHour = {
   createdAt: string;
   updatedAt: string;
 };
+
 export type HumanAssistanceRequest = {
   id: number;
   botId: string;

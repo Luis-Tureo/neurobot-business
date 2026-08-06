@@ -6,17 +6,22 @@ import {
   type GroundedResponseRequest,
   type GroundedResponseResult,
 } from './ai-provider.js';
+
 type FetchImplementation = (input: string | URL, init?: RequestInit) => Promise<Response>;
+
 export class GroqAIProvider implements AIProvider {
   private readonly endpoint = 'https://api.groq.com/openai/v1';
+
   public constructor(
     private readonly apiKey: string | undefined,
     private readonly model: string,
     private readonly fetchImplementation: FetchImplementation = fetch,
   ) {}
+
   public isConfigured(): boolean {
     return typeof this.apiKey === 'string' && this.apiKey.trim().length > 0;
   }
+
   public async testConnection(timeoutMs = 15_000): Promise<AIProviderConnectionResult> {
     if (!this.isConfigured()) return { successful: false, errorCode: 'AI_NOT_CONFIGURED' };
     try {
@@ -28,6 +33,7 @@ export class GroqAIProvider implements AIProvider {
       return { successful: false, errorCode: this.classifyProviderError(error) };
     }
   }
+
   public async generateGroundedResponse(
     request: GroundedResponseRequest,
   ): Promise<GroundedResponseResult> {
@@ -68,9 +74,11 @@ export class GroqAIProvider implements AIProvider {
     if (text === '') throw new AIProviderError('AI_EMPTY_RESPONSE', 'El proveedor devolvió una respuesta vacía.');
     return { text, usage: this.normalizeUsage(value.usage) };
   }
+
   public getModelInformation(): { provider: string; model: string } {
     return { provider: 'groq', model: this.model };
   }
+
   public normalizeUsage(value: unknown): { inputTokens: number; outputTokens: number; totalTokens: number } {
     if (!isRecord(value)) return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
     const inputTokens = safeTokenCount(value.prompt_tokens);
@@ -82,11 +90,13 @@ export class GroqAIProvider implements AIProvider {
       totalTokens: suppliedTotal > 0 ? suppliedTotal : inputTokens + outputTokens,
     };
   }
+
   public classifyProviderError(error: unknown): AIProviderErrorCode {
     if (error instanceof AIProviderError) return error.code;
     if (error instanceof DOMException && error.name === 'AbortError') return 'AI_TIMEOUT';
     return 'AI_NETWORK_ERROR';
   }
+
   private async performRequest(
     url: string,
     init: RequestInit,
@@ -129,6 +139,7 @@ export class GroqAIProvider implements AIProvider {
       : new AIProviderError('AI_TEMPORARY_ERROR', 'Error temporal del proveedor.', true);
   }
 }
+
 function errorFromStatus(status: number, retryAfterSeconds: number | null): AIProviderError {
   if (status === 401 || status === 403) return new AIProviderError('AI_INVALID_KEY', 'Acceso rechazado.');
   if (status === 404) return new AIProviderError('AI_MODEL_UNAVAILABLE', 'Modelo no disponible.');
@@ -136,6 +147,7 @@ function errorFromStatus(status: number, retryAfterSeconds: number | null): AIPr
   if (status >= 500) return new AIProviderError('AI_TEMPORARY_ERROR', 'Error temporal del proveedor.', true, retryAfterSeconds);
   return new AIProviderError('AI_PERMANENT_ERROR', 'Solicitud rechazada por el proveedor.');
 }
+
 function parseRetryAfter(value: string | null): number | null {
   if (value === null) return null;
   const seconds = Number(value);
@@ -144,9 +156,11 @@ function parseRetryAfter(value: string | null): number | null {
   if (!Number.isFinite(retryAt)) return null;
   return Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
 }
+
 function safeTokenCount(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0;
 }
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }

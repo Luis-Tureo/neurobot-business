@@ -1,9 +1,11 @@
 import type { AppDatabase } from '../persistence/database.js';
+
 export class CatalogService {
   public constructor(
     private readonly database: AppDatabase,
     private readonly botId: string,
   ) {}
+
   public itemText(id: number): string {
     const item = this.database.listCatalogItems(this.botId).find((candidate) => candidate.id === id && candidate.enabled);
     if (item === undefined) return 'No tengo información actualizada sobre ese producto. Consulta directamente con el negocio.';
@@ -18,6 +20,7 @@ export class CatalogService {
     if (item.availability !== '') lines.push(item.availability);
     return lines.slice(0, 5).join('\n').slice(0, 600);
   }
+
   public categoryText(categoryId: number | null): string {
     const items = this.database
       .listCatalogItems(this.botId)
@@ -29,6 +32,7 @@ export class CatalogService {
       .slice(0, 600);
   }
 }
+
 function formatMoney(amount: number, currency: string): string {
   try {
     return new Intl.NumberFormat('es-CL', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount / 100);

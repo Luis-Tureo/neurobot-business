@@ -4,6 +4,7 @@ export type SafeErrorDetails = {
   errorCode: string;
   errorStack?: string;
 };
+
 export function serializeError(
   value: unknown,
   fallbackCode: string,
@@ -28,6 +29,7 @@ export function serializeError(
     errorMessage,
     errorCode: technicalCode ?? fallbackCode,
   };
+
   if (includeStack) {
     const stack = value instanceof Error ? value.stack : readString(record, 'stack');
     if (stack !== undefined && stack.trim() !== '') {
@@ -36,15 +38,18 @@ export function serializeError(
   }
   return result;
 }
+
 export function sanitizeSensitiveText(value: string): string {
   return value
     .replace(/(?:file:\/\/\/)?[a-z]:[\\/][^\r\n)]+/giu, '[RUTA_OCULTA]')
     .replace(/[a-z0-9._-]{4,}@(c\.us|lid|g\.us|newsletter|broadcast)/giu, '[ID_OCULTO]')
     .replace(/(?<![a-z0-9])\+?\d(?:[\s().-]?\d){7,14}(?!\d)/giu, '[NÚMERO_OCULTO]');
 }
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
+
 function readString(record: Record<string, unknown> | null, key: string): string | undefined {
   if (record === null) return undefined;
   try {
@@ -54,6 +59,7 @@ function readString(record: Record<string, unknown> | null, key: string): string
     return undefined;
   }
 }
+
 function readCode(record: Record<string, unknown> | null): string | number | undefined {
   if (record === null) return undefined;
   try {
@@ -63,6 +69,7 @@ function readCode(record: Record<string, unknown> | null): string | number | und
     return undefined;
   }
 }
+
 function normalizeTechnicalCode(value: string | number | undefined): string | null {
   if (value === undefined) return null;
   const normalized = String(value)
@@ -72,6 +79,7 @@ function normalizeTechnicalCode(value: string | number | undefined): string | nu
     .slice(0, 80);
   return normalized.length >= 3 ? normalized : null;
 }
+
 function safeText(value: string | undefined, fallback: string, maximumLength: number): string {
   if (value === undefined || value.trim() === '') return fallback;
   return value.trim().slice(0, maximumLength);

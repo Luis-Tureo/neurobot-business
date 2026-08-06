@@ -1,4 +1,5 @@
 import type { AIUsage } from '../domain/types.js';
+
 export type AIProviderErrorCode =
   | 'AI_NOT_CONFIGURED'
   | 'AI_TIMEOUT'
@@ -10,9 +11,11 @@ export type AIProviderErrorCode =
   | 'AI_INVALID_RESPONSE'
   | 'AI_TEMPORARY_ERROR'
   | 'AI_PERMANENT_ERROR';
+
 export type AIProviderConnectionResult =
   | { successful: true }
   | { successful: false; errorCode: AIProviderErrorCode };
+
 export type GroundedResponseRequest = {
   systemInstruction: string;
   question: string;
@@ -21,10 +24,12 @@ export type GroundedResponseRequest = {
   temperature: number;
   timeoutMs: number;
 };
+
 export type GroundedResponseResult = {
   text: string;
   usage: AIUsage;
 };
+
 export interface AIProvider {
   isConfigured(): boolean;
   testConnection(timeoutMs?: number): Promise<AIProviderConnectionResult>;
@@ -33,6 +38,7 @@ export interface AIProvider {
   normalizeUsage(value: unknown): AIUsage;
   classifyProviderError(error: unknown): AIProviderErrorCode;
 }
+
 export class AIProviderError extends Error {
   public constructor(
     public readonly code: AIProviderErrorCode,
