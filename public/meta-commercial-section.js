@@ -78,7 +78,7 @@ export function installCommercialNavigation() {
 
   const select = document.querySelector('#section-select');
   if (select && !select.querySelector('option[value="commercial"]')) {
-    const option = new Option('Plan y plantillas', 'commercial');
+    const option = new window.Option('Plan y plantillas', 'commercial');
     option.dataset.botOnly = '';
     const groups = [...select.querySelectorAll('optgroup[data-bot-only]')];
     (groups.at(-1) || select).append(option);
