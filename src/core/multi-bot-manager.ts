@@ -31,11 +31,12 @@ export type MetaCloudRuntimeConfiguration = {
   phoneNumberId?: string;
   accessToken?: string;
   billingLedgerPath: string;
+  primaryBotId?: string;
 };
 
 export type MultiBotManagerOptions = BotInstanceOptions & {
   chromeExecutablePath?: string;
-  metaCloud: MetaCloudRuntimeConfiguration;
+  metaCloud?: MetaCloudRuntimeConfiguration;
 };
 
 export class MultiBotManager {
@@ -45,6 +46,7 @@ export class MultiBotManager {
   private readonly planService: CommercialPlanService;
   private readonly billingLedger: MetaBillingLedger;
   private readonly clientFactory: ClientFactory;
+  private readonly metaCloud: MetaCloudRuntimeConfiguration;
 
   public constructor(
     private readonly database: AppDatabase,
@@ -55,8 +57,13 @@ export class MultiBotManager {
     private readonly options: MultiBotManagerOptions,
     clientFactory?: ClientFactory,
   ) {
+    this.metaCloud = options.metaCloud ?? {
+      graphApiVersion: 'v25.0',
+      billingLedgerPath: './data/meta-billing-events.jsonl',
+      primaryBotId: 'neurobot',
+    };
     this.planService = new CommercialPlanService(database);
-    this.billingLedger = new MetaBillingLedger(options.metaCloud.billingLedgerPath);
+    this.billingLedger = new MetaBillingLedger(this.metaCloud.billingLedgerPath);
     this.clientFactory = clientFactory ?? ((bot) => this.createMessagingClient(bot));
   }
 
@@ -138,8 +145,11 @@ export class MultiBotManager {
     menuType: MenuType;
     profile: Omit<AssistantProfile, 'id' | 'active' | 'createdAt' | 'updatedAt'>;
   }): Promise<BotRecord> {
+    const connectorType: ConnectorType =
+      input.mode === 'business' ? 'WHATSAPP_CLOUD_API' : input.connectorType;
     const bot = this.database.createBot({
       ...input,
+      connectorType,
       sessionPath: this.sessions.newBotPath(input.id),
     });
     if (bot.mode === 'business') this.planService.set({ botId: bot.id, plan: 'BASIC' });
@@ -270,20 +280,22 @@ export class MultiBotManager {
 
   private createMessagingClient(bot: BotRecord): MessagingClient {
     if (bot.connectorType === 'WHATSAPP_CLOUD_API') {
+      const primaryBotId = this.metaCloud.primaryBotId ?? 'neurobot';
+      const isPrimaryBot = bot.id === primaryBotId;
       return new MetaCloudApiClient(
         {
           botId: bot.id,
-          graphApiVersion: this.options.metaCloud.graphApiVersion,
+          graphApiVersion: this.metaCloud.graphApiVersion,
           maxMessageLength: this.options.maxMessageLength,
           planService: this.planService,
           billingLedger: this.billingLedger,
           customerReference: (recipient) => this.anonymizer.identifier(recipient),
-          ...(this.options.metaCloud.phoneNumberId === undefined
-            ? {}
-            : { phoneNumberId: this.options.metaCloud.phoneNumberId }),
-          ...(this.options.metaCloud.accessToken === undefined
-            ? {}
-            : { accessToken: this.options.metaCloud.accessToken }),
+          ...(isPrimaryBot && this.metaCloud.phoneNumberId !== undefined
+            ? { phoneNumberId: this.metaCloud.phoneNumberId }
+            : {}),
+          ...(isPrimaryBot && this.metaCloud.accessToken !== undefined
+            ? { accessToken: this.metaCloud.accessToken }
+            : {}),
         },
         this.logger,
       );
