@@ -7,6 +7,7 @@ import { serializeError } from '../infrastructure/safe-error.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import type { ConnectionManager } from './connection-manager.js';
+import type { GroupDiscoveryService } from './group-discovery-service.js';
 
 export type MaintenanceOperation = 'factory_reset' | 'unlink_whatsapp';
 export type MaintenanceResult = 'running' | 'completed' | 'failed' | 'rolled_back';
@@ -108,6 +109,7 @@ export class MaintenanceService {
   public constructor(
     private readonly database: AppDatabase,
     private readonly connectionManager: ConnectionManager,
+    private readonly groupDiscovery: GroupDiscoveryService,
     private readonly anonymizer: Anonymizer,
     private readonly logger: Logger,
     private readonly options: MaintenanceServiceOptions,
@@ -177,6 +179,7 @@ export class MaintenanceService {
 
     try {
       await this.changeStage('stopping_whatsapp', 'FACTORY_RESET_STARTED');
+      this.groupDiscovery.cancel();
       this.connectionManager.updateState('resetting');
       await this.connectionManager.stop();
       this.connectionManager.updateState('resetting');
@@ -196,6 +199,7 @@ export class MaintenanceService {
 
       await this.changeStage('deleting_previous_state', 'FACTORY_RESET_STARTED');
       deletionStarted = true;
+      await this.deleteFactoryResetTargets();
 
       await this.changeStage('creating_database', 'FACTORY_RESET_STARTED');
       this.database.reopen();
@@ -264,6 +268,7 @@ export class MaintenanceService {
     const startedAt = Date.now();
     try {
       await this.changeStage('stopping_whatsapp', 'WHATSAPP_UNLINK_STARTED');
+      this.groupDiscovery.cancel();
       this.connectionManager.updateState('resetting');
       await this.connectionManager.stop();
       this.connectionManager.updateState('resetting');
@@ -301,6 +306,7 @@ export class MaintenanceService {
   }
 
   private collectBackupSummary(): BackupSummary {
+    const groups = this.database.listGroups();
     const administrators = this.database.listAdministrators();
     const commands = this.database.listCommands();
     return {
@@ -365,6 +371,7 @@ export class MaintenanceService {
     }
   }
 
+  private async deleteFactoryResetTargets(): Promise<void> {
     await this.deleteWhatsAppState();
     const databaseFiles = await this.listDatabaseFiles();
     for (const path of databaseFiles) {
@@ -447,6 +454,7 @@ export class MaintenanceService {
     if (!this.database.getSetting('bot_enabled', false)) {
       throw new Error('No se restauró la configuración predeterminada del bot.');
     }
+    if (this.database.listGroups().length !== 0 || this.database.getAdministratorCount() !== 0) {
       throw new Error('La base de datos nueva contiene autorizaciones anteriores.');
     }
     if (this.database.listCommands().length === 0) {
