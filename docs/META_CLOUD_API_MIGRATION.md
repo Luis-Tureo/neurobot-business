@@ -23,14 +23,26 @@ El bloqueo se aplica en el servidor, no solamente en la interfaz.
 
 El plan `ADVANCED` se activa únicamente después de preparar y aceptar un presupuesto específico.
 
+- Precio base de Neurobot: **US$50 mensuales por negocio**.
+- Los cargos que pueda aplicar Meta no están incluidos en esos US$50.
+- Cada negocio conecta su propia cuenta empresarial y paga directamente a Meta los mensajes cobrables.
 - Requiere `COMMERCIAL_PLAN=ADVANCED`.
 - Requiere una referencia de presupuesto en `COMMERCIAL_QUOTE_REFERENCE`.
 - Permite enviar plantillas que continúen con estado `APPROVED` en Meta.
 - Incluye casos como seguimiento de pedidos, avisos de despacho, reprogramaciones y recordatorios de citas.
-- Neurobot registra los mensajes de plantilla enviados y sus estados de entrega para preparar la facturación adicional al final del mes.
+- Neurobot registra los mensajes de plantilla y sus estados para conciliación, soporte y visibilidad del uso, pero no añade automáticamente esos cargos de Meta a la mensualidad.
 - El cliente no puede modificar límites ni fijar un presupuesto operativo desde su panel.
 
-El valor de implementación, las automatizaciones incluidas y los cargos variables deben detallarse en la cotización entregada antes de activar el plan.
+La cotización debe especificar las automatizaciones incluidas, la implementación necesaria y que los cargos de Meta se pagan por separado directamente en la cuenta empresarial del cliente.
+
+## Solicitud de cotización
+
+Al crear un asistente, el cliente puede escoger:
+
+- `BASIC`: se activa inmediatamente con las protecciones de la ventana de 24 horas.
+- `ADVANCED`: queda registrado como `QUOTE_REQUIRED`; el plan básico continúa activo hasta que el proveedor apruebe la contratación.
+
+También puede solicitar el plan avanzado posteriormente desde la sección **Plan y plantillas**. La solicitud no habilita plantillas ni modifica el cobro por sí sola.
 
 ## Plantillas iniciales
 
@@ -65,7 +77,7 @@ COMMERCIAL_PLAN=BASIC
 COMMERCIAL_QUOTE_REFERENCE=
 ```
 
-Para activar el plan avanzado:
+Para activar el plan avanzado después de aceptar la cotización:
 
 ```dotenv
 COMMERCIAL_PLAN=ADVANCED
@@ -86,7 +98,20 @@ POST /webhooks/meta/whatsapp
 - `GET` valida el token configurado en Meta.
 - `POST` verifica `X-Hub-Signature-256` con `META_APP_SECRET` antes de procesar eventos.
 - Los mensajes entrantes actualizan la ventana de atención.
-- Los estados de mensajes de plantilla alimentan el registro mensual.
+- Los estados de mensajes de plantilla alimentan el registro mensual de uso.
+
+## Panel administrativo
+
+La primera fase visual incluye:
+
+- Selección del plan básico o solicitud del plan avanzado al crear el bot.
+- Solicitud y cancelación de una cotización avanzada.
+- Visualización del plan activo y su estado.
+- Vista previa de plantillas sugeridas según reparto o agenda.
+- Resumen mensual de plantillas enviadas, entregadas y fallidas.
+- Ocultamiento de la interfaz heredada de QR en el flujo Business.
+
+El panel no expone topes de gasto, presupuestos de Meta ni controles para que el cliente active libremente el plan avanzado.
 
 ## Migración de instalaciones existentes
 
@@ -100,9 +125,8 @@ Al iniciar la nueva versión:
 
 ## Pendientes de la siguiente fase
 
-- Pantalla visual de provisión para elegir plan al crear la instalación.
-- Módulo visual para revisar borradores y estados de plantillas.
-- Integración con el endpoint de administración de plantillas de Meta.
+- Integración con el endpoint de administración de plantillas de Meta para enviarlas a revisión.
+- Sincronización automática de estados `PENDING`, `APPROVED`, `REJECTED` y `DISABLED`.
 - Programación visual por eventos de pedido o por fecha de cita.
-- Informe mensual descargable para incluirlo en la facturación.
+- Informe mensual descargable de conciliación.
 - Eliminación definitiva del código y dependencias heredadas de WhatsApp Web después de completar la transición y las pruebas de producción.
