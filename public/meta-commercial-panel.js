@@ -26,11 +26,22 @@ function installStyles() {
   document.head.append(style);
 }
 
+function installMobileNavigationHandler() {
+  const select = document.querySelector('#section-select');
+  if (!select || select.dataset.commercialHandlerReady === 'true') return;
+  select.dataset.commercialHandlerReady = 'true';
+  select.addEventListener('change', () => {
+    if (select.value !== 'commercial') return;
+    document.querySelector('button[data-section="commercial"]')?.click();
+  });
+}
+
 function install() {
   installStyles();
   installCreatePlanFields();
   installCommercialSection();
   installCommercialNavigation();
+  installMobileNavigationHandler();
   hideLegacyQrInterface();
 }
 
