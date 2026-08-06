@@ -7,15 +7,24 @@ type EnvironmentEntry = {
   key: string;
   createValue: () => string;
   replaceWhenBlank?: boolean;
+  replaceValues?: string[];
 };
 
 const destination = resolve(process.cwd(), '.env');
 
 const entries: EnvironmentEntry[] = [
   { key: 'PANEL_HOST', createValue: () => '127.0.0.1' },
-  { key: 'PANEL_PORT', createValue: () => '3001' },
-  { key: 'DATABASE_PATH', createValue: () => './data/asistente-negocio.db' },
-  { key: 'WHATSAPP_SESSION_PATH', createValue: () => './data/whatsapp-session-negocio' },
+  { key: 'PANEL_PORT', createValue: () => '3001', replaceValues: ['3000'] },
+  {
+    key: 'DATABASE_PATH',
+    createValue: () => './data/asistente-negocio.db',
+    replaceValues: ['./data/asistente.db'],
+  },
+  {
+    key: 'WHATSAPP_SESSION_PATH',
+    createValue: () => './data/whatsapp-session-negocio',
+    replaceValues: ['./data/whatsapp-session'],
+  },
   { key: 'LOG_LEVEL', createValue: () => 'info' },
   {
     key: 'ANONYMIZATION_SECRET',
@@ -62,6 +71,11 @@ function needsSecureReplacement(value: string): boolean {
   return value.length === 0 || /^reemplace-/iu.test(value);
 }
 
+function shouldReplace(entry: EnvironmentEntry, value: string): boolean {
+  if (entry.replaceWhenBlank === true && needsSecureReplacement(value)) return true;
+  return entry.replaceValues?.includes(value) ?? false;
+}
+
 async function main(): Promise<void> {
   if (!existsSync(destination)) {
     const content = `${entries.map((entry) => `${entry.key}=${entry.createValue()}`).join('\n')}\n`;
@@ -88,7 +102,7 @@ async function main(): Promise<void> {
       continue;
     }
 
-    if (entry.replaceWhenBlank === true && needsSecureReplacement(configuredValue(lines[index] ?? ''))) {
+    if (shouldReplace(entry, configuredValue(lines[index] ?? ''))) {
       lines[index] = `${entry.key}=${entry.createValue()}`;
       changedKeys.push(entry.key);
     }
