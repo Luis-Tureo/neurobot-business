@@ -1,0 +1,68 @@
+name: Cleanup Neurobot Business Temporary Files
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  cleanup:
+    if: github.event.issue.title == '[cleanup-neurobot-business]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/repair-business-readme
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Remove temporary root-level repair artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          find . -maxdepth 1 -type f \( \
+            -name 'ast-*.js' -o \
+            -name 'auto-*.js' -o \
+            -name 'auto-*.cjs' -o \
+            -name 'babel-*.js' -o \
+            -name 'clean-*.js' -o \
+            -name 'clean-*.cjs' -o \
+            -name 'debug-*.js' -o \
+            -name 'direct-*.js' -o \
+            -name 'final-*.js' -o \
+            -name 'fix-*.js' -o \
+            -name 'repair-*.js' -o \
+            -name 'strip-*.js' -o \
+            -name 'tsc-errors*.txt' \
+          \) -print -delete
+
+      - name: Commit cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No temporary artifacts were found."
+          else
+            git commit -m "chore: remove temporary refactoring artifacts"
+            git push origin HEAD:agent/repair-business-readme
+          fi
+
+      - name: Close trigger issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed',
+              state_reason: 'completed'
+            });
