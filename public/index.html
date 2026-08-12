@@ -7,6 +7,7 @@
     <title>Neurobot Business</title>
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/friendly-panel.css" />
+    <link rel="stylesheet" href="/community-design.css" />
   </head>
   <body>
     <main class="shell">
@@ -305,7 +306,10 @@
                     >
                   </div>
                   <div class="checks">
-                    <label><input name="enabled" type="checkbox" /> Asistente activado</label>
+                    <label
+                      ><input name="enabled" type="checkbox" role="switch" /> Asistente
+                      activado</label
+                    >
                     <label class="hidden"
                       ><input name="groupsEnabled" type="checkbox" /> Grupos desactivados</label
                     >
@@ -318,8 +322,8 @@
                       desactivadas</label
                     >
                     <label
-                      ><input name="continuedConversationsEnabled" type="checkbox" /> Conversaciones
-                      continuadas</label
+                      ><input name="continuedConversationsEnabled" type="checkbox" role="switch" />
+                      Conversaciones continuadas</label
                     >
                   </div>
                   <div class="actions" style="margin-top: 1rem">
@@ -633,7 +637,8 @@
                     >Nombre de la categoría<input name="name" maxlength="100" required
                   /></label>
                   <label class="toggle"
-                    ><input name="enabled" type="checkbox" checked /> Categoría activa</label
+                    ><input name="enabled" type="checkbox" role="switch" checked /> Categoría
+                    activa</label
                   >
                   <div class="actions">
                     <button id="knowledge-category-submit" type="submit">Guardar categoría</button>
@@ -733,7 +738,8 @@
 
                 <input name="internalSource" type="hidden" />
                 <label class="toggle"
-                  ><input name="enabled" type="checkbox" checked /> Información activa</label
+                  ><input name="enabled" type="checkbox" role="switch" checked /> Información
+                  activa</label
                 >
                 <div class="actions">
                   <button type="submit">Guardar información</button>
@@ -774,7 +780,8 @@
                 </label>
                 <label>Texto de ayuda<input name="helpText" maxlength="300" /></label>
                 <div class="checks">
-                  <label><input name="enabled" type="checkbox" checked /> Activo</label
+                  <label
+                    ><input name="enabled" type="checkbox" role="switch" checked /> Activo</label
                   ><label><input name="isInitial" type="checkbox" /> Menú inicial</label>
                 </div>
                 <div class="actions">
@@ -819,7 +826,8 @@
 {}</textarea>
                 </label>
                 <label class="toggle"
-                  ><input name="enabled" type="checkbox" checked /> Opción activa</label
+                  ><input name="enabled" type="checkbox" role="switch" checked /> Opción
+                  activa</label
                 >
                 <button type="submit">Guardar opción</button>
               </form>
@@ -838,7 +846,7 @@
                   >Categoría<input name="name" required /></label
                 ><label>Descripción<input name="description" /></label
                 ><label class="toggle"
-                  ><input name="enabled" type="checkbox" checked /> Activa</label
+                  ><input name="enabled" type="checkbox" role="switch" checked /> Activa</label
                 ><button type="submit">Guardar categoría</button>
               </form>
               <div id="catalog-categories" class="list compact-list"></div>
@@ -882,7 +890,7 @@
                   </select></label
                 >
                 <label class="toggle"
-                  ><input name="enabled" type="checkbox" checked /> Activo</label
+                  ><input name="enabled" type="checkbox" role="switch" checked /> Activo</label
                 >
                 <div class="actions">
                   <button type="submit">Guardar producto o servicio</button
@@ -998,7 +1006,9 @@
                     <p id="response-preview"></p>
                   </div>
                   <div class="checks">
-                    <label><input name="enabled" type="checkbox" checked /> Activo</label>
+                    <label
+                      ><input name="enabled" type="checkbox" role="switch" checked /> Activo</label
+                    >
                     <label
                       ><input name="healthRelated" type="checkbox" /> Relacionado con salud</label
                     >
@@ -1105,7 +1115,7 @@
 
                 <div class="ai-essential-grid">
                   <label class="toggle ai-primary-toggle"
-                    ><input name="enabled" type="checkbox" /> IA activada</label
+                    ><input name="enabled" type="checkbox" role="switch" /> IA activada</label
                   >
                   <label
                     >Proveedor<select name="provider">
@@ -1510,7 +1520,7 @@
               <h2>Configuración</h2>
               <form id="settings-form">
                 <label class="toggle"
-                  ><input name="bot_enabled" type="checkbox" /> Bot activado</label
+                  ><input name="bot_enabled" type="checkbox" role="switch" /> Bot activado</label
                 >
                 <label
                   >Respuesta de respaldo<textarea
@@ -1588,8 +1598,12 @@
                 <fieldset>
                   <legend>Vigencia de grupos</legend>
                   <label class="toggle"
-                    ><input name="require_authorized_admin_in_group" type="checkbox" /> Requerir al
-                    menos un administrador autorizado dentro del grupo</label
+                    ><input
+                      name="require_authorized_admin_in_group"
+                      type="checkbox"
+                      role="switch"
+                    />
+                    Requerir al menos un administrador autorizado dentro del grupo</label
                   >
                   <div class="form-row">
                     <label
@@ -1618,8 +1632,8 @@
                       required
                   /></label>
                   <label class="toggle"
-                    ><input name="group_auto_delete_enabled" type="checkbox" /> Eliminar
-                    automáticamente registros archivados cuando venza la retención</label
+                    ><input name="group_auto_delete_enabled" type="checkbox" role="switch" />
+                    Eliminar automáticamente registros archivados cuando venza la retención</label
                   >
                 </fieldset>
                 <p class="muted">
