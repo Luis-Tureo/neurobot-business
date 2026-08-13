@@ -1,1003 +1,1203 @@
-const panelState = {
-  csrfToken: null,
+import { api } from './js/api-client.js';
+import {
+  actionButton,
+  bindAsyncForm,
+  confirmAction,
+  element,
+  formatDate,
+  hidePanel,
+  lines,
+  listRow,
+  notify,
+  numberOrNull,
+  renderEmpty,
+  renderHealthGrid,
+  renderMetricGrid,
+  setLoading,
+  setStatus,
+  setTestResult,
+  showPanel,
+  statusBadge,
+  withBusy,
+} from './js/ui.js';
+
+const state = {
   selectedBotId: null,
   bot: null,
   profile: null,
-  visibleModules: [],
   bots: [],
+  visibleModules: [],
   knowledgeCategories: [],
   knowledgeEntries: [],
   cachedAnswers: [],
   menus: [],
   menuOptions: [],
-  moderation: null,
   catalogCategories: [],
   catalogItems: [],
   mediaAssets: [],
-  botRefreshTimer: null,
+  requests: [],
+  requestFilter: 'pending',
+  ai: null,
+  history: [],
+  historyPage: 1,
+  refreshTimer: null,
 };
 
-const botConnectionLabels = {
+const connectionLabels = {
   disconnected: 'Desconectado',
-  initializing: 'Inicializando',
+  initializing: 'Iniciando',
   authenticated: 'Configuración cargada',
   loading_chats: 'Sincronizando',
   connected: 'Conectado',
-  auth_failure: 'Fallo de autenticación',
+  auth_failure: 'Error de autenticación',
   reconnecting: 'Reconectando',
   resetting: 'Restableciendo',
 };
 
 const dayLabels = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-const lifecycleLabels = {
-  DRAFT: 'Borrador',
-  UNLINKED: 'Sin vincular',
-  LINKING: 'Vinculando',
-  CONNECTED: 'Conectado',
-  DUPLICATE_CONFIGURATION: 'Configuración duplicada',
-  DISABLED: 'Desactivado',
-  ARCHIVED: 'En papelera',
-  PENDING_DELETION: 'Pendiente de eliminación',
+const answerStatusLabels = {
+  ADMIN_APPROVED: 'Aprobada',
+  ADMIN_EDITED: 'Editada',
+  DISABLED: 'Inactiva',
+  INVALIDATED: 'Pendiente de revisión',
+  AUTO_APPROVED: 'Automática',
 };
 
-async function panelApi(path, options = {}) {
-  const headers = {
-    'Cache-Control': 'no-cache, no-store, must-revalidate',
-    Pragma: 'no-cache',
-    ...(options.body ? { 'content-type': 'application/json' } : {}),
-    ...(options.headers || {}),
-  };
-  if (panelState.csrfToken && options.method && options.method !== 'GET') {
-    headers['x-csrf-token'] = panelState.csrfToken;
-  }
-  const response = await fetch(path, { ...options, headers, cache: 'no-store' });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(payload.error || 'La solicitud no pudo completarse.');
-    error.code = payload.code;
-    throw error;
-  }
-  return payload;
+const actionLabels = {
+  text: 'Mostrar mensaje',
+  catalog_item: 'Mostrar producto o servicio',
+  catalog_category: 'Mostrar categoría',
+  media: 'Enviar imagen',
+  submenu: 'Abrir otro menú',
+  knowledge: 'Buscar en conocimiento',
+  ai: 'Responder con IA',
+  hours: 'Mostrar horarios',
+  address: 'Mostrar dirección',
+  payments: 'Informar formas de pago',
+  shipping: 'Informar despachos',
+  human_assistance: 'Solicitar atención humana',
+  reservation_request: 'Solicitar reserva',
+  back: 'Volver',
+  exit: 'Finalizar',
+};
+
+const eventLabels = {
+  REAL_MENTION_RECEIVED: 'Consulta recibida',
+  TEXT_ALIAS_RECEIVED: 'Consulta recibida',
+  LOCAL_FAQ_RESPONSE: 'Respuesta frecuente',
+  KNOWLEDGE_DIRECT_RESPONSE: 'Respuesta desde conocimiento',
+  ANSWER_CACHE_EXACT_HIT: 'Respuesta guardada',
+  ANSWER_CACHE_EQUIVALENT_HIT: 'Respuesta guardada',
+  ANSWER_CACHE_MISS: 'Consulta nueva',
+  AI_CALL_SUCCESS: 'Respuesta de inteligencia artificial',
+  AI_CALL_FAILED: 'Error al responder con IA',
+  AI_LIMIT_REACHED: 'Límite de IA alcanzado',
+  OUT_OF_SCOPE_LOCAL_RESPONSE: 'Consulta fuera de alcance',
+  KNOWLEDGE_NOT_FOUND: 'Información no encontrada',
+  DUPLICATE_QUERY_SUPPRESSED: 'Consulta repetida',
+  CONCURRENT_QUERY_COALESCED: 'Consulta agrupada',
+  HUMAN_ASSISTANCE_REQUESTED: 'Solicitud de atención humana',
+  MENU_OPTION_SELECTED: 'Opción de menú seleccionada',
+  CATALOG_ITEM_SENT: 'Información de catálogo enviada',
+  ASSISTANT_ADMIN_OPENED: 'Panel del asistente abierto',
+  ASSISTANT_CONTEXT_CHANGED: 'Asistente seleccionado',
+};
+
+let navigation = null;
+let configured = false;
+let initializationPromise = null;
+let moreMenuSequence = 0;
+
+function connectionTone(value) {
+  if (value === 'connected') return 'success';
+  if (value === 'auth_failure') return 'error';
+  return value === 'disconnected' ? 'warning' : 'neutral';
 }
 
-function notify(message, error = false) {
-  const notice = document.querySelector('#notice');
-  notice.textContent = message;
-  notice.classList.toggle('error', error);
-  notice.classList.remove('hidden');
-  window.setTimeout(() => notice.classList.add('hidden'), 5000);
+function booleanTone(value) {
+  return value ? 'success' : 'warning';
+}
+
+function providerLabel(value) {
+  if (value === 'groq') return 'Groq';
+  if (value === 'disabled') return 'Desactivada';
+  return value || 'Sin proveedor';
+}
+
+function safeHash(value, label = 'Usuario') {
+  return value ? `${label} · ${String(value).slice(0, 8)}` : 'Sin identificador';
+}
+
+function normalizeBotIdentifier(value) {
+  let normalized = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/-+/gu, '-')
+    .replace(/^-|-$/gu, '');
+  if (normalized && !/^[a-z]/u.test(normalized)) normalized = `bot-${normalized}`;
+  return normalized.slice(0, 40).replace(/-$/u, '');
 }
 
 function recordPanelEvent(eventType, assistantId) {
-  void panelApi('/api/panel-events', {
+  void api('/api/panel-events', {
     method: 'POST',
     body: JSON.stringify({ eventType, ...(assistantId ? { assistantId } : {}) }),
   }).catch(() => {
-    // La auditoría visual no debe interrumpir la administración.
+    // La telemetría segura del panel no debe interrumpir la administración.
   });
 }
 
-function node(tag, text, className) {
-  const element = document.createElement(tag);
-  if (text !== undefined) element.textContent = text;
-  if (className) element.className = className;
-  return element;
-}
+function createMoreMenu(items, label = 'Más acciones') {
+  const host = element('div', { className: 'more-menu' });
+  const menuId = `more-menu-${(moreMenuSequence += 1)}`;
+  const trigger = element('button', {
+    className: 'icon-button secondary',
+    attributes: {
+      type: 'button',
+      'aria-label': label,
+      'aria-expanded': 'false',
+      'aria-controls': menuId,
+    },
+  });
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', '#icon-more');
+  icon.append(use);
+  trigger.append(icon);
 
-function friendlyPanelError(error) {
-  const message = error instanceof Error ? error.message : String(error || '');
-  if (/Cannot read properties|replaceChildren|is not a function|undefined|null/iu.test(message)) {
-    return 'No fue posible abrir esta sección. Actualiza la página y vuelve a intentarlo.';
+  const menu = element('div', {
+    className: 'more-menu__panel hidden',
+    attributes: { id: menuId, role: 'menu' },
+  });
+  for (const item of items) {
+    const button = actionButton(item.label, item.danger ? 'danger' : '', async () => {
+      trigger.focus();
+      menu.classList.add('hidden');
+      trigger.setAttribute('aria-expanded', 'false');
+      await item.action();
+    });
+    button.setAttribute('role', 'menuitem');
+    menu.append(button);
   }
-  return message || 'La operación no pudo completarse.';
-}
-
-function actionButton(label, className, handler) {
-  const button = node('button', label, className);
-  button.type = 'button';
-  button.addEventListener('click', () => {
-    void Promise.resolve(handler()).catch((error) => notify(friendlyPanelError(error), true));
+  trigger.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const shouldOpen = menu.classList.contains('hidden');
+    closeAllMoreMenus();
+    if (!shouldOpen) return;
+    menu.classList.remove('hidden');
+    trigger.setAttribute('aria-expanded', 'true');
+    menu.querySelector('button')?.focus();
   });
-  return button;
-}
-
-function safeDate(value) {
-  return value ? new Date(value).toLocaleString('es-CL') : 'Sin registro';
-}
-
-function botModeLabel() {
-  return 'Negocio';
-}
-
-function setSection(name) {
-  const resolvedName = name === 'whatsapp' ? 'status' : name;
-  const navigationButton = document.querySelector(`button[data-section="${resolvedName}"]`);
-  if (navigationButton && !navigationButton.disabled) {
-    navigationButton.click();
-    return true;
-  }
-  const selector = document.querySelector('#section-select');
-  const option = selector?.querySelector(`option[value="${resolvedName}"]`);
-  if (!selector || !option || option.disabled) return false;
-  selector.value = resolvedName;
-  selector.dispatchEvent(new window.Event('change', { bubbles: true }));
-  return true;
-}
-
-function setBotNavigationAvailable(available) {
-  document.querySelector('#panel-view')?.classList.toggle('assistant-context-active', available);
-  document.querySelectorAll('.bot-only').forEach((element) => {
-    element.classList.toggle('hidden', !available);
+  trigger.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    closeAllMoreMenus();
+    menu.classList.remove('hidden');
+    trigger.setAttribute('aria-expanded', 'true');
+    menu.querySelector('button')?.focus();
   });
-  document.querySelectorAll('.global-only').forEach((element) => {
-    element.classList.toggle('hidden', available);
+  menu.addEventListener('keydown', (event) => {
+    const buttons = [...menu.querySelectorAll('button:not(:disabled)')];
+    const index = buttons.indexOf(document.activeElement);
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeAllMoreMenus();
+      trigger.focus();
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const direction = event.key === 'ArrowDown' ? 1 : -1;
+      buttons[(index + direction + buttons.length) % buttons.length]?.focus();
+    } else if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      buttons[event.key === 'Home' ? 0 : buttons.length - 1]?.focus();
+    }
   });
-  document.querySelectorAll('#section-select [data-global-only]').forEach((option) => {
-    option.hidden = available;
-    option.disabled = available;
-  });
-  document.querySelectorAll('#section-select [data-bot-only]').forEach((option) => {
-    option.hidden = !available;
-    option.disabled = !available;
-  });
-  document.querySelector('#assistant-context')?.classList.toggle('hidden', !available);
+  host.append(trigger, menu);
+  return host;
 }
 
-function applyBotCapabilities(capabilities) {
-  document.querySelectorAll('[data-capability]').forEach((element) => {
-    const available = Boolean(capabilities?.[element.dataset.capability]);
-    element.classList.toggle('hidden', !available);
-    if ('disabled' in element) element.disabled = !available;
-  });
-  const activeSection = document
-    .querySelector('.panel-section:not(.hidden)')
-    ?.id?.replace('section-', '');
-  const activeNavigation = activeSection
-    ? document.querySelector(`[data-section="${activeSection}"][data-capability]`)
-    : null;
-  if (activeNavigation?.classList.contains('hidden')) setSection('status');
+function closeAllMoreMenus() {
+  document.querySelectorAll('.more-menu__panel').forEach((menu) => menu.classList.add('hidden'));
+  document
+    .querySelectorAll('.more-menu > button[aria-expanded="true"]')
+    .forEach((button) => button.setAttribute('aria-expanded', 'false'));
 }
 
-function applyBotModules(modules = []) {
-  const businessModules = modules.filter(
-    (module) => !['automatic-messages', 'polls', 'moderation'].includes(module),
-  );
-  panelState.visibleModules = businessModules;
-  const visible = new Set(businessModules);
-  document.querySelectorAll('.bot-only[data-module]').forEach((element) => {
-    const available = visible.has(element.dataset.module);
-    element.classList.toggle('hidden', !available);
-    if ('disabled' in element) element.disabled = !available;
-  });
-  document.querySelectorAll('#section-select option[data-module]').forEach((option) => {
-    const available = visible.has(option.dataset.module);
-    option.hidden = !available;
-    option.disabled = !available;
-  });
-  document.querySelectorAll('[data-requires-module]').forEach((element) => {
-    element.classList.toggle('hidden', !visible.has(element.dataset.requiresModule));
-  });
-}
-
-function setGlobalContext(section = 'bots', activate = true) {
-  panelState.selectedBotId = null;
-  panelState.bot = null;
-  panelState.profile = null;
-  panelState.visibleModules = [];
-  setBotNavigationAvailable(false);
-  document.title = 'Neurobot Business';
-  document.querySelector('#application-title').textContent = 'Neurobot Business';
-  document.querySelector('#application-subtitle').textContent =
-    'Administra la atención automática y humana de cada negocio.';
-  document.documentElement.style.removeProperty('--primary');
-  document.documentElement.style.removeProperty('--accent');
-  if (activate) setSection(section);
-  window.history.replaceState(null, '', `#${section === 'bots' ? 'assistants' : section}`);
-  recordPanelEvent('GLOBAL_PANEL_OPENED');
-}
-
-function updateAssistantContext() {
-  if (!panelState.bot || !panelState.profile) return;
-  document.querySelector('#assistant-context-name').textContent = panelState.profile.botName;
-  document.querySelector('#assistant-context-detail').textContent = [
-    botModeLabel(panelState.bot.mode),
-    lifecycleLabels[panelState.bot.lifecycleStatus] || panelState.bot.lifecycleStatus,
-    panelState.bot.phoneNumber || 'Sin número vinculado',
-  ].join(' · ');
-  const warning = document.querySelector('#assistant-context-warning');
-  warning.textContent = '';
-  warning.classList.add('hidden');
-}
-
-function updateSetupState(selector, text, complete) {
-  const status = document.querySelector(selector);
-  if (!status) return;
-  status.textContent = text;
-  status.closest('.setup-step')?.classList.toggle('complete', complete);
-}
-
-function setCardGrid(selector, cards) {
-  const target = document.querySelector(selector);
-  if (!target) return;
-  target.replaceChildren();
-  cards.forEach(([label, value]) => {
-    const card = node('div', undefined, 'status-card');
-    card.append(node('span', label), node('strong', String(value)));
-    target.append(card);
-  });
-}
-
-function createListItem(title, detail) {
-  const item = node('article', undefined, 'list-item');
-  const meta = node('div', undefined, 'meta');
-  meta.append(node('h3', title), node('p', detail));
-  item.append(meta);
-  return item;
-}
-
-function emptyState(message) {
-  return node('p', message, 'muted');
-}
-
-async function loadBots() {
-  const result = await panelApi('/api/bots');
-  panelState.bots = result.bots;
+async function loadBots({ background = false } = {}) {
   const target = document.querySelector('#bots-list');
-  if (!target) return;
-  target.replaceChildren();
+  if (!background) setLoading(target, 'Cargando asistentes…');
+  const result = await api('/api/bots');
+  state.bots = result.bots;
   if (result.bots.length === 0) {
-    target.append(emptyState('Todavía no hay asistentes.'));
+    renderEmpty(
+      target,
+      'Todavía no hay asistentes',
+      'Crea el primero para comenzar a atender con Neurobot.',
+      actionButton('Crear asistente', '', () => openCreateBot()),
+    );
     return;
   }
-  result.bots.forEach((bot) => {
-    const card = node('article', undefined, 'card bot-card minimalist-bot-card');
-    const heading = node('div', undefined, 'bot-card-heading');
-    heading.append(node('h3', bot.botName));
 
-    const info = node('div', undefined, 'bot-card-info');
-    const phoneText = bot.phoneNumber || 'Sin vincular';
-    const statusText = botConnectionLabels[bot.whatsappStatus] || bot.whatsappStatus;
-    info.append(node('p', `Número: ${phoneText} • Estado: ${statusText}`, 'muted'));
+  target.replaceChildren();
+  for (const bot of result.bots) {
+    const card = element('article', { className: 'assistant-card' });
+    const heading = element('div', { className: 'assistant-card__heading' });
+    const copy = element('div');
+    copy.append(
+      element('h3', { text: bot.organizationName || bot.botName }),
+      element('p', { className: 'assistant-card__bot-name', text: bot.botName }),
+    );
+    heading.append(
+      copy,
+      statusBadge(bot.enabled ? 'Activo' : 'Inactivo', booleanTone(bot.enabled)),
+    );
 
-    const actions = node('div', undefined, 'actions');
-    actions.append(actionButton('Administrar', 'primary', async () => selectBot(bot.id, 'status')));
+    const facts = element('div', { className: 'assistant-card__facts' });
+    const factValues = [
+      ['Tipo de negocio', bot.organizationType || 'Sin tipo'],
+      ['WhatsApp', connectionLabels[bot.whatsappStatus] || 'Sin estado'],
+      ['Número', bot.maskedNumber || 'Sin número asociado'],
+      [
+        'IA',
+        bot.aiConfigured
+          ? `${providerLabel(bot.aiProvider)} · ${bot.aiEnabled ? 'Activa' : 'Inactiva'}`
+          : 'Sin configurar',
+      ],
+    ];
+    if (bot.lastConnectedAt) factValues.push(['Última actividad', formatDate(bot.lastConnectedAt)]);
+    for (const [label, value] of factValues) {
+      const row = element('div', { className: 'fact-row' });
+      row.append(element('span', { text: label }), element('strong', { text: value }));
+      facts.append(row);
+    }
 
-    card.append(heading, info);
-    card.append(actions);
+    const actions = element('div', { className: 'assistant-card__actions' });
+    actions.append(
+      actionButton('Administrar', '', () => selectBot(bot.id, 'status')),
+      actionButton(bot.enabled ? 'Desactivar' : 'Activar', 'secondary', () => toggleBot(bot)),
+      createMoreMenu([
+        {
+          label: 'Enviar a la papelera',
+          danger: true,
+          action: () => sendBotToTrash(bot),
+        },
+      ]),
+    );
+    card.append(heading, facts, actions);
     target.append(card);
-  });
+  }
 }
 
-async function selectBot(botId, section) {
-  const previousBotId = panelState.selectedBotId;
-  panelState.selectedBotId = botId;
-  setBotNavigationAvailable(true);
-  setSection('status');
-  const maintenanceButton = document.querySelector('button[data-section="maintenance"]');
-  const maintenanceOption = document.querySelector('#section-select option[value="maintenance"]');
-  if (maintenanceButton) {
-    maintenanceButton.disabled = false;
-    maintenanceButton.title = '';
-  }
-  if (maintenanceOption) maintenanceOption.disabled = false;
-  await loadSelectedBot();
-  const normalizedSection = section === 'whatsapp' ? 'status' : section;
-  const requestedButton = document.querySelector(`button[data-section="${normalizedSection}"]`);
-  const requestedSection = requestedButton?.disabled ? 'status' : normalizedSection;
-  setSection(requestedSection);
-  window.history.replaceState(
-    null,
-    '',
-    `#assistants/${encodeURIComponent(botId)}/${requestedSection}`,
-  );
-  recordPanelEvent(
-    previousBotId && previousBotId !== botId
-      ? 'ASSISTANT_CONTEXT_CHANGED'
-      : 'ASSISTANT_ADMIN_OPENED',
-    botId,
-  );
-  window.dispatchEvent(
-    new window.CustomEvent('bot-services-load', {
-      detail: {
-        botId,
-        timezone: panelState.profile?.timezone || 'America/Santiago',
-        visibleModules: panelState.visibleModules,
-      },
+function openCreateBot() {
+  const form = document.querySelector('#create-bot-form');
+  showPanel(form, { focus: true });
+}
+
+function closeCreateBot() {
+  const form = document.querySelector('#create-bot-form');
+  form.reset();
+  form.elements.timezone.value = 'America/Santiago';
+  form.elements.menuType.value = 'automatic';
+  form.dataset.identifierEdited = 'false';
+  hidePanel(form);
+}
+
+async function toggleBot(bot) {
+  const detail = await api(`/api/bots/${encodeURIComponent(bot.id)}`);
+  await api(`/api/bots/${encodeURIComponent(bot.id)}/configuration`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      mode: 'business',
+      enabled: !detail.bot.enabled,
+      groupsEnabled: false,
+      privateMessagesEnabled: true,
+      realMentionRequired: false,
+      continuedConversationsEnabled: detail.bot.continuedConversationsEnabled,
+      menuType: detail.bot.menuType,
     }),
-  );
-}
-
-async function loadSelectedBot() {
-  if (!panelState.selectedBotId) return;
-  await loadBotSummary();
-  const visible = new Set(panelState.visibleModules);
-  const loaders = [loadWhatsApp(), loadKnowledge(), loadCachedAnswers(), loadAI()];
-  if (visible.has('menus')) loaders.push(loadMenus());
-  if (visible.has('catalog')) loaders.push(loadCatalog());
-  if (visible.has('media')) loaders.push(loadMedia());
-  if (visible.has('hours')) loaders.push(loadHours());
-  if (visible.has('requests')) loaders.push(loadRequests());
-  await Promise.all(loaders);
-}
-
-async function loadBotSummary(refreshForms = true) {
-  const result = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}`);
-  panelState.bot = result.bot;
-  panelState.profile = result.profile;
-  applyBotModules(result.visibleModules || []);
-  applyBotCapabilities(result.bot.capabilities);
-  const connection = result.runtime?.connection || {
-    state: result.bot.whatsappStatus,
-    lastConnectedAt: result.bot.lastConnectedAt,
-  };
-  document.title = result.profile.applicationName;
-  document.querySelector('#application-title').textContent = result.profile.headerText;
-  document.querySelector('#application-subtitle').textContent =
-    `${result.profile.organizationName} · ${result.profile.botName}`;
-  document.documentElement.style.setProperty('--primary', result.profile.primaryColor);
-  document.documentElement.style.setProperty('--accent', result.profile.secondaryColor);
-  updateAssistantContext();
-  document.querySelectorAll('[data-community-channel]').forEach((element) => {
-    element.classList.toggle('hidden', !result.bot.groupChannelEnabled);
   });
-  document
-    .querySelector('#neurobot-maintenance-tools')
-    .classList.toggle('hidden', panelState.selectedBotId !== 'neurobot');
-  const trashButton = document.querySelector('#maintenance-send-to-trash');
-  trashButton.disabled = result.bot.deletionLocked;
-  document.querySelector('#assistant-trash-help').textContent = result.bot.deletionLocked
-    ? `Este asistente está protegido contra eliminación accidental. Número: ${result.bot.phoneNumber || 'Sin vincular'}.`
-    : `Número: ${result.bot.phoneNumber || 'Sin vincular'}. Detiene solamente este conector y conserva sus datos durante 30 días.`;
-  const cards = [
-    ['Número', result.bot.phoneNumber || 'Sin vincular'],
-    ['WhatsApp', botConnectionLabels[connection.state] || connection.state],
-    [
-      'IA',
-      result.ai.configured
-        ? result.ai.enabled
-          ? 'Configurada y activa'
-          : 'Configurada e inactiva'
-        : 'No configurada',
-    ],
-    ['Modo', botModeLabel(result.bot.mode)],
-    ['Consultas hoy', result.usage.requests],
-    ['Tokens hoy', result.usage.totalTokens],
-  ];
-  if (result.bot.capabilities.conversationContinuationEnabled)
-    cards.push(['Conversaciones activas', result.activeConversations]);
-  if (result.bot.capabilities.humanAssistanceEnabled)
-    cards.push(['Solicitudes pendientes', result.pendingRequests]);
-  setCardGrid('#status-cards', cards);
-  setCardGrid('#statistics-cards', [
-    ['Consultas hoy', result.usage.requests],
-    ['Tokens de entrada hoy', result.usage.inputTokens],
-    ['Tokens de salida hoy', result.usage.outputTokens],
-    ['Tokens totales hoy', result.usage.totalTokens],
-    ['Consultas del mes', result.usage.monthlyRequests],
-    ['Tokens del mes', result.usage.monthlyTokens],
-  ]);
-  updateSetupState(
-    '#setup-whatsapp-state',
-    botConnectionLabels[connection.state] || connection.state,
-    connection.state === 'connected',
-  );
-  updateSetupState(
-    '#setup-profile-state',
-    result.profile.organizationName,
-    result.profile.organizationName.trim().length > 0,
-  );
-  updateSetupState(
-    '#setup-test-state',
-    result.bot.privateMessagesEnabled ? 'Chats privados activos' : 'Chats privados desactivados',
-    result.bot.privateMessagesEnabled,
-  );
+  await loadBots();
+  if (state.selectedBotId === bot.id) await loadBotSummary({ refreshForms: false });
+  notify(detail.bot.enabled ? 'Asistente desactivado.' : 'Asistente activado.');
+}
 
-  const quickActionsContainer = document.querySelector('#status-quick-actions');
-  if (quickActionsContainer) {
-    quickActionsContainer.replaceChildren();
-    quickActionsContainer.append(
-      actionButton(
-        result.bot.enabled ? 'Desactivar asistente' : 'Activar asistente',
-        result.bot.enabled ? 'secondary' : 'primary',
-        async () => toggleBot(result.bot),
-      ),
-    );
-    quickActionsContainer.append(
-      actionButton('Ver estado de Meta', 'secondary', async () =>
-        selectBot(result.bot.id, 'whatsapp'),
-      ),
-    );
-    if (result.bot.meta?.configured) {
-      quickActionsContainer.append(
-        actionButton('Revalidar configuración', 'secondary', async () =>
-          restartBot(result.bot.id),
-        ),
-      );
-    }
-    if (!result.bot.deletionLocked) {
-      quickActionsContainer.append(
-        actionButton('Enviar a papelera', 'danger', async () => sendBotToTrash(result.bot)),
-      );
-    } else {
-      quickActionsContainer.append(node('span', 'Protegido contra eliminación', 'protected-label'));
-    }
+async function sendBotToTrash(bot) {
+  const confirmation = await confirmAction({
+    title: 'Enviar asistente a la papelera',
+    description: `${bot.organizationName || bot.botName} quedará detenido y podrá restaurarse durante 30 días.`,
+    expectedConfirmation: bot.botName,
+    requirePassword: true,
+    confirmLabel: 'Enviar a la papelera',
+    danger: true,
+  });
+  if (!confirmation) return;
+  await api(`/api/bots/${encodeURIComponent(bot.id)}/trash`, {
+    method: 'POST',
+    body: JSON.stringify({
+      password: confirmation.password,
+      confirmationName: confirmation.confirmation,
+    }),
+  });
+  if (state.selectedBotId === bot.id) await setGlobalContext('bots');
+  await Promise.all([loadBots(), loadTrash()]);
+  notify('Asistente enviado a la papelera.');
+}
+
+async function loadTrash() {
+  const target = document.querySelector('#trash-list');
+  setLoading(target, 'Cargando papelera…');
+  const result = await api('/api/assistants/trash');
+  if (result.assistants.length === 0) {
+    renderEmpty(target, 'La papelera está vacía', 'No hay asistentes pendientes de restauración.');
+    return;
   }
 
-  if (refreshForms) {
-    fillBotConfiguration(result.bot);
-    fillProfile(result.profile);
-    fillActivationAliases(result.activationAliases);
+  target.replaceChildren();
+  for (const assistant of result.assistants) {
+    const card = element('article', { className: 'assistant-card' });
+    const heading = element('div', { className: 'assistant-card__heading' });
+    const copy = element('div');
+    copy.append(
+      element('h3', { text: assistant.organizationName || assistant.botName }),
+      element('p', { className: 'assistant-card__bot-name', text: assistant.botName }),
+    );
+    heading.append(copy, statusBadge('En papelera', 'warning'));
+    const facts = element('div', { className: 'assistant-card__facts' });
+    const scheduled = element('div', { className: 'fact-row' });
+    scheduled.append(
+      element('span', { text: 'Eliminación programada' }),
+      element('strong', { text: formatDate(assistant.scheduledPermanentDeletionAt) }),
+    );
+    facts.append(scheduled);
+    const actions = element('div', { className: 'assistant-card__actions' });
+    actions.append(
+      actionButton('Restaurar', '', async () => {
+        await api(`/api/bots/${encodeURIComponent(assistant.id)}/restore`, {
+          method: 'POST',
+          body: JSON.stringify({ confirmed: true }),
+        });
+        await Promise.all([loadBots(), loadTrash()]);
+        notify('Asistente restaurado en estado inactivo.');
+      }),
+      actionButton('Eliminar definitivamente', 'danger', async () => {
+        const expected = `ELIMINAR PERMANENTEMENTE ${assistant.botName}`;
+        const confirmation = await confirmAction({
+          title: 'Eliminar definitivamente',
+          description:
+            'Esta acción no se puede deshacer y eliminará todos los datos del asistente.',
+          expectedConfirmation: expected,
+          requirePassword: true,
+          confirmLabel: 'Eliminar definitivamente',
+          danger: true,
+        });
+        if (!confirmation) return;
+        await api(`/api/bots/${encodeURIComponent(assistant.id)}/permanent`, {
+          method: 'DELETE',
+          body: JSON.stringify({
+            password: confirmation.password,
+            confirmationPhrase: confirmation.confirmation,
+          }),
+        });
+        await loadTrash();
+        notify('Asistente eliminado definitivamente.');
+      }),
+    );
+    card.append(heading, facts, actions);
+    target.append(card);
   }
 }
 
-function fillBotConfiguration(bot) {
-  const form = document.querySelector('#bot-configuration-form');
-  form.elements.mode.value = 'business';
-  form.elements.menuType.value = bot.menuType;
-  [
-    'enabled',
-    'groupsEnabled',
-    'privateMessagesEnabled',
-    'realMentionRequired',
-    'continuedConversationsEnabled',
-  ].forEach((field) => {
-    form.elements[field].checked = Boolean(bot[field]);
-  });
-  form.elements.mode.disabled = true;
-  form.elements.menuType.disabled = !bot.capabilities.interactiveMenusEnabled;
-  form.elements.groupsEnabled.checked = false;
-  form.elements.privateMessagesEnabled.checked = true;
-  form.elements.privateMessagesEnabled.disabled = true;
-  form.elements.realMentionRequired.checked = false;
-  form.elements.realMentionRequired.disabled = true;
-  form.elements.continuedConversationsEnabled.checked =
-    bot.capabilities.conversationContinuationEnabled && bot.continuedConversationsEnabled;
-  form.elements.continuedConversationsEnabled.disabled =
-    !bot.capabilities.conversationContinuationEnabled;
-  document.querySelector('#community-menu-help')?.classList.add('hidden');
-  document.querySelector('#community-single-turn-settings')?.classList.add('hidden');
-}
-
-function fillActivationAliases(aliases = []) {
-  const card = document.querySelector('#activation-aliases-card');
-  const input = document.querySelector('#activation-aliases');
-  if (!card || !input) return;
-  card.classList.add('hidden');
-  input.value = aliases.filter((alias) => alias.toLowerCase() !== '@neurobot').join('\n');
+function updateAssistantContext(detail) {
+  const bot = detail.bot;
+  const profile = detail.profile;
+  document.querySelector('#assistant-context-business').textContent = profile.organizationName;
+  document.querySelector('#assistant-context-name').textContent = profile.botName;
+  setStatus(
+    '#assistant-context-status',
+    bot.enabled ? 'Activo' : 'Inactivo',
+    booleanTone(bot.enabled),
+  );
+  setStatus(
+    '#assistant-context-whatsapp',
+    connectionLabels[bot.whatsappStatus] || 'Sin estado',
+    connectionTone(bot.whatsappStatus),
+  );
+  const details = [bot.organizationType, bot.maskedNumber].filter(Boolean);
+  document.querySelector('#assistant-context-detail').textContent = details.join(' · ');
 }
 
 function fillProfile(profile) {
   const form = document.querySelector('#profile-form');
-  Object.entries(profile).forEach(([field, value]) => {
+  for (const [field, value] of Object.entries(profile)) {
     const input = form.elements[field];
-    if (!input) return;
+    if (!input) continue;
     input.value = Array.isArray(value) ? value.join('\n') : (value ?? '');
-  });
-  const fixedNeurobotIdentity = panelState.selectedBotId === 'neurobot';
-  const botName = form.elements.botName;
-  const activationAlias = form.elements.activationAlias;
-  if (fixedNeurobotIdentity) {
-    botName.value = 'Neurobot';
-    activationAlias.value = '@neurobot';
   }
-  botName.readOnly = fixedNeurobotIdentity;
-  activationAlias.readOnly = fixedNeurobotIdentity;
-  document.querySelector('#neurobot-alias-help').classList.toggle('hidden', !fixedNeurobotIdentity);
-  const preview = document.querySelector('#profile-preview');
-  preview.replaceChildren(
-    node('h3', profile.botName),
-    node('p', profile.description),
-    node('p', profile.footerText, 'muted'),
+  form.elements.address.value = profile.address || '';
+  if (!form.elements.activationAlias.value) form.elements.activationAlias.value = '@asistente';
+}
+
+function fillBotConfiguration(bot) {
+  const form = document.querySelector('#bot-configuration-form');
+  form.elements.enabled.checked = Boolean(bot.enabled);
+  form.elements.continuedConversationsEnabled.checked = Boolean(bot.continuedConversationsEnabled);
+  form.elements.continuedConversationsEnabled.disabled =
+    !bot.capabilities.conversationContinuationEnabled;
+  form.elements.menuType.value = bot.menuType;
+  form.elements.menuType.disabled = !bot.capabilities.interactiveMenusEnabled;
+}
+
+function renderOverview(detail) {
+  const connection = detail.runtime?.connection || {
+    state: detail.bot.whatsappStatus,
+  };
+  renderHealthGrid('#status-cards', [
+    {
+      label: 'Asistente',
+      value: detail.bot.enabled ? 'Activo' : 'Inactivo',
+      tone: booleanTone(detail.bot.enabled),
+    },
+    {
+      label: 'WhatsApp',
+      value: connectionLabels[connection.state] || 'Sin estado',
+      tone: connectionTone(connection.state),
+    },
+    {
+      label: 'Inteligencia artificial',
+      value: detail.ai.configured ? (detail.ai.enabled ? 'Activa' : 'Inactiva') : 'Sin configurar',
+      tone: detail.ai.configured && detail.ai.enabled ? 'success' : 'warning',
+    },
+    {
+      label: 'Solicitudes humanas',
+      value: detail.pendingRequests === 0 ? 'Al día' : `${detail.pendingRequests} pendientes`,
+      tone: detail.pendingRequests === 0 ? 'success' : 'warning',
+    },
+  ]);
+
+  const quickActions = document.querySelector('#status-quick-actions');
+  quickActions.replaceChildren(
+    actionButton(
+      detail.bot.enabled ? 'Desactivar asistente' : 'Activar asistente',
+      detail.bot.enabled ? 'secondary' : '',
+      () => toggleBot(detail.bot),
+    ),
+    actionButton('Revisar WhatsApp', 'secondary', () =>
+      navigation.navigate('whatsapp', { focus: true }),
+    ),
+    actionButton('Editar conocimiento', 'secondary', () =>
+      navigation.navigate('knowledge', { focus: true }),
+    ),
+    actionButton('Abrir centro de pruebas', 'secondary', () =>
+      navigation.navigate('test-center', { focus: true }),
+    ),
   );
+
+  const issues = [];
+  if (!detail.bot.enabled)
+    issues.push(['Asistente inactivo', 'Actívalo para comenzar a responder.']);
+  if (connection.state !== 'connected') {
+    issues.push([
+      'WhatsApp no está conectado',
+      detail.bot.meta?.configured
+        ? 'Revisa la conexión o vuelve a validar la configuración.'
+        : 'Completa la configuración de WhatsApp Cloud API en el servidor.',
+    ]);
+  }
+  if (!detail.ai.configured && detail.ai.provider !== 'disabled') {
+    issues.push([
+      'IA sin configurar',
+      'Configura el proveedor antes de activar respuestas con IA.',
+    ]);
+  }
+
+  const attentionPanel = document.querySelector('#attention-panel');
+  const attentionList = document.querySelector('#attention-list');
+  attentionPanel.classList.toggle('hidden', issues.length === 0);
+  attentionList.replaceChildren();
+  for (const [title, description] of issues) attentionList.append(listRow(title, description));
+
+  renderMetricGrid('#statistics-cards', [
+    { label: 'Conversaciones activas', value: detail.activeConversations },
+    { label: 'Preguntas hoy', value: detail.usage.requests },
+    { label: 'Solicitudes pendientes', value: detail.pendingRequests },
+    { label: 'Actividad registrada', value: state.history.length },
+  ]);
+}
+
+async function loadBotSummary({ refreshForms = true } = {}) {
+  if (!state.selectedBotId) return null;
+  const detail = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}`);
+  state.bot = detail.bot;
+  state.profile = detail.profile;
+  state.visibleModules = (detail.visibleModules || []).filter(
+    (module) => !['automatic-messages', 'polls', 'moderation', 'maintenance'].includes(module),
+  );
+  navigation.setModuleVisibility(state.visibleModules);
+  updateAssistantContext(detail);
+  renderOverview(detail);
+  if (refreshForms) {
+    fillProfile(detail.profile);
+    fillBotConfiguration(detail.bot);
+  }
+  return detail;
+}
+
+async function selectBot(botId, section = 'status') {
+  const previous = state.selectedBotId;
+  state.selectedBotId = botId;
+  navigation.setContext('assistant');
+  await loadBotSummary();
+  await loadHistory({ background: true });
+  const requested = document.querySelector(`button[data-section="${section}"]`);
+  const resolved =
+    requested && !requested.disabled && !requested.classList.contains('hidden')
+      ? section
+      : 'status';
+  await navigation.navigate(resolved, { notify: false, focus: true });
+  await enterSection(resolved, { history: false });
+  recordPanelEvent(
+    previous && previous !== botId ? 'ASSISTANT_CONTEXT_CHANGED' : 'ASSISTANT_ADMIN_OPENED',
+    botId,
+  );
+}
+
+async function setGlobalContext(section = 'bots') {
+  state.selectedBotId = null;
+  state.bot = null;
+  state.profile = null;
+  state.visibleModules = [];
+  navigation.setContext('global');
+  document.querySelector('#application-title').textContent = 'Business';
+  document.querySelector('#application-subtitle').textContent =
+    'Atención inteligente para cada negocio.';
+  document.title = 'Neurobot Business';
+  await navigation.navigate(section, { notify: false, focus: true });
+  window.history.replaceState(null, '', section === 'bots' ? '#assistants' : `#${section}`);
+  recordPanelEvent('GLOBAL_PANEL_OPENED');
 }
 
 async function loadWhatsApp() {
-  if (!panelState.selectedBotId) return;
-  const visible = new Set(panelState.visibleModules);
-  const [detail, groups, polls] = await Promise.all([
-    panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}`),
-    visible.has('automatic-messages')
-      ? panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/groups`)
-      : Promise.resolve({ groups: [] }),
-    visible.has('polls')
-      ? panelApi(`/api/polls?botId=${encodeURIComponent(panelState.selectedBotId)}`)
-      : Promise.resolve({ templates: [] }),
-  ]);
+  if (!state.selectedBotId) return;
+  const target = document.querySelector('#whatsapp-cards');
+  setLoading(target, 'Comprobando WhatsApp…');
+  const detail = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}`);
   const connection = detail.runtime?.connection || {
     state: detail.bot.whatsappStatus,
-    lastConnectedAt: detail.bot.lastConnectedAt,
-  };
-  const meta = detail.bot.meta || {
-    configured: false,
-    credentialsMissing: [
-      'META_ACCESS_TOKEN',
-      'META_PHONE_NUMBER_ID',
-      'META_WABA_ID',
-      'META_APP_SECRET',
-      'META_WEBHOOK_VERIFY_TOKEN',
-    ],
-    webhookAvailable: false,
     lastErrorCode: null,
   };
-  setCardGrid('#whatsapp-cards', [
-    ['Estado', botConnectionLabels[connection.state] || connection.state],
-    ['Configuración', meta.configured ? 'Configurado' : 'No configurado'],
-    ['Webhook', meta.webhookAvailable ? 'Disponible' : 'No configurado'],
-    [
-      'Credenciales',
-      meta.credentialsMissing?.length
-        ? `Faltan: ${meta.credentialsMissing.join(', ')}`
-        : 'Completas',
-    ],
-    ['Runtime', detail.runtime ? 'Instancia preparada' : 'Pendiente'],
-    ...(meta.lastErrorCode ? [['Último error de Meta', meta.lastErrorCode]] : []),
-    ...(connection.lastErrorCode ? [['Último error', connection.lastErrorCode]] : []),
+  const meta = detail.bot.meta || { configured: false, webhookAvailable: false };
+  renderHealthGrid(target, [
+    {
+      label: 'Estado',
+      value: connectionLabels[connection.state] || 'Sin estado',
+      tone: connectionTone(connection.state),
+    },
+    {
+      label: 'Número',
+      value: detail.bot.maskedNumber || 'Sin número asociado',
+      tone: detail.bot.maskedNumber ? 'success' : 'warning',
+    },
+    { label: 'Integración', value: 'WhatsApp Cloud API', tone: 'success' },
+    {
+      label: 'Webhook',
+      value: meta.webhookAvailable ? 'Disponible' : 'Requiere configuración',
+      tone: meta.webhookAvailable ? 'success' : 'warning',
+    },
   ]);
-  renderBotGroups(groups.groups);
-  const availableGroups = groups.groups.filter(
-    (group) => group.active && !group.blocked && group.botIsMember === true,
-  );
-  replaceSelectOptions(
-    document.querySelector('#manual-test-group'),
-    availableGroups,
-    'groupHash',
-    'name',
-  );
-  replaceSelectOptions(
-    document.querySelector('#manual-test-poll'),
-    (polls.templates || []).filter((template) => template.enabled),
-    'id',
-    'question',
-  );
-}
 
-function renderBotGroups(groups) {
-  const target = document.querySelector('#bot-groups-list');
-  target.replaceChildren();
-  if (groups.length === 0) {
-    target.append(emptyState('No se detectaron grupos para este asistente.'));
-    return;
-  }
-  groups.forEach((group) => {
-    const item = createListItem(
-      group.name,
-      `${group.active ? 'Activo' : 'Inactivo'} · ${group.status}`,
-    );
-    target.append(item);
-  });
+  const issues = document.querySelector('#whatsapp-issues');
+  const messages = [];
+  if (!meta.configured)
+    messages.push('La integración requiere completar su configuración en el servidor.');
+  if (meta.lastErrorCode)
+    messages.push('Meta informó un problema que requiere revisión de la cuenta.');
+  if (connection.lastErrorCode)
+    messages.push('La conexión registró un problema y puede necesitar revalidación.');
+  issues.classList.toggle('hidden', messages.length === 0);
+  issues.replaceChildren(...messages.map((message) => element('p', { text: message })));
 }
 
 function knowledgePriorityLabel(value) {
   const priority = Number(value);
-  if (priority <= -75) return 'Prioridad muy baja';
-  if (priority < 0) return 'Prioridad baja';
-  if (priority === 0) return 'Prioridad normal';
-  if (priority < 75) return 'Prioridad alta';
-  return 'Prioridad muy alta';
+  if (priority <= -75) return 'Muy baja';
+  if (priority < 0) return 'Baja';
+  if (priority === 0) return 'Normal';
+  if (priority < 75) return 'Alta';
+  return 'Muy alta';
 }
 
-function updateKnowledgePriorityDisplay(value) {
+function updateKnowledgePriority(value) {
   const label = document.querySelector('#knowledge-priority-label');
   if (label) label.textContent = knowledgePriorityLabel(value);
 }
 
-function setKnowledgeCategoryPanelVisible(visible) {
+function showKnowledgeCategories(visible) {
   const panel = document.querySelector('#knowledge-category-panel');
   const button = document.querySelector('#toggle-knowledge-categories');
-  panel?.classList.toggle('hidden', !visible);
-  if (button) button.textContent = visible ? 'Cerrar categorías' : 'Administrar categorías';
+  panel.classList.toggle('hidden', !visible);
+  button.setAttribute('aria-expanded', String(visible));
+  button.textContent = visible ? 'Cerrar categorías' : 'Categorías';
 }
 
-function closeKnowledgeCategoryForm() {
+function resetKnowledgeCategoryForm() {
   const form = document.querySelector('#knowledge-category-form');
-  if (!form) return;
   form.reset();
   form.elements.id.value = '';
   form.elements.enabled.checked = true;
-  form.classList.add('hidden');
-  const submit = document.querySelector('#knowledge-category-submit');
-  if (submit) submit.textContent = 'Guardar categoría';
+  hidePanel(form);
 }
 
-function openKnowledgeCategoryForm(category = null) {
+function editKnowledgeCategory(category = null) {
   const form = document.querySelector('#knowledge-category-form');
-  if (!form) return;
-  setKnowledgeCategoryPanelVisible(true);
+  showKnowledgeCategories(true);
   form.reset();
   form.elements.id.value = category?.id || '';
   form.elements.name.value = category?.name || '';
   form.elements.enabled.checked = category?.enabled ?? true;
-  form.classList.remove('hidden');
-  const submit = document.querySelector('#knowledge-category-submit');
-  if (submit) submit.textContent = category ? 'Guardar nuevo nombre' : 'Crear categoría';
-  form.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  window.setTimeout(() => form.elements.name.focus(), 250);
+  showPanel(form, { focus: true });
 }
 
 function resetKnowledgeEntryForm() {
   const form = document.querySelector('#knowledge-entry-form');
-  if (!form) return;
   form.reset();
   form.elements.id.value = '';
   form.elements.priority.value = 0;
   form.elements.internalSource.value = '';
   form.elements.enabled.checked = true;
-  updateKnowledgePriorityDisplay(0);
-  const title = document.querySelector('#knowledge-entry-form-title');
-  if (title) title.textContent = 'Agregar información';
+  document.querySelector('#knowledge-entry-form-title').textContent = 'Agregar información';
+  updateKnowledgePriority(0);
 }
 
-function closeKnowledgeEntryForm() {
+function openKnowledgeEntry(entry = null) {
   const form = document.querySelector('#knowledge-entry-form');
-  if (!form) return;
   resetKnowledgeEntryForm();
-  form.classList.add('hidden');
-}
-
-function openNewKnowledgeEntry() {
-  const form = document.querySelector('#knowledge-entry-form');
-  if (!form) return;
-  resetKnowledgeEntryForm();
-  form.classList.remove('hidden');
-  form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  window.setTimeout(() => form.elements.title.focus(), 250);
+  if (entry) {
+    for (const field of ['id', 'title', 'categoryId', 'content', 'priority']) {
+      form.elements[field].value = entry[field];
+    }
+    form.elements.keywords.value = entry.keywords.join('\n');
+    form.elements.synonyms.value = entry.synonyms.join('\n');
+    form.elements.internalSource.value = entry.internalSource || '';
+    form.elements.enabled.checked = entry.enabled;
+    document.querySelector('#knowledge-entry-form-title').textContent = 'Editar información';
+    updateKnowledgePriority(entry.priority);
+  }
+  showPanel(form, { focus: true });
 }
 
 async function loadKnowledge() {
-  if (!panelState.selectedBotId) return;
-  const result = await panelApi(
-    `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/knowledge`,
-  );
-  panelState.knowledgeCategories = result.categories;
-  panelState.knowledgeEntries = result.entries;
-  const activeEntries = result.entries.filter((entry) => entry.enabled).length;
-  updateSetupState(
-    '#setup-knowledge-state',
-    activeEntries > 0
-      ? `${activeEntries} entrada${activeEntries === 1 ? '' : 's'} activa${activeEntries === 1 ? '' : 's'}`
-      : 'Sin contenido activo',
-    activeEntries > 0,
-  );
+  if (!state.selectedBotId) return;
+  const entriesTarget = document.querySelector('#knowledge-entries');
+  setLoading(entriesTarget, 'Cargando conocimiento…');
+  const result = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/knowledge`);
+  state.knowledgeCategories = result.categories;
+  state.knowledgeEntries = result.entries;
 
-  const addInformationButton = document.querySelector('#new-knowledge-entry');
-  if (addInformationButton) {
-    addInformationButton.disabled = result.categories.length === 0;
-    addInformationButton.title =
-      result.categories.length === 0
-        ? 'Crea primero una categoría para ordenar la información.'
-        : '';
-  }
+  const categorySelect = document.querySelector('#knowledge-entry-form').elements.categoryId;
+  replaceOptions(categorySelect, result.categories, 'id', 'name');
+  document.querySelector('#new-knowledge-entry').disabled = result.categories.length === 0;
 
   const categoriesTarget = document.querySelector('#knowledge-categories');
   categoriesTarget.replaceChildren();
   if (result.categories.length === 0) {
-    categoriesTarget.append(emptyState('Todavía no hay categorías. Crea una para comenzar.'));
+    renderEmpty(
+      categoriesTarget,
+      'Todavía no hay categorías',
+      'Crea una categoría para comenzar a organizar la información.',
+      actionButton('Crear categoría', '', () => editKnowledgeCategory()),
+    );
+  } else {
+    for (const category of result.categories) {
+      const count = result.entries.filter(
+        (entry) => Number(entry.categoryId) === Number(category.id),
+      ).length;
+      const row = listRow(
+        category.name,
+        `${count} elemento${count === 1 ? '' : 's'} · ${category.enabled ? 'Activa' : 'Inactiva'}`,
+      );
+      row.append(actionButton('Editar', 'secondary', () => editKnowledgeCategory(category)));
+      categoriesTarget.append(row);
+    }
   }
-  result.categories.forEach((category) => {
-    const entryCount = result.entries.filter(
-      (entry) => Number(entry.categoryId) === Number(category.id),
-    ).length;
-    const item = createListItem(
-      category.name,
-      `${entryCount} información${entryCount === 1 ? '' : 'es'} guardada${entryCount === 1 ? '' : 's'} · ${category.enabled ? 'Activa' : 'Inactiva'}`,
-    );
-    item.append(
-      actionButton('Renombrar categoría', 'secondary', () => openKnowledgeCategoryForm(category)),
-    );
-    categoriesTarget.append(item);
-  });
 
-  replaceSelectOptions(
-    document.querySelector('#knowledge-entry-form').elements.categoryId,
-    result.categories,
-    'id',
-    'name',
-  );
-  const entriesTarget = document.querySelector('#knowledge-entries');
-  entriesTarget.replaceChildren();
-  if (result.entries.length === 0)
-    entriesTarget.append(emptyState('Todavía no hay información guardada.'));
-  result.entries.forEach((entry) => {
-    const item = createListItem(
-      entry.title,
-      `${entry.categoryName} · ${knowledgePriorityLabel(entry.priority)} · ${entry.enabled ? 'Activa' : 'Inactiva'}`,
+  if (result.entries.length === 0) {
+    renderEmpty(
+      entriesTarget,
+      'Todavía no hay información',
+      result.categories.length
+        ? 'Agrega el primer dato oficial para que el asistente pueda usarlo.'
+        : 'Crea primero una categoría.',
+      result.categories.length
+        ? actionButton('Agregar información', '', () => openKnowledgeEntry())
+        : undefined,
     );
-    const actions = node('div', undefined, 'actions');
+    return;
+  }
+
+  entriesTarget.replaceChildren();
+  for (const entry of result.entries) {
+    const row = listRow(
+      entry.title,
+      `${entry.categoryName} · Prioridad ${knowledgePriorityLabel(entry.priority)} · ${entry.enabled ? 'Activa' : 'Inactiva'}`,
+    );
+    const actions = element('div', { className: 'button-row' });
     actions.append(
-      actionButton('Editar información', 'secondary', () => fillKnowledgeEntry(entry)),
+      actionButton('Editar', 'secondary', () => openKnowledgeEntry(entry)),
       actionButton('Eliminar', 'danger', async () => {
-        if (!window.confirm('¿Eliminar esta información oficial?')) return;
-        await panelApi(
-          `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/knowledge/entries/${entry.id}`,
+        const confirmation = await confirmAction({
+          title: 'Eliminar información',
+          description: `“${entry.title}” dejará de estar disponible para las respuestas.`,
+          confirmLabel: 'Eliminar',
+          danger: true,
+        });
+        if (!confirmation) return;
+        await api(
+          `/api/bots/${encodeURIComponent(state.selectedBotId)}/knowledge/entries/${entry.id}`,
           { method: 'DELETE' },
         );
         await loadKnowledge();
+        notify('Información eliminada.');
       }),
     );
-    item.append(actions);
-    entriesTarget.append(item);
-  });
+    row.append(actions);
+    entriesTarget.append(row);
+  }
 }
 
-async function loadCachedAnswers(search = '') {
-  if (!panelState.selectedBotId) return;
-  const suffix = search ? `?search=${encodeURIComponent(search)}` : '';
-  const result = await panelApi(
-    `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/cached-answers${suffix}`,
-  );
-  panelState.cachedAnswers = result.answers;
-  const target = document.querySelector('#cached-answers-list');
-  target.replaceChildren();
-  result.answers.forEach((answer) => {
-    const item = createListItem(
-      answer.canonicalQuestion,
-      `${answer.category} · ${answer.sourceType} · ${answer.status} · ${answer.hitCount} usos · ${answer.apiCallsSaved} llamadas evitadas · actualizado ${safeDate(answer.updatedAt)} · ${answer.botId}`,
-    );
-    item.querySelector('.meta').append(node('p', answer.answer));
-    const sourceText =
-      answer.knowledgeSourceIds.length > 0
-        ? `Fuentes oficiales: ${answer.knowledgeSourceIds.join(', ')}`
-        : 'Sin fuentes vinculadas';
-    item.querySelector('.meta').append(node('p', sourceText, 'muted'));
-    if (answer.variants.length > 0)
-      item
-        .querySelector('.meta')
-        .append(node('p', `Variantes: ${answer.variants.join(' · ')}`, 'muted'));
-    const actions = node('div', undefined, 'actions wrap');
-    actions.append(
-      actionButton('Aprobar', 'secondary', () =>
-        cachedAnswerAction(answer.id, { action: 'approve' }),
-      ),
-      actionButton('Editar', 'secondary', async () => {
-        const edited = window.prompt('Edita la respuesta:', answer.answer);
-        if (edited === null || edited.trim() === '') return;
-        const category = window.prompt('Categoría:', answer.category);
-        if (category === null || category.trim() === '') return;
-        await cachedAnswerAction(answer.id, { action: 'edit', answer: edited, category });
-      }),
-      actionButton('Desactivar', 'secondary', () =>
-        cachedAnswerAction(answer.id, { action: 'disable' }),
-      ),
-      actionButton('Convertir en FAQ', 'secondary', () =>
-        cachedAnswerAction(answer.id, { action: 'convert_faq' }),
-      ),
-      actionButton('Agregar variante', 'secondary', async () => {
-        const variant = window.prompt('Escribe una variante equivalente de la pregunta:');
-        if (variant?.trim())
-          await cachedAnswerAction(answer.id, { action: 'add_variant', variant });
-      }),
-      actionButton('Invalidar', 'secondary', () =>
-        cachedAnswerAction(answer.id, { action: 'invalidate' }),
-      ),
-      actionButton('Regenerar en próxima consulta', 'secondary', () =>
-        cachedAnswerAction(answer.id, { action: 'regenerate' }),
-      ),
-      actionButton('Ver fuentes', 'secondary', async () => {
-        const details = await panelApi(
-          `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/cached-answers/${answer.id}`,
-          {
-            method: 'PATCH',
-            body: JSON.stringify({ action: 'view_sources' }),
-          },
-        );
-        notify(
-          details.sourceIds.length > 0
-            ? `Fuentes oficiales: ${details.sourceIds.join(', ')}`
-            : 'Esta respuesta no tiene fuentes vinculadas.',
-        );
-      }),
-      actionButton('Eliminar', 'danger', async () => {
-        if (!window.confirm('¿Eliminar esta respuesta guardada?')) return;
-        await panelApi(
-          `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/cached-answers/${answer.id}`,
-          { method: 'DELETE' },
-        );
-        await loadCachedAnswers();
-        notify('Respuesta eliminada.');
-      }),
-    );
-    item.append(actions);
-    target.append(item);
-  });
-  if (result.answers.length === 0)
-    target.append(emptyState('No hay respuestas guardadas para esta búsqueda.'));
+function resetCachedAnswerForm() {
+  const form = document.querySelector('#cached-answer-form');
+  form.reset();
+  form.elements.id.value = '';
+  form.elements.category.value = 'General';
+  form.elements.canonicalQuestion.readOnly = false;
+  document.querySelector('#cached-answer-form-title').textContent = 'Crear respuesta';
 }
 
-async function cachedAnswerAction(id, payload) {
-  await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/cached-answers/${id}`, {
+function openCachedAnswer(answer = null) {
+  const form = document.querySelector('#cached-answer-form');
+  resetCachedAnswerForm();
+  if (answer) {
+    form.elements.id.value = answer.id;
+    form.elements.canonicalQuestion.value = answer.canonicalQuestion;
+    form.elements.canonicalQuestion.readOnly = true;
+    form.elements.answer.value = answer.answer;
+    form.elements.category.value = answer.category;
+    form.elements.sourceType.value = answer.sourceType === 'MANUAL' ? 'MANUAL' : 'ADMIN_FAQ';
+    form.elements.variants.value = answer.variants.join('\n');
+    document.querySelector('#cached-answer-form-title').textContent = 'Editar respuesta';
+  }
+  showPanel(form, { focus: true });
+}
+
+async function cachedAnswerAction(answer, payload, successMessage = 'Respuesta actualizada.') {
+  await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/cached-answers/${answer.id}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
   });
   await loadCachedAnswers(document.querySelector('#cached-answer-search').elements.search.value);
-  notify('Respuesta guardada actualizada.');
+  notify(successMessage);
 }
 
-function fillKnowledgeEntry(entry) {
-  const form = document.querySelector('#knowledge-entry-form');
-  ['id', 'title', 'categoryId', 'content', 'priority'].forEach((field) => {
-    form.elements[field].value = entry[field];
-  });
-  form.elements.keywords.value = entry.keywords.join('\n');
-  form.elements.synonyms.value = entry.synonyms.join('\n');
-  form.elements.internalSource.value = entry.internalSource || '';
-  form.elements.enabled.checked = entry.enabled;
-  updateKnowledgePriorityDisplay(entry.priority);
-  const title = document.querySelector('#knowledge-entry-form-title');
-  if (title) title.textContent = 'Editar información';
-  form.classList.remove('hidden');
-  form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  window.setTimeout(() => form.elements.title.focus(), 250);
+async function loadCachedAnswers(search = '') {
+  if (!state.selectedBotId) return;
+  const target = document.querySelector('#cached-answers-list');
+  setLoading(target, 'Cargando respuestas…');
+  const suffix = search ? `?search=${encodeURIComponent(search)}` : '';
+  const result = await api(
+    `/api/bots/${encodeURIComponent(state.selectedBotId)}/cached-answers${suffix}`,
+  );
+  state.cachedAnswers = result.answers;
+  if (result.answers.length === 0) {
+    renderEmpty(
+      target,
+      search ? 'No encontramos resultados' : 'Todavía no hay respuestas',
+      search
+        ? 'Prueba con otra palabra o limpia la búsqueda.'
+        : 'Crea una respuesta aprobada para comenzar.',
+      search ? undefined : actionButton('Crear respuesta', '', () => openCachedAnswer()),
+    );
+    return;
+  }
+
+  target.replaceChildren();
+  for (const answer of result.answers) {
+    const row = listRow(
+      answer.canonicalQuestion,
+      `${answer.category} · ${answerStatusLabels[answer.status] || 'Guardada'} · ${answer.hitCount} uso${answer.hitCount === 1 ? '' : 's'}`,
+    );
+    row.querySelector('.list-row__content').append(element('p', { text: answer.answer }));
+    const actions = element('div', { className: 'button-row' });
+    actions.append(
+      actionButton('Editar', 'secondary', () => openCachedAnswer(answer)),
+      createMoreMenu([
+        {
+          label: 'Aprobar',
+          action: () => cachedAnswerAction(answer, { action: 'approve' }, 'Respuesta aprobada.'),
+        },
+        {
+          label: 'Desactivar',
+          action: () => cachedAnswerAction(answer, { action: 'disable' }, 'Respuesta desactivada.'),
+        },
+        {
+          label: 'Agregar variante',
+          action: async () => {
+            const input = await confirmAction({
+              title: 'Agregar otra forma de preguntar',
+              description: 'Escribe una pregunta equivalente que deba usar la misma respuesta.',
+              valueLabel: 'Variante',
+              valueRows: 2,
+              confirmLabel: 'Agregar',
+            });
+            if (!input?.value) return;
+            await cachedAnswerAction(answer, { action: 'add_variant', variant: input.value });
+          },
+        },
+        {
+          label: 'Revisar en la próxima consulta',
+          action: () => cachedAnswerAction(answer, { action: 'regenerate' }),
+        },
+        {
+          label: 'Ver fuentes',
+          action: async () => {
+            const details = await api(
+              `/api/bots/${encodeURIComponent(state.selectedBotId)}/cached-answers/${answer.id}`,
+              { method: 'PATCH', body: JSON.stringify({ action: 'view_sources' }) },
+            );
+            notify(
+              details.sourceIds.length
+                ? `${details.sourceIds.length} fuente${details.sourceIds.length === 1 ? '' : 's'} vinculada${details.sourceIds.length === 1 ? '' : 's'}.`
+                : 'Esta respuesta no tiene fuentes vinculadas.',
+              'info',
+            );
+          },
+        },
+        {
+          label: 'Eliminar',
+          danger: true,
+          action: async () => {
+            const confirmation = await confirmAction({
+              title: 'Eliminar respuesta',
+              description: 'La respuesta dejará de estar disponible inmediatamente.',
+              confirmLabel: 'Eliminar',
+              danger: true,
+            });
+            if (!confirmation) return;
+            await api(
+              `/api/bots/${encodeURIComponent(state.selectedBotId)}/cached-answers/${answer.id}`,
+              { method: 'DELETE' },
+            );
+            await loadCachedAnswers();
+            notify('Respuesta eliminada.');
+          },
+        },
+      ]),
+    );
+    row.append(actions);
+    target.append(row);
+  }
+}
+
+function replaceOptions(select, items, valueField, labelField, emptyLabel, resolver) {
+  if (!select) return;
+  const previous = select.value;
+  select.replaceChildren();
+  if (emptyLabel !== undefined) select.add(new window.Option(emptyLabel, ''));
+  for (const item of items) {
+    select.add(
+      new window.Option(resolver ? resolver(item) : item[labelField], String(item[valueField])),
+    );
+  }
+  if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+}
+
+function clearMenuForm() {
+  const form = document.querySelector('#menu-form');
+  form.reset();
+  form.elements.id.value = '';
+  form.elements.expirationMinutes.value = 15;
+  form.elements.enabled.checked = true;
+  document.querySelector('#menu-form-title').textContent = 'Crear menú';
+}
+
+function openMenu(menu = null) {
+  const form = document.querySelector('#menu-form');
+  clearMenuForm();
+  if (menu) {
+    for (const field of ['id', 'title', 'message', 'helpText', 'expirationMinutes']) {
+      form.elements[field].value = menu[field];
+    }
+    form.elements.parentMenuId.value = menu.parentMenuId || '';
+    form.elements.enabled.checked = menu.enabled;
+    form.elements.isInitial.checked = menu.isInitial;
+    document.querySelector('#menu-form-title').textContent = 'Editar menú';
+  }
+  showPanel(form, { focus: true });
+}
+
+function createActionField(labelText, control) {
+  const label = element('label', { text: labelText });
+  label.append(control);
+  return label;
+}
+
+function renderMenuActionFields(payload = {}) {
+  const form = document.querySelector('#menu-option-form');
+  const actionType = form.elements.actionType.value;
+  const target = document.querySelector('#menu-action-fields');
+  target.replaceChildren();
+
+  if (actionType === 'text') {
+    const textarea = element('textarea', { attributes: { rows: '4', maxlength: '600' } });
+    textarea.dataset.actionField = 'text';
+    textarea.required = true;
+    textarea.value = typeof payload.text === 'string' ? payload.text : '';
+    target.append(createActionField('Mensaje que verá la persona', textarea));
+    return;
+  }
+
+  const references = {
+    catalog_item: [state.catalogItems, 'name', 'Producto o servicio'],
+    catalog_category: [state.catalogCategories, 'name', 'Categoría'],
+    media: [state.mediaAssets, 'caption', 'Imagen'],
+    submenu: [state.menus, 'title', 'Menú de destino'],
+  };
+  if (references[actionType]) {
+    const [items, labelField, labelText] = references[actionType];
+    const select = document.createElement('select');
+    select.dataset.actionField = 'id';
+    select.required = true;
+    replaceOptions(
+      select,
+      items,
+      'id',
+      labelField,
+      'Selecciona una opción',
+      (item) => item[labelField] || `${labelText} ${item.id}`,
+    );
+    select.value = payload.id ? String(payload.id) : '';
+    target.append(createActionField(labelText, select));
+    return;
+  }
+
+  if (['knowledge', 'ai', 'payments', 'shipping'].includes(actionType)) {
+    const input = document.createElement('input');
+    input.dataset.actionField = 'query';
+    input.maxLength = 300;
+    input.value = typeof payload.query === 'string' ? payload.query : '';
+    input.placeholder = 'Si lo dejas vacío, se usará el nombre de la opción.';
+    target.append(createActionField('Tema que debe buscar', input));
+    return;
+  }
+
+  if (['human_assistance', 'reservation_request'].includes(actionType)) {
+    const input = document.createElement('input');
+    input.dataset.actionField = 'interval';
+    input.maxLength = 160;
+    input.value = typeof payload.interval === 'string' ? payload.interval : '';
+    input.placeholder = 'Ejemplo: durante la tarde';
+    target.append(createActionField('Horario sugerido (opcional)', input));
+    return;
+  }
+
+  target.append(
+    element('p', {
+      className: 'form-help',
+      text: 'Esta acción no necesita información adicional.',
+    }),
+  );
+}
+
+function menuActionPayload() {
+  const field = document.querySelector('#menu-action-fields [data-action-field]');
+  if (!field || field.value.trim() === '') return {};
+  return field.dataset.actionField === 'id'
+    ? { id: Number(field.value) }
+    : { [field.dataset.actionField]: field.value.trim() };
+}
+
+function resetMenuOptionForm() {
+  const form = document.querySelector('#menu-option-form');
+  form.reset();
+  form.elements.id.value = '';
+  form.elements.order.value = 1;
+  form.elements.enabled.checked = true;
+  document.querySelector('#menu-option-form-title').textContent = 'Agregar opción';
+  renderMenuActionFields();
+}
+
+function openMenuOption(option = null) {
+  const form = document.querySelector('#menu-option-form');
+  resetMenuOptionForm();
+  if (option) {
+    for (const field of ['id', 'menuId', 'label', 'order', 'actionType']) {
+      form.elements[field].value = option[field];
+    }
+    form.elements.aliases.value = option.aliases.join('\n');
+    form.elements.enabled.checked = option.enabled;
+    document.querySelector('#menu-option-form-title').textContent = 'Editar opción';
+    renderMenuActionFields(option.actionPayload);
+  }
+  showPanel(form, { focus: true });
 }
 
 async function loadMenus() {
-  if (!panelState.selectedBotId) return;
-  const result = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/menus`);
-  panelState.menus = result.menus;
-  panelState.menuOptions = result.options;
-  const initialMenu = result.menus.find((menu) => menu.isInitial && menu.enabled);
-  const activeOptions =
-    initialMenu === undefined
-      ? 0
-      : result.options.filter((option) => option.menuId === initialMenu.id && option.enabled)
-          .length;
-  updateSetupState(
-    '#setup-menu-state',
-    initialMenu === undefined
-      ? 'Falta el menú principal'
-      : `${activeOptions} opci${activeOptions === 1 ? 'ón' : 'ones'} activa${activeOptions === 1 ? '' : 's'}`,
-    initialMenu !== undefined && activeOptions > 0,
-  );
-  replaceSelectOptions(
+  if (!state.selectedBotId) return;
+  const menusTarget = document.querySelector('#menus-list');
+  setLoading(menusTarget, 'Cargando menús…');
+  const result = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/menus`);
+  state.menus = result.menus;
+  state.menuOptions = result.options;
+  replaceOptions(
     document.querySelector('#menu-form').elements.parentMenuId,
     result.menus,
     'id',
     'title',
-    'Sin menú padre',
+    'Ninguno',
   );
-  replaceSelectOptions(
+  replaceOptions(
     document.querySelector('#menu-option-form').elements.menuId,
     result.menus,
     'id',
     'title',
   );
-  const menusTarget = document.querySelector('#menus-list');
-  menusTarget.replaceChildren();
-  result.menus.forEach((menu) => {
-    const item = createListItem(
-      menu.title,
-      `${menu.isInitial ? 'Menú inicial · ' : ''}${menu.enabled ? 'Activo' : 'Inactivo'} · expira en ${menu.expirationMinutes} min`,
+  renderMenuActionFields();
+
+  if (result.menus.length === 0) {
+    renderEmpty(
+      menusTarget,
+      'Todavía no hay menús',
+      'Crea un menú inicial para guiar a tus clientes.',
+      actionButton('Crear menú', '', () => openMenu()),
     );
-    const actions = node('div', undefined, 'actions');
-    actions.append(actionButton('Editar', 'secondary', () => fillMenu(menu)));
-    if (!menu.isInitial)
-      actions.append(
-        actionButton('Eliminar', 'danger', async () => {
-          if (!window.confirm('¿Eliminar este menú y sus opciones?')) return;
-          await panelApi(
-            `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/menus/${menu.id}`,
-            { method: 'DELETE' },
-          );
-          await loadMenus();
-        }),
+  } else {
+    menusTarget.replaceChildren();
+    for (const menu of result.menus) {
+      const row = listRow(
+        menu.title,
+        `${menu.isInitial ? 'Menú inicial · ' : ''}${menu.enabled ? 'Activo' : 'Inactivo'} · ${menu.expirationMinutes} min`,
       );
-    item.append(actions);
-    menusTarget.append(item);
-  });
+      const options = [
+        { label: 'Editar', action: () => openMenu(menu) },
+        ...(!menu.isInitial
+          ? [
+              {
+                label: 'Eliminar',
+                danger: true,
+                action: async () => {
+                  const confirmation = await confirmAction({
+                    title: 'Eliminar menú',
+                    description: `También se eliminarán las opciones de “${menu.title}”.`,
+                    confirmLabel: 'Eliminar',
+                    danger: true,
+                  });
+                  if (!confirmation) return;
+                  await api(
+                    `/api/bots/${encodeURIComponent(state.selectedBotId)}/menus/${menu.id}`,
+                    { method: 'DELETE' },
+                  );
+                  await loadMenus();
+                  notify('Menú eliminado.');
+                },
+              },
+            ]
+          : []),
+      ];
+      row.append(createMoreMenu(options));
+      menusTarget.append(row);
+    }
+  }
+
   const optionsTarget = document.querySelector('#menu-options-list');
+  if (result.options.length === 0) {
+    renderEmpty(
+      optionsTarget,
+      'Todavía no hay opciones',
+      result.menus.length ? 'Agrega una opción a uno de tus menús.' : 'Crea primero un menú.',
+      result.menus.length ? actionButton('Agregar opción', '', () => openMenuOption()) : undefined,
+    );
+    return;
+  }
   optionsTarget.replaceChildren();
-  result.options.forEach((option) => {
+  for (const option of result.options) {
     const menu = result.menus.find((candidate) => candidate.id === option.menuId);
-    const item = createListItem(
+    const row = listRow(
       `${option.order}. ${option.label}`,
-      `${menu?.title || 'Menú no disponible'} · ${option.actionType} · ${option.enabled ? 'Activa' : 'Inactiva'}`,
+      `${menu?.title || 'Menú no disponible'} · ${actionLabels[option.actionType] || option.actionType} · ${option.enabled ? 'Activa' : 'Inactiva'}`,
     );
-    const actions = node('div', undefined, 'actions');
-    actions.append(
-      actionButton('Editar', 'secondary', () => fillMenuOption(option)),
-      actionButton('Eliminar', 'danger', async () => {
-        if (!window.confirm('¿Eliminar esta opción?')) return;
-        await panelApi(
-          `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/menu-options/${option.id}`,
-          { method: 'DELETE' },
-        );
-        await loadMenus();
-      }),
+    row.append(
+      createMoreMenu([
+        { label: 'Editar', action: () => openMenuOption(option) },
+        {
+          label: 'Eliminar',
+          danger: true,
+          action: async () => {
+            const confirmation = await confirmAction({
+              title: 'Eliminar opción',
+              description: `“${option.label}” dejará de aparecer en el menú.`,
+              confirmLabel: 'Eliminar',
+              danger: true,
+            });
+            if (!confirmation) return;
+            await api(
+              `/api/bots/${encodeURIComponent(state.selectedBotId)}/menu-options/${option.id}`,
+              { method: 'DELETE' },
+            );
+            await loadMenus();
+            notify('Opción eliminada.');
+          },
+        },
+      ]),
     );
-    item.append(actions);
-    optionsTarget.append(item);
-  });
+    optionsTarget.append(row);
+  }
 }
 
-function fillMenu(menu) {
-  const form = document.querySelector('#menu-form');
-  ['id', 'title', 'message', 'helpText', 'expirationMinutes'].forEach((field) => {
-    form.elements[field].value = menu[field];
-  });
-  form.elements.parentMenuId.value = menu.parentMenuId || '';
-  form.elements.enabled.checked = menu.enabled;
-  form.elements.isInitial.checked = menu.isInitial;
-}
-
-function fillMenuOption(option) {
-  const form = document.querySelector('#menu-option-form');
-  ['id', 'menuId', 'label', 'order', 'actionType'].forEach((field) => {
-    form.elements[field].value = option[field];
-  });
-  form.elements.aliases.value = option.aliases.join('\n');
-  form.elements.actionPayload.value = JSON.stringify(option.actionPayload, null, 2);
-  form.elements.enabled.checked = option.enabled;
-}
-
-async function loadCatalog() {
-  if (!panelState.selectedBotId) return;
-  const result = await panelApi(
-    `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/catalog`,
-  );
-  panelState.catalogCategories = result.categories;
-  panelState.catalogItems = result.items;
-  const categoriesTarget = document.querySelector('#catalog-categories');
-  categoriesTarget.replaceChildren();
-  result.categories.forEach((category) => {
-    const item = createListItem(
-      category.name,
-      `${category.description || 'Sin descripción'} · ${category.enabled ? 'Activa' : 'Inactiva'}`,
-    );
-    item.append(actionButton('Editar', 'secondary', () => fillCatalogCategory(category)));
-    categoriesTarget.append(item);
-  });
-  replaceSelectOptions(
-    document.querySelector('#catalog-item-form').elements.categoryId,
-    result.categories,
-    'id',
-    'name',
-    'Sin categoría',
-  );
-  replaceSelectOptions(
-    document.querySelector('#catalog-item-form').elements.primaryMediaId,
-    panelState.mediaAssets,
-    'id',
-    'caption',
-    'Sin imagen',
-    (asset) => asset.caption || `Imagen ${asset.id}`,
-  );
-  const itemsTarget = document.querySelector('#catalog-items');
-  itemsTarget.replaceChildren();
-  if (result.items.length === 0) itemsTarget.append(emptyState('No hay productos o servicios.'));
-  result.items.forEach((itemData) => {
-    const price =
-      itemData.priceAmount === null
-        ? 'Precio no informado'
-        : `${formatMoney(itemData.priceAmount, itemData.currency)}`;
-    const item = createListItem(
-      itemData.name,
-      `${itemData.code} · ${price} · ${itemData.availability || 'Disponibilidad no informada'} · ${itemData.enabled ? 'Activo' : 'Inactivo'}`,
-    );
-    const actions = node('div', undefined, 'actions');
-    actions.append(
-      actionButton('Editar', 'secondary', () => fillCatalogItem(itemData)),
-      actionButton('Eliminar', 'danger', async () => {
-        if (!window.confirm('¿Eliminar este producto o servicio?')) return;
-        await panelApi(
-          `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/catalog/items/${itemData.id}`,
-          { method: 'DELETE' },
-        );
-        await loadCatalog();
-      }),
-    );
-    item.append(actions);
-    itemsTarget.append(item);
-  });
-  replaceSelectOptions(
-    document.querySelector('#manual-test-catalog'),
-    result.items.filter((item) => item.enabled),
-    'id',
-    'name',
-  );
-}
-
-function formatMoney(amount, currency) {
+function formatMoney(amount, currency = 'CLP') {
+  if (amount === null || amount === undefined) return 'Precio no informado';
   return new Intl.NumberFormat('es-CL', { style: 'currency', currency }).format(amount / 100);
+}
+
+function resetCatalogItemForm() {
+  const form = document.querySelector('#catalog-item-form');
+  form.reset();
+  form.elements.id.value = '';
+  form.elements.currency.value = 'CLP';
+  form.elements.enabled.checked = true;
+  document.querySelector('#catalog-item-title').textContent = 'Agregar producto o servicio';
+}
+
+function openCatalogItem(item = null) {
+  const form = document.querySelector('#catalog-item-form');
+  resetCatalogItemForm();
+  if (item) {
+    for (const field of [
+      'id',
+      'name',
+      'code',
+      'description',
+      'currency',
+      'presentation',
+      'size',
+      'availability',
+    ]) {
+      form.elements[field].value = item[field] ?? '';
+    }
+    form.elements.price.value = item.priceAmount === null ? '' : item.priceAmount / 100;
+    form.elements.offerPrice.value =
+      item.offerPriceAmount === null ? '' : item.offerPriceAmount / 100;
+    form.elements.informedStock.value = item.informedStock ?? '';
+    form.elements.categoryId.value = item.categoryId || '';
+    form.elements.primaryMediaId.value = item.primaryMediaId || '';
+    form.elements.variants.value = item.variants.join('\n');
+    form.elements.authorizedLink.value = item.authorizedLink || '';
+    form.elements.enabled.checked = item.enabled;
+    document.querySelector('#catalog-item-title').textContent = 'Editar producto o servicio';
+  }
+  showPanel(form, { focus: true });
 }
 
 function fillCatalogCategory(category) {
@@ -1006,30 +1206,104 @@ function fillCatalogCategory(category) {
   form.elements.name.value = category.name;
   form.elements.description.value = category.description;
   form.elements.enabled.checked = category.enabled;
+  form.elements.name.focus();
 }
 
-function fillCatalogItem(item) {
-  const form = document.querySelector('#catalog-item-form');
-  ['id', 'name', 'code', 'description', 'currency', 'presentation', 'size', 'availability'].forEach(
-    (field) => {
-      form.elements[field].value = item[field] ?? '';
-    },
+async function loadCatalog() {
+  if (!state.selectedBotId) return;
+  const target = document.querySelector('#catalog-items');
+  setLoading(target, 'Cargando catálogo…');
+  const result = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/catalog`);
+  state.catalogCategories = result.categories;
+  state.catalogItems = result.items;
+  replaceOptions(
+    document.querySelector('#catalog-item-form').elements.categoryId,
+    result.categories,
+    'id',
+    'name',
+    'Sin categoría',
   );
-  ['priceAmount', 'offerPriceAmount', 'informedStock'].forEach((field) => {
-    form.elements[field].value = item[field] ?? '';
-  });
-  form.elements.categoryId.value = item.categoryId || '';
-  form.elements.primaryMediaId.value = item.primaryMediaId || '';
-  form.elements.variants.value = item.variants.join('\n');
-  form.elements.authorizedLink.value = item.authorizedLink || '';
-  form.elements.enabled.checked = item.enabled;
+
+  const categoriesTarget = document.querySelector('#catalog-categories');
+  categoriesTarget.replaceChildren();
+  if (result.categories.length === 0) {
+    renderEmpty(
+      categoriesTarget,
+      'Todavía no hay categorías',
+      'Puedes crear productos sin categoría o agregar una aquí.',
+    );
+  } else {
+    for (const category of result.categories) {
+      const count = result.items.filter((item) => item.categoryId === category.id).length;
+      const row = listRow(
+        category.name,
+        `${count} producto${count === 1 ? '' : 's'} · ${category.enabled ? 'Activa' : 'Inactiva'}`,
+      );
+      row.append(actionButton('Editar', 'secondary', () => fillCatalogCategory(category)));
+      categoriesTarget.append(row);
+    }
+  }
+
+  if (result.items.length === 0) {
+    renderEmpty(
+      target,
+      'Todavía no hay productos ni servicios',
+      'Agrega el primer elemento del catálogo.',
+      actionButton('Agregar producto o servicio', '', () => openCatalogItem()),
+    );
+    return;
+  }
+
+  target.replaceChildren();
+  for (const item of result.items) {
+    const card = element('article', { className: 'catalog-card' });
+    if (item.primaryMediaId) {
+      const image = document.createElement('img');
+      image.className = 'catalog-card__image';
+      image.src = `/api/bots/${encodeURIComponent(state.selectedBotId)}/media/${item.primaryMediaId}/file`;
+      image.alt = item.name;
+      image.loading = 'lazy';
+      card.append(image);
+    }
+    card.append(
+      statusBadge(item.enabled ? 'Disponible' : 'Inactivo', item.enabled ? 'success' : 'neutral'),
+      element('h3', { text: item.name }),
+      element('p', { className: 'muted', text: item.description || 'Sin descripción.' }),
+      element('p', {
+        className: 'catalog-card__price',
+        text: formatMoney(item.offerPriceAmount ?? item.priceAmount, item.currency),
+      }),
+    );
+    const actions = element('div', { className: 'button-row' });
+    actions.append(
+      actionButton('Editar', 'secondary', () => openCatalogItem(item)),
+      actionButton('Eliminar', 'danger', async () => {
+        const confirmation = await confirmAction({
+          title: 'Eliminar del catálogo',
+          description: `“${item.name}” dejará de estar disponible.`,
+          confirmLabel: 'Eliminar',
+          danger: true,
+        });
+        if (!confirmation) return;
+        await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/catalog/items/${item.id}`, {
+          method: 'DELETE',
+        });
+        await loadCatalog();
+        notify('Elemento eliminado del catálogo.');
+      }),
+    );
+    card.append(actions);
+    target.append(card);
+  }
 }
 
 async function loadMedia() {
-  if (!panelState.selectedBotId) return;
-  const result = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/media`);
-  panelState.mediaAssets = result.assets;
-  replaceSelectOptions(
+  if (!state.selectedBotId) return;
+  const target = document.querySelector('#media-list');
+  setLoading(target, 'Cargando imágenes…');
+  const result = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/media`);
+  state.mediaAssets = result.assets;
+  replaceOptions(
     document.querySelector('#catalog-item-form').elements.primaryMediaId,
     result.assets,
     'id',
@@ -1037,58 +1311,41 @@ async function loadMedia() {
     'Sin imagen',
     (asset) => asset.caption || `Imagen ${asset.id}`,
   );
-  const target = document.querySelector('#media-list');
+  if (result.assets.length === 0) {
+    renderEmpty(
+      target,
+      'Todavía no hay imágenes',
+      'Sube una imagen oficial para utilizarla en el catálogo o los menús.',
+    );
+    return;
+  }
   target.replaceChildren();
-  if (result.assets.length === 0) target.append(emptyState('No hay imágenes oficiales.'));
-  result.assets.forEach((asset) => {
-    const card = node('article', undefined, 'card media-card');
+  for (const asset of result.assets) {
+    const card = element('article', { className: 'media-card' });
     const image = document.createElement('img');
-    image.src = `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/media/${asset.id}/file`;
+    image.src = `/api/bots/${encodeURIComponent(state.selectedBotId)}/media/${asset.id}/file`;
     image.alt = asset.caption || 'Imagen oficial';
     image.loading = 'lazy';
     card.append(
       image,
-      node('p', asset.caption || 'Sin texto', 'muted'),
-      node('small', `${Math.round(asset.byteSize / 1024)} KB`),
-    );
-    card.append(
+      element('h3', { text: asset.caption || 'Imagen sin descripción' }),
+      element('p', { className: 'muted', text: `${Math.round(asset.byteSize / 1024)} KB` }),
       actionButton('Eliminar', 'danger', async () => {
-        if (!window.confirm('¿Mover esta imagen a la papelera recuperable?')) return;
-        await panelApi(
-          `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/media/${asset.id}`,
-          { method: 'DELETE' },
-        );
+        const confirmation = await confirmAction({
+          title: 'Eliminar imagen',
+          description: 'La imagen dejará de estar disponible para productos, menús y respuestas.',
+          confirmLabel: 'Eliminar',
+          danger: true,
+        });
+        if (!confirmation) return;
+        await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/media/${asset.id}`, {
+          method: 'DELETE',
+        });
         await Promise.all([loadMedia(), loadCatalog()]);
+        notify('Imagen eliminada.');
       }),
     );
     target.append(card);
-  });
-  replaceSelectOptions(
-    document.querySelector('#manual-test-media'),
-    result.assets.filter((asset) => asset.enabled),
-    'id',
-    'caption',
-    undefined,
-    (asset) => asset.caption || `Imagen ${asset.id}`,
-  );
-}
-
-async function loadHours() {
-  if (!panelState.selectedBotId) return;
-  const result = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/hours`);
-  const target = document.querySelector('#hours-editor');
-  target.replaceChildren();
-  result.hours.forEach((hour) => addHourRow(hour));
-  if (result.hours.length === 0) {
-    for (let weekday = 1; weekday <= 5; weekday += 1)
-      addHourRow({
-        weekday,
-        localDate: null,
-        openingTime: '09:00',
-        closingTime: '18:00',
-        closed: false,
-        label: '',
-      });
   }
 }
 
@@ -1102,35 +1359,39 @@ function addHourRow(
     label: '',
   },
 ) {
-  const row = node('article', undefined, 'list-item hour-row');
-  const fields = node('div', undefined, 'hour-fields');
-  const weekday = document.createElement('select');
-  weekday.dataset.field = 'weekday';
-  dayLabels.forEach((label, index) => weekday.add(new window.Option(label, String(index))));
-  weekday.value = hour.weekday === null ? '' : String(hour.weekday);
-  const date = document.createElement('input');
-  date.type = 'date';
-  date.dataset.field = 'localDate';
-  date.value = hour.localDate || '';
-  const opening = document.createElement('input');
-  opening.type = 'time';
-  opening.dataset.field = 'openingTime';
-  opening.value = hour.openingTime || '';
-  const closing = document.createElement('input');
-  closing.type = 'time';
-  closing.dataset.field = 'closingTime';
-  closing.value = hour.closingTime || '';
-  const label = document.createElement('input');
-  label.dataset.field = 'label';
-  label.placeholder = 'Etiqueta o feriado';
-  label.value = hour.label || '';
-  const closedLabel = node('label', undefined, 'toggle');
+  const row = element('article', { className: 'hour-row' });
+  const fields = element('div', { className: 'hour-fields' });
+  const values = [
+    ['Día', 'select', 'weekday'],
+    ['Fecha especial', 'date', 'localDate'],
+    ['Apertura', 'time', 'openingTime'],
+    ['Cierre', 'time', 'closingTime'],
+    ['Etiqueta', 'text', 'label'],
+  ];
+  for (const [labelText, type, field] of values) {
+    const label = element('label', { text: labelText });
+    let control;
+    if (type === 'select') {
+      control = document.createElement('select');
+      dayLabels.forEach((day, index) => control.add(new window.Option(day, String(index))));
+      control.value = hour.weekday === null ? '1' : String(hour.weekday);
+    } else {
+      control = document.createElement('input');
+      control.type = type;
+      control.value = hour[field] || '';
+      if (field === 'label') control.placeholder = 'Ejemplo: Feriado';
+    }
+    control.dataset.field = field;
+    label.append(control);
+    fields.append(label);
+  }
+  const closedLabel = element('label', { className: 'check-row' });
   const closed = document.createElement('input');
   closed.type = 'checkbox';
   closed.dataset.field = 'closed';
   closed.checked = hour.closed;
-  closedLabel.append(closed, document.createTextNode(' Cerrado'));
-  fields.append(weekday, date, opening, closing, label, closedLabel);
+  closedLabel.append(closed, element('span', { text: 'Cerrado' }));
+  fields.append(closedLabel);
   row.append(
     fields,
     actionButton('Quitar', 'danger', () => row.remove()),
@@ -1138,20 +1399,59 @@ function addHourRow(
   document.querySelector('#hours-editor').append(row);
 }
 
-async function loadRequests() {
-  if (!panelState.selectedBotId) return;
-  const result = await panelApi(
-    `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/requests`,
-  );
-  const target = document.querySelector('#requests-list');
+async function loadHours() {
+  if (!state.selectedBotId) return;
+  const target = document.querySelector('#hours-editor');
+  setLoading(target, 'Cargando horarios…');
+  const result = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/hours`);
   target.replaceChildren();
-  if (result.requests.length === 0) target.append(emptyState('No hay solicitudes de atención.'));
-  result.requests.forEach((request) => {
-    const item = createListItem(
-      `Solicitud ${request.id}`,
-      `${request.localDate} · ${request.requestedInterval || 'Intervalo no indicado'} · chat ${request.chatHash} · usuario ${request.userHash}`,
+  if (result.hours.length === 0) {
+    for (let weekday = 1; weekday <= 5; weekday += 1)
+      addHourRow({
+        weekday,
+        localDate: null,
+        openingTime: '09:00',
+        closingTime: '18:00',
+        closed: false,
+        label: '',
+      });
+    return;
+  }
+  result.hours.forEach((hour) => addHourRow(hour));
+}
+
+function renderRequests() {
+  const target = document.querySelector('#requests-list');
+  const pending = state.requests.filter((request) => request.status === 'pending').length;
+  const attended = state.requests.filter((request) => request.status === 'attended').length;
+  document.querySelector('#requests-pending-count').textContent = String(pending);
+  document.querySelector('#requests-attended-count').textContent = String(attended);
+  const filtered = state.requests.filter((request) => {
+    if (state.requestFilter === 'all') return true;
+    return request.status === state.requestFilter;
+  });
+  if (filtered.length === 0) {
+    renderEmpty(
+      target,
+      state.requestFilter === 'pending'
+        ? 'No hay solicitudes pendientes'
+        : 'No hay solicitudes en esta vista',
+      state.requestFilter === 'pending' ? 'La bandeja está al día.' : 'Prueba con otro filtro.',
     );
-    const controls = node('div', undefined, 'request-controls');
+    return;
+  }
+  target.replaceChildren();
+  for (const request of filtered) {
+    const card = element('article', { className: 'request-card' });
+    const content = element('div');
+    content.append(
+      element('h3', { text: safeHash(request.userHash) }),
+      element('p', {
+        text: `${formatDate(request.createdAt)} · ${request.requestedInterval || 'Horario no indicado'}`,
+      }),
+    );
+    const controls = element('div', { className: 'request-card__controls' });
+    const statusLabel = element('label', { text: 'Estado' });
     const status = document.createElement('select');
     [
       ['pending', 'Pendiente'],
@@ -1161,679 +1461,679 @@ async function loadRequests() {
       ['cancelled', 'Cancelada'],
     ].forEach(([value, label]) => status.add(new window.Option(label, value)));
     status.value = request.status;
+    statusLabel.append(status);
+    const noteLabel = element('label', { text: 'Nota' });
     const note = document.createElement('input');
     note.maxLength = 300;
     note.placeholder = 'Nota breve opcional';
     note.value = request.note;
+    noteLabel.append(note);
     controls.append(
-      status,
-      note,
+      statusLabel,
+      noteLabel,
       actionButton('Guardar', '', async () => {
-        await panelApi(
-          `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/requests/${request.id}`,
-          {
-            method: 'PATCH',
-            body: JSON.stringify({ status: status.value, note: note.value.trim() }),
-          },
-        );
+        await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/requests/${request.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: status.value, note: note.value.trim() }),
+        });
         await loadRequests();
         notify('Solicitud actualizada.');
       }),
     );
-    item.append(controls);
-    target.append(item);
-  });
+    card.append(content, controls);
+    target.append(card);
+  }
 }
 
-async function loadAI() {
-  if (!panelState.selectedBotId) return;
+async function loadRequests() {
+  if (!state.selectedBotId) return;
+  const target = document.querySelector('#requests-list');
+  setLoading(target, 'Cargando solicitudes…');
+  const result = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/requests`);
+  state.requests = result.requests;
+  renderRequests();
+}
+
+async function loadAI({ renderStatistics = false } = {}) {
+  if (!state.selectedBotId) return;
+  const target = document.querySelector('#ai-status-cards');
+  setLoading(target, 'Cargando inteligencia artificial…');
   const [result, global] = await Promise.all([
-    panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai`),
-    panelApi('/api/ai/global-limits'),
+    api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/ai`),
+    api('/api/ai/global-limits'),
   ]);
-  const settings = result.settings;
+  state.ai = result;
+
   const form = document.querySelector('#ai-settings-form');
-  Object.entries(settings).forEach(([field, value]) => {
+  for (const [field, value] of Object.entries(result.settings)) {
     const input = form.elements[field];
-    if (!input) return;
+    if (!input) continue;
     if (input.type === 'checkbox') input.checked = Boolean(value);
     else input.value = value;
-  });
+  }
   form.elements.confirmIncreasedLimits.checked = false;
-  const queueForm = document.querySelector('#ai-queue-settings-form');
-  Object.entries(result.queue.settings).forEach(([field, value]) => {
-    if (queueForm.elements[field]) queueForm.elements[field].value = value;
-  });
-  const globalForm = document.querySelector('#global-ai-limits-form');
-  Object.entries(global.limits).forEach(([field, value]) => {
-    globalForm.elements[field].value = value;
-  });
+
   const credentialForm = document.querySelector('#ai-credential-form');
   credentialForm.elements.mode.value = result.credential.mode;
   credentialForm.elements.apiKey.value = '';
   credentialForm.elements.apiKey.disabled = result.credential.mode !== 'per_bot';
-  setCardGrid('#ai-status-cards', [
-    ['Proveedor', result.status.provider],
-    ['Modelo', result.status.model],
-    ['Clave', result.credential.configured ? 'Clave configurada' : 'No configurada'],
-    ['Estado', result.status.connection],
-    ['Consultas hoy', result.usage.requests],
-    ['Tokens hoy', result.usage.totalTokens],
-    ['Consultas mes', result.usage.monthlyRequests],
-    ['Tokens mes', result.usage.monthlyTokens],
+
+  const queueForm = document.querySelector('#ai-queue-settings-form');
+  for (const [field, value] of Object.entries(result.queue.settings)) {
+    if (queueForm.elements[field]) queueForm.elements[field].value = value;
+  }
+  const globalForm = document.querySelector('#global-ai-limits-form');
+  for (const [field, value] of Object.entries(global.limits)) {
+    if (globalForm.elements[field]) globalForm.elements[field].value = value;
+  }
+
+  renderHealthGrid(target, [
+    {
+      label: 'IA',
+      value: result.settings.enabled ? 'Activa' : 'Inactiva',
+      tone: result.settings.enabled ? 'success' : 'warning',
+    },
+    { label: 'Proveedor', value: providerLabel(result.status.provider), tone: 'neutral' },
+    { label: 'Modelo', value: result.status.model || 'Sin modelo', tone: 'neutral' },
+    {
+      label: 'Estado',
+      value: result.credential.configured ? 'Configurada' : 'Requiere configuración',
+      tone: result.credential.configured ? 'success' : 'warning',
+    },
   ]);
-  const metrics = result.operationalMetrics;
-  setCardGrid('#operational-metrics-cards', [
-    ['Activaciones', metrics.activations],
-    ['Respuestas locales', metrics.localResponses],
-    ['Saludos', metrics.greetings],
-    ['Preguntas frecuentes', metrics.faqs],
-    ['Caché reutilizada', metrics.cacheHits],
-    ['Conocimiento directo', metrics.directKnowledge],
-    ['Llamadas reales a Groq', metrics.aiCalls],
-    ['Groq exitosas', metrics.aiSuccesses],
-    ['Groq fallidas', metrics.aiFailures],
-    ['Rechazos por cuota', metrics.quotaRejections],
-    ['Sin información o fuera de alcance', metrics.noInformation + metrics.outOfScope],
-    ['Llamadas evitadas', metrics.avoidedAICalls],
-  ]);
-  const queue = result.queue;
-  const queueMetrics = queue.metrics;
-  setCardGrid('#ai-queue-cards', [
-    ['Estado de Groq', queue.providerHealth.state || 'NOT_CONFIGURED'],
-    ['Circuito', queue.providerHealth.circuitState || 'CLOSED'],
-    ['Procesándose', queue.processing],
-    ['Esperando', queue.waiting],
-    ['Capacidad de cola', queue.settings.maxQueueSize],
-    ['Concurrencia', queue.settings.maxConcurrent],
-    ['Espera promedio', `${queueMetrics.averageWaitMs} ms`],
-    ['Espera máxima', `${queueMetrics.maximumWaitMs} ms`],
-    ['Exitosas', queueMetrics.completedCount],
-    ['Fallidas', queueMetrics.failedCount],
-    ['Timeouts', queueMetrics.timeoutCount],
-    ['Errores 429', queueMetrics.rateLimitCount],
-    ['Reintentos', queueMetrics.retryCount],
-    ['Cola llena', queueMetrics.rejectedCount],
-    ['Agrupadas', queueMetrics.coalescedCount],
-    ['Último error', queue.providerHealth.lastSafeErrorCode || 'Ninguno'],
+
+  renderMetricGrid('#ai-queue-cards', [
+    { label: 'Procesándose', value: result.queue.processing },
+    { label: 'Esperando', value: result.queue.waiting },
+    { label: 'Exitosas', value: result.queue.metrics.completedCount },
+    { label: 'Fallidas', value: result.queue.metrics.failedCount },
   ]);
   document.querySelector('#ai-queue-simulator').classList.toggle('hidden', !result.developmentMode);
-  document.querySelector('#section-ai .button-link').href =
-    `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/export`;
-  const eventsTarget = document.querySelector('#ai-events');
-  const statisticsTarget = document.querySelector('#statistics-events');
-  eventsTarget.replaceChildren();
-  statisticsTarget.replaceChildren();
-  result.recentEvents.forEach((event) => {
-    const item = createListItem(
-      'Uso de IA',
-      `${safeDate(event.created_at)} · ${event.result}${event.error_code ? ` · ${event.error_code}` : ''} · ${event.total_tokens || 0} tokens`,
-    );
-    eventsTarget.append(item);
-    statisticsTarget.append(item.cloneNode(true));
-  });
-  if (result.recentEvents.length === 0) {
-    eventsTarget.append(emptyState('No hay eventos recientes de IA.'));
-    statisticsTarget.append(emptyState('No hay eventos agregados recientes.'));
-  }
+  document
+    .querySelector('#ai-development-actions')
+    .classList.toggle('hidden', !result.developmentMode);
+
+  if (renderStatistics) renderStatisticsCards(result);
 }
 
-function replaceSelectOptions(select, items, valueField, labelField, emptyLabel, labelResolver) {
-  const previous = select.value;
-  select.replaceChildren();
-  if (emptyLabel !== undefined) select.add(new window.Option(emptyLabel, ''));
-  items.forEach((item) =>
-    select.add(
-      new window.Option(
-        labelResolver ? labelResolver(item) : item[labelField],
-        String(item[valueField]),
-      ),
-    ),
-  );
-  if ([...select.options].some((option) => option.value === previous)) select.value = previous;
-}
-
-async function restartBot(botId = panelState.selectedBotId) {
-  if (!botId) return;
-  await panelApi(`/api/bots/${encodeURIComponent(botId)}/restart`, { method: 'POST', body: '{}' });
-  notify('Configuración de Meta revalidada.');
-  await Promise.all([
-    loadBots(),
-    botId === panelState.selectedBotId ? loadWhatsApp() : Promise.resolve(),
+function renderStatisticsCards(ai = state.ai) {
+  if (!state.bot || !ai) return;
+  const pending = state.requests.filter((request) => request.status === 'pending').length;
+  renderMetricGrid('#statistics-cards', [
+    { label: 'Preguntas hoy', value: ai.usage.requests },
+    { label: 'Respuestas locales', value: ai.operationalMetrics.localResponses },
+    { label: 'Respuestas con IA', value: ai.operationalMetrics.aiSuccesses },
+    { label: 'Respuestas guardadas', value: ai.operationalMetrics.cacheHits },
+    { label: 'Solicitudes humanas', value: pending },
+    { label: 'Actividad registrada', value: state.history.length },
   ]);
 }
 
-async function toggleBot(bot) {
-  const detail = await panelApi(`/api/bots/${encodeURIComponent(bot.id)}`);
-  await panelApi(`/api/bots/${encodeURIComponent(bot.id)}/configuration`, {
-    method: 'PATCH',
-    body: JSON.stringify({
-      mode: 'business',
-      enabled: !detail.bot.enabled,
-      groupsEnabled: false,
-      privateMessagesEnabled: true,
-      realMentionRequired: false,
-      continuedConversationsEnabled: detail.bot.continuedConversationsEnabled,
-      menuType: detail.bot.menuType,
-    }),
-  });
-  await loadBots();
-  notify(detail.bot.enabled ? 'Asistente desactivado.' : 'Asistente activado.');
+async function loadStatistics() {
+  if (!state.selectedBotId) return;
+  const loaders = [loadHistory({ background: true })];
+  if (state.visibleModules.includes('requests')) loaders.push(loadRequests());
+  else state.requests = [];
+  await Promise.all(loaders);
+  await loadAI({ renderStatistics: true });
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function transferCommercialConfiguration(bot) {
-  if (
-    !window.confirm(
-      'Se copiarán menús, productos, imágenes y horarios a Neurobot. No se copiarán la configuración de Meta ni los grupos. El borrador quedará en la papelera. ¿Continuar?',
-    )
-  )
-    return;
-  const confirmationPhrase = window.prompt('Escribe exactamente: TRANSFERIR A NEUROBOT');
-  if (confirmationPhrase === null) return;
-  const password = window.prompt('Escribe la contraseña actual del panel:');
-  if (!password) return;
-  await panelApi(`/api/bots/${encodeURIComponent(bot.id)}/transfer-commercial-to-neurobot`, {
-    method: 'POST',
-    body: JSON.stringify({ password, confirmationPhrase }),
-  });
-  await loadBots();
-  await selectBot('neurobot', 'status');
-  notify('Configuración comercial transferida. La configuración de Meta y los grupos de Neurobot se conservaron.');
+function historyTone(item) {
+  const text = `${item.result || ''} ${item.errorCode || ''} ${item.eventType || ''}`.toLowerCase();
+  if (/fail|error|reject|invalid|blocked|timeout/u.test(text)) return 'error';
+  if (/limit|missing|not_found|warning|out_of_scope|duplicate/u.test(text)) return 'warning';
+  return 'success';
 }
 
-async function sendBotToTrash(bot) {
-  const phone = bot.phoneNumber ? `\nNúmero vinculado: ${bot.phoneNumber}` : '';
-  const confirmationName = window.prompt(
-    `Para enviar este asistente a la papelera, escribe exactamente: ${bot.botName}${phone}`,
-  );
-  if (confirmationName === null) return;
-  const password = window.prompt('Escribe la contraseña actual del panel:');
-  if (!password) return;
-  await panelApi(`/api/bots/${encodeURIComponent(bot.id)}/trash`, {
-    method: 'POST',
-    body: JSON.stringify({ password, confirmationName }),
-  });
-  if (panelState.selectedBotId === bot.id) setGlobalContext('bots');
-  await Promise.all([loadBots(), loadTrash()]);
-  notify('Asistente enviado a la papelera. Puede restaurarse durante 30 días.');
+function historyLabel(item) {
+  return eventLabels[item.eventType] || 'Actividad del asistente';
 }
 
-async function loadTrash() {
-  const result = await panelApi('/api/assistants/trash');
-  const target = document.querySelector('#trash-list');
-  target.replaceChildren();
-  if (result.assistants.length === 0) {
-    target.append(emptyState('La papelera está vacía.'));
+function historySource(item) {
+  if (item.source === 'manual-test') return 'Prueba manual';
+  if (item.source) return 'Automatización';
+  if (item.eventType?.includes('AI_')) return 'Inteligencia artificial';
+  if (item.eventType?.includes('CACHE') || item.eventType?.includes('FAQ')) return 'Respuestas';
+  if (item.eventType?.includes('KNOWLEDGE')) return 'Conocimiento';
+  if (item.eventType?.includes('MENU') || item.eventType?.includes('CATALOG')) return 'Menú';
+  return 'Asistente';
+}
+
+function filteredHistory() {
+  const form = document.querySelector('#history-filters');
+  const search = form.elements.search.value.trim().toLocaleLowerCase('es');
+  const status = form.elements.status.value;
+  const order = form.elements.order.value;
+  const items = state.history.filter((item) => {
+    const tone = historyTone(item);
+    const haystack =
+      `${historyLabel(item)} ${historySource(item)} ${item.userHash || ''} ${item.groupHash || ''}`.toLocaleLowerCase(
+        'es',
+      );
+    return (status === 'all' || tone === status) && (!search || haystack.includes(search));
+  });
+  return items.sort((left, right) => {
+    const comparison = new Date(left.occurredAt).getTime() - new Date(right.occurredAt).getTime();
+    return order === 'asc' ? comparison : -comparison;
+  });
+}
+
+function renderOverviewActivity() {
+  const target = document.querySelector('#overview-activity');
+  const items = state.history.slice(0, 5);
+  if (items.length === 0) {
+    renderEmpty(
+      target,
+      'Todavía no hay actividad',
+      'Los eventos seguros aparecerán aquí cuando el asistente comience a trabajar.',
+    );
     return;
   }
-  result.assistants.forEach((assistant) => {
-    const card = node('article', undefined, 'card bot-card');
-    card.append(
-      node('h3', assistant.botName),
-      node('p', assistant.organizationName),
-      node('p', `Número: ${assistant.phoneNumber || 'Sin vincular'}`, 'muted'),
-      node(
-        'p',
-        `Eliminación programada: ${safeDate(assistant.scheduledPermanentDeletionAt)}`,
-        'muted',
+  target.replaceChildren();
+  for (const item of items) {
+    const row = element('article', { className: 'activity-row' });
+    const content = element('div', { className: 'activity-row__content' });
+    content.append(
+      element('strong', { text: historyLabel(item) }),
+      element('p', { text: `${formatDate(item.occurredAt)} · ${historySource(item)}` }),
+    );
+    row.append(
+      content,
+      statusBadge(
+        historyTone(item) === 'success'
+          ? 'Correcto'
+          : historyTone(item) === 'warning'
+            ? 'Advertencia'
+            : 'Error',
+        historyTone(item),
       ),
     );
-    const actions = node('div', undefined, 'actions');
-    actions.append(
-      actionButton('Restaurar', 'secondary', async () => {
-        await panelApi(`/api/bots/${encodeURIComponent(assistant.id)}/restore`, {
-          method: 'POST',
-          body: JSON.stringify({ confirmed: true }),
-        });
-        await Promise.all([loadBots(), loadTrash()]);
-        notify('Asistente restaurado en estado desactivado.');
-      }),
+    target.append(row);
+  }
+}
+
+function renderHistory() {
+  const body = document.querySelector('#history-table-body');
+  const empty = document.querySelector('#history-empty');
+  const items = filteredHistory();
+  const pageSize = Number(document.querySelector('#history-filters').elements.pageSize.value);
+  const pages = Math.max(1, Math.ceil(items.length / pageSize));
+  state.historyPage = Math.min(state.historyPage, pages);
+  const start = (state.historyPage - 1) * pageSize;
+  const visible = items.slice(start, start + pageSize);
+  body.replaceChildren();
+  empty.classList.toggle('hidden', visible.length > 0);
+  if (visible.length === 0) {
+    empty.replaceChildren(
+      element('h3', { text: 'No hay actividad para estos filtros' }),
+      element('p', { text: 'Cambia la búsqueda o el estado seleccionado.' }),
     );
-    actions.append(
-      actionButton('Eliminar definitivamente', 'danger', async () => {
-        const expected = `ELIMINAR PERMANENTEMENTE ${assistant.botName}`;
-        const phone = assistant.phoneNumber ? `\nNúmero vinculado: ${assistant.phoneNumber}` : '';
-        const confirmationPhrase = window.prompt(
-          `Esta acción no se puede deshacer.${phone}\nEscribe exactamente: ${expected}`,
-        );
-        if (confirmationPhrase === null) return;
-        const password = window.prompt('Escribe la contraseña actual del panel:');
-        if (!password) return;
-        await panelApi(`/api/bots/${encodeURIComponent(assistant.id)}/permanent`, {
-          method: 'DELETE',
-          body: JSON.stringify({ password, confirmationPhrase }),
-        });
-        await loadTrash();
-        notify('Asistente eliminado definitivamente.');
-      }),
+  }
+  for (const item of visible) {
+    const tone = historyTone(item);
+    const row = document.createElement('tr');
+    const values = [
+      ['Fecha', formatDate(item.occurredAt)],
+      ['Usuario', safeHash(item.userHash || item.groupHash)],
+      ['Actividad', historyLabel(item)],
+      ['Fuente', historySource(item)],
+    ];
+    for (const [label, value] of values) {
+      const cell = element('td', { text: value, attributes: { 'data-label': label } });
+      row.append(cell);
+    }
+    const statusCell = element('td', { attributes: { 'data-label': 'Estado' } });
+    statusCell.append(
+      statusBadge(
+        tone === 'success' ? 'Correcto' : tone === 'warning' ? 'Advertencia' : 'Error',
+        tone,
+      ),
     );
-    card.append(actions);
-    target.append(card);
+    row.append(statusCell);
+    body.append(row);
+  }
+  document.querySelector('#history-page-status').textContent =
+    `Página ${state.historyPage} de ${pages}`;
+  document.querySelector('#history-previous').disabled = state.historyPage <= 1;
+  document.querySelector('#history-next').disabled = state.historyPage >= pages;
+}
+
+async function loadHistory({ background = false } = {}) {
+  if (!state.selectedBotId) return;
+  if (!background) {
+    const body = document.querySelector('#history-table-body');
+    body.replaceChildren();
+    document.querySelector('#history-empty').classList.remove('hidden');
+    document
+      .querySelector('#history-empty')
+      .replaceChildren(element('div', { className: 'loading-state', text: 'Cargando historial…' }));
+  }
+  const result = await api(
+    `/api/bots/${encodeURIComponent(state.selectedBotId)}/history?limit=200`,
+  );
+  state.history = result.items;
+  state.historyPage = 1;
+  renderHistory();
+  renderOverviewActivity();
+}
+
+async function testWhatsApp() {
+  const detail = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}`);
+  const connection = detail.runtime?.connection?.state || detail.bot.whatsappStatus;
+  const configured = detail.bot.meta?.configured === true;
+  if (connection === 'connected' && configured) {
+    setStatus('#test-whatsapp-status', 'Correcto', 'success');
+    setTestResult(
+      '#test-whatsapp-result',
+      'WhatsApp Cloud API, el número y el webhook están disponibles.',
+      'success',
+    );
+  } else if (configured) {
+    setStatus('#test-whatsapp-status', 'Advertencia', 'warning');
+    setTestResult(
+      '#test-whatsapp-result',
+      'La configuración existe, pero la conexión no está activa en este momento.',
+      'warning',
+    );
+  } else {
+    setStatus('#test-whatsapp-status', 'Error', 'error');
+    setTestResult(
+      '#test-whatsapp-result',
+      'La integración necesita completar su configuración en el servidor.',
+      'error',
+    );
+  }
+}
+
+async function testAI() {
+  let result;
+  try {
+    result = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/ai/test-connection`, {
+      method: 'POST',
+      body: '{}',
+    });
+  } catch {
+    setStatus('#test-ai-status', 'Error', 'error');
+    setTestResult(
+      '#test-ai-result',
+      'No fue posible completar la prueba. Revisa la configuración del proveedor.',
+      'error',
+    );
+    return;
+  }
+  const successful = result.connection === 'successful';
+  setStatus('#test-ai-status', successful ? 'Correcto' : 'Error', successful ? 'success' : 'error');
+  setTestResult(
+    '#test-ai-result',
+    successful
+      ? 'El proveedor respondió correctamente.'
+      : 'El proveedor no pudo completar la prueba. Revisa su configuración.',
+    successful ? 'success' : 'error',
+  );
+  await loadAI();
+}
+
+async function testMenu() {
+  await loadMenus();
+  const initial = state.menus.find((menu) => menu.isInitial && menu.enabled);
+  const options = initial
+    ? state.menuOptions.filter((option) => option.menuId === initial.id && option.enabled)
+    : [];
+  if (!initial) {
+    setStatus('#test-menu-status', 'Advertencia', 'warning');
+    setTestResult('#test-menu-result', 'No hay un menú inicial activo.', 'warning');
+    return;
+  }
+  if (options.length === 0) {
+    setStatus('#test-menu-status', 'Advertencia', 'warning');
+    setTestResult(
+      '#test-menu-result',
+      `El menú “${initial.title}” está activo, pero no tiene opciones disponibles.`,
+      'warning',
+    );
+    return;
+  }
+  setStatus('#test-menu-status', 'Correcto', 'success');
+  setTestResult(
+    '#test-menu-result',
+    `“${initial.title}” está listo con ${options.length} opción${options.length === 1 ? '' : 'es'} activa${options.length === 1 ? '' : 's'}.`,
+    'success',
+  );
+}
+
+async function restartBot() {
+  if (!state.selectedBotId) return;
+  await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/restart`, {
+    method: 'POST',
+    body: '{}',
   });
+  await Promise.all([
+    loadWhatsApp(),
+    loadBotSummary({ refreshForms: false }),
+    loadBots({ background: true }),
+  ]);
+  notify('Configuración de WhatsApp revalidada.');
 }
 
-function numberOrNull(value) {
-  return value === '' ? null : Number(value);
-}
-
-function lines(value) {
-  return value
-    .split(/\r?\n/u)
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
-
-function normalizeBotIdentifier(value) {
-  let normalized = value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/gu, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/-+/gu, '-')
-    .replace(/^-|-$/gu, '');
-  if (normalized && !/^[a-z]/u.test(normalized)) normalized = `bot-${normalized}`;
-  return normalized.slice(0, 40).replace(/-$/u, '');
-}
-
-function clearForm(form, defaults = {}) {
-  form.reset();
-  Object.entries(defaults).forEach(([field, value]) => {
-    form.elements[field].value = value;
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new window.FileReader();
+    reader.addEventListener('load', () => resolve(String(reader.result).split(',')[1] || ''));
+    reader.addEventListener('error', () => reject(new Error('No fue posible leer el archivo.')));
+    reader.readAsDataURL(file);
   });
 }
 
 function configureForms() {
-  document
-    .querySelector('#back-to-assistants')
-    .addEventListener('click', () => setGlobalContext('bots'));
-  document.querySelector('#maintenance-send-to-trash').addEventListener('click', () => {
-    if (!panelState.bot) return;
-    void sendBotToTrash(panelState.bot).catch((error) => notify(error.message, true));
-  });
-  document.querySelectorAll('.tabs [data-section]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const section = button.dataset.section;
-      if (button.classList.contains('global-only')) {
-        setGlobalContext(section, false);
-        if (section === 'trash') void loadTrash().catch((error) => notify(error.message, true));
-      } else if (panelState.selectedBotId) {
-        window.history.replaceState(
-          null,
-          '',
-          `#assistants/${encodeURIComponent(panelState.selectedBotId)}/${section}`,
-        );
-      }
-    });
-  });
-  document.querySelector('#section-select').addEventListener('change', (event) => {
-    const section = event.currentTarget.value;
-    if (['bots', 'trash', 'global-system', 'administrators'].includes(section)) {
-      setGlobalContext(section, false);
-      if (section === 'trash') void loadTrash().catch((error) => notify(error.message, true));
-    } else if (panelState.selectedBotId) {
-      window.history.replaceState(
-        null,
-        '',
-        `#assistants/${encodeURIComponent(panelState.selectedBotId)}/${section}`,
-      );
-    }
-  });
-  document
-    .querySelector('#open-create-bot')
-    .addEventListener('click', () =>
-      document.querySelector('#create-bot-form').classList.remove('hidden'),
-    );
-  document
-    .querySelector('#cancel-create-bot')
-    .addEventListener('click', () =>
-      document.querySelector('#create-bot-form').classList.add('hidden'),
-    );
-  const createBotForm = document.querySelector('#create-bot-form');
-  createBotForm.elements.id.addEventListener('blur', (event) => {
-    event.currentTarget.value = normalizeBotIdentifier(event.currentTarget.value);
-  });
-  createBotForm.elements.organizationName.addEventListener('blur', (event) => {
-    if (!createBotForm.elements.id.value.trim()) {
-      createBotForm.elements.id.value = normalizeBotIdentifier(event.currentTarget.value);
-    }
-  });
-  createBotForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    try {
-      const payload = Object.fromEntries(new FormData(form));
-      delete payload.exclusiveNumberConfirmed;
-      payload.id = normalizeBotIdentifier(payload.id);
-      payload.mode = 'business';
-      payload.connectorType = 'WHATSAPP_CLOUD_API';
-      if (payload.preset === 'community') payload.preset = 'empty';
-      if (payload.id.length < 3) {
-        notify('El identificador interno debe tener al menos 3 caracteres.', true);
-        form.elements.id.focus();
-        return;
-      }
-      const result = await panelApi('/api/bots', { method: 'POST', body: JSON.stringify(payload) });
-      form.classList.add('hidden');
-      form.reset();
-      notify('Asistente creado con datos independientes; falta asignar su cuenta de Meta en el servidor.');
-      await loadBots();
-      await selectBot(result.bot.id, 'whatsapp');
-    } catch (error) {
-      notify(error.message, true);
-    }
+  if (configured) return;
+  configured = true;
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.more-menu')) closeAllMoreMenus();
   });
 
-  document.querySelector('#bot-configuration-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
+  document.querySelector('#back-to-assistants').addEventListener('click', () => {
+    void setGlobalContext('bots');
+  });
+  document.querySelector('#open-create-bot').addEventListener('click', openCreateBot);
+  document.querySelector('#cancel-create-bot').addEventListener('click', closeCreateBot);
+  document.querySelector('[data-cancel-create]').addEventListener('click', closeCreateBot);
+
+  const createForm = document.querySelector('#create-bot-form');
+  createForm.elements.id.addEventListener('input', () => {
+    createForm.dataset.identifierEdited = 'true';
+  });
+  createForm.elements.organizationName.addEventListener('input', (event) => {
+    if (createForm.dataset.identifierEdited === 'true') return;
+    createForm.elements.id.value = normalizeBotIdentifier(event.currentTarget.value);
+  });
+  bindAsyncForm(createForm, async (_event, form) => {
     const payload = {
+      id: normalizeBotIdentifier(form.elements.id.value || form.elements.organizationName.value),
+      organizationName: form.elements.organizationName.value,
+      botName: form.elements.botName.value,
+      organizationType: form.elements.organizationType.value,
+      timezone: form.elements.timezone.value,
       mode: 'business',
-      menuType: form.elements.menuType.value,
-      enabled: form.elements.enabled.checked,
-      groupsEnabled: false,
-      privateMessagesEnabled: true,
-      realMentionRequired: false,
-      continuedConversationsEnabled: form.elements.continuedConversationsEnabled.checked,
+      connectorType: 'WHATSAPP_CLOUD_API',
+      provider: form.elements.provider.value,
+      preset: form.elements.preset.value,
+      menuType: 'automatic',
     };
-    try {
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/configuration`, {
-        method: 'PATCH',
-        body: JSON.stringify(payload),
-      });
-      notify('Funcionamiento guardado. Reinicia la conexión si cambiaste los canales.');
-      await Promise.all([loadBotSummary(), loadBots()]);
-    } catch (error) {
-      notify(error.message, true);
-    }
+    const result = await api('/api/bots', { method: 'POST', body: JSON.stringify(payload) });
+    closeCreateBot();
+    await loadBots();
+    await selectBot(result.bot.id, 'whatsapp');
+    notify('Asistente creado. Completa ahora su conexión de WhatsApp.');
   });
 
-  document.querySelector('#profile-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    try {
-      const logoFile = document.querySelector('#profile-logo-file').files[0];
-      if (logoFile) {
-        const data = await readFileAsBase64(logoFile);
-        const uploaded = await panelApi('/api/branding/logo', {
-          method: 'POST',
-          body: JSON.stringify({ mimeType: logoFile.type, data }),
-        });
-        form.elements.logoPath.value = uploaded.path;
-      }
-      const payload = {};
-      [...form.elements].forEach((input) => {
-        if (!input.name) return;
-        payload[input.name] = ['allowedTopics', 'excludedTopics'].includes(input.name)
-          ? lines(input.value)
-          : ['address', 'logoPath'].includes(input.name) && input.value.trim() === ''
-            ? null
-            : input.value.trim();
-      });
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/profile`, {
-        method: 'PATCH',
-        body: JSON.stringify(payload),
-      });
-      notify('Perfil guardado.');
-      await Promise.all([loadBotSummary(), loadBots()]);
-    } catch (error) {
-      notify(error.message, true);
-    }
+  bindAsyncForm('#profile-form', async (_event, form) => {
+    const payload = {
+      internalName: form.elements.internalName.value,
+      organizationName: form.elements.organizationName.value,
+      botName: form.elements.botName.value,
+      activationAlias: form.elements.activationAlias.value,
+      description: form.elements.description.value,
+      organizationType: form.elements.organizationType.value,
+      industry: form.elements.industry.value,
+      objective: form.elements.objective.value,
+      allowedTopics: lines(form.elements.allowedTopics.value),
+      excludedTopics: lines(form.elements.excludedTopics.value),
+      tone: form.elements.tone.value,
+      outOfScopeMessage: form.elements.outOfScopeMessage.value,
+      noInformationMessage: form.elements.noInformationMessage.value,
+      limitMessage: form.elements.limitMessage.value,
+      aiErrorMessage: form.elements.aiErrorMessage.value,
+      medicalMessage: form.elements.medicalMessage.value,
+      mentionPromptMessage: form.elements.mentionPromptMessage.value,
+      communityGreetingMessage: form.elements.communityGreetingMessage.value,
+      contactInformation: form.elements.contactInformation.value,
+      businessHours: form.elements.businessHours.value,
+      address: form.elements.address.value.trim() || null,
+      logoPath: form.elements.logoPath.value.trim() || null,
+      primaryColor: form.elements.primaryColor.value,
+      secondaryColor: form.elements.secondaryColor.value,
+      timezone: form.elements.timezone.value,
+      applicationName: form.elements.applicationName.value,
+      headerText: form.elements.headerText.value,
+      footerText: form.elements.footerText.value,
+      supportInformation: form.elements.supportInformation.value,
+    };
+    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/profile`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    await Promise.all([loadBotSummary(), loadBots({ background: true })]);
+    notify('Perfil guardado.');
   });
 
-  document.querySelector('#save-activation-aliases').addEventListener('click', async () => {
-    try {
-      await panelApi(
-        `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/activation-aliases`,
-        {
-          method: 'PUT',
-          body: JSON.stringify({
-            aliases: ['@neurobot', ...lines(document.querySelector('#activation-aliases').value)],
-          }),
-        },
-      );
-      notify('Alias de activación guardados.');
-      await loadBotSummary(false);
-    } catch (error) {
-      notify(error.message, true);
-    }
+  bindAsyncForm('#bot-configuration-form', async (_event, form) => {
+    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/configuration`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        mode: 'business',
+        enabled: form.elements.enabled.checked,
+        groupsEnabled: false,
+        privateMessagesEnabled: true,
+        realMentionRequired: false,
+        continuedConversationsEnabled: form.elements.continuedConversationsEnabled.checked,
+        menuType: form.elements.menuType.value,
+      }),
+    });
+    await Promise.all([loadBotSummary(), loadBots({ background: true })]);
+    notify('Funcionamiento guardado.');
   });
 
   document.querySelector('#toggle-knowledge-categories').addEventListener('click', () => {
-    const panel = document.querySelector('#knowledge-category-panel');
-    setKnowledgeCategoryPanelVisible(panel?.classList.contains('hidden') ?? true);
+    showKnowledgeCategories(
+      document.querySelector('#knowledge-category-panel').classList.contains('hidden'),
+    );
   });
   document
     .querySelector('#new-knowledge-category')
-    .addEventListener('click', () => openKnowledgeCategoryForm());
+    .addEventListener('click', () => editKnowledgeCategory());
   document
     .querySelector('#cancel-knowledge-category')
-    .addEventListener('click', closeKnowledgeCategoryForm);
-  document.querySelector('#new-knowledge-entry').addEventListener('click', openNewKnowledgeEntry);
+    .addEventListener('click', resetKnowledgeCategoryForm);
   document
-    .querySelector('#knowledge-entry-form')
-    .elements.priority.addEventListener('input', (event) => {
-      updateKnowledgePriorityDisplay(event.currentTarget.value);
+    .querySelector('#new-knowledge-entry')
+    .addEventListener('click', () => openKnowledgeEntry());
+  document.querySelector('#cancel-knowledge-entry').addEventListener('click', () => {
+    resetKnowledgeEntryForm();
+    hidePanel(document.querySelector('#knowledge-entry-form'));
+  });
+  document
+    .querySelector('#knowledge-entry-form [name="priority"]')
+    .addEventListener('input', (event) => {
+      updateKnowledgePriority(event.currentTarget.value);
     });
-
-  document.querySelector('#knowledge-category-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const payload = {
-      ...(form.elements.id.value ? { id: Number(form.elements.id.value) } : {}),
-      name: form.elements.name.value,
-      enabled: form.elements.enabled.checked,
-    };
-    try {
-      await panelApi(
-        `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/knowledge/categories`,
-        { method: 'POST', body: JSON.stringify(payload) },
-      );
-      closeKnowledgeCategoryForm();
-      await loadKnowledge();
-      notify('Categoría guardada.');
-    } catch (error) {
-      notify(error.message, true);
-    }
+  bindAsyncForm('#knowledge-category-form', async (_event, form) => {
+    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/knowledge/categories`, {
+      method: 'POST',
+      body: JSON.stringify({
+        ...(form.elements.id.value ? { id: Number(form.elements.id.value) } : {}),
+        name: form.elements.name.value,
+        enabled: form.elements.enabled.checked,
+      }),
+    });
+    resetKnowledgeCategoryForm();
+    await loadKnowledge();
+    notify('Categoría guardada.');
+  });
+  bindAsyncForm('#knowledge-entry-form', async (_event, form) => {
+    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/knowledge/entries`, {
+      method: 'POST',
+      body: JSON.stringify({
+        ...(form.elements.id.value ? { id: Number(form.elements.id.value) } : {}),
+        categoryId: Number(form.elements.categoryId.value),
+        title: form.elements.title.value,
+        content: form.elements.content.value,
+        keywords: lines(form.elements.keywords.value),
+        synonyms: lines(form.elements.synonyms.value),
+        priority: Number(form.elements.priority.value),
+        internalSource: form.elements.internalSource.value.trim() || null,
+        enabled: form.elements.enabled.checked,
+      }),
+    });
+    resetKnowledgeEntryForm();
+    hidePanel(form);
+    await loadKnowledge();
+    notify('Información guardada.');
   });
 
-  document.querySelector('#knowledge-entry-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const payload = {
-      ...(form.elements.id.value ? { id: Number(form.elements.id.value) } : {}),
-      categoryId: Number(form.elements.categoryId.value),
-      title: form.elements.title.value,
-      content: form.elements.content.value,
-      keywords: lines(form.elements.keywords.value),
-      synonyms: lines(form.elements.synonyms.value),
-      priority: Number(form.elements.priority.value),
-      internalSource: form.elements.internalSource.value.trim() || null,
-      enabled: form.elements.enabled.checked,
-    };
-    try {
-      await panelApi(
-        `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/knowledge/entries`,
-        { method: 'POST', body: JSON.stringify(payload) },
-      );
-      closeKnowledgeEntryForm();
-      await loadKnowledge();
-      notify('Información guardada.');
-    } catch (error) {
-      notify(error.message, true);
-    }
+  document.querySelector('#new-cached-answer').addEventListener('click', () => openCachedAnswer());
+  document.querySelector('#cancel-cached-answer').addEventListener('click', () => {
+    resetCachedAnswerForm();
+    hidePanel(document.querySelector('#cached-answer-form'));
   });
+  bindAsyncForm('#cached-answer-search', async (_event, form) => {
+    await loadCachedAnswers(form.elements.search.value);
+  });
+  bindAsyncForm('#cached-answer-form', async (_event, form) => {
+    const id = form.elements.id.value;
+    if (id) {
+      await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/cached-answers/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          action: 'edit',
+          answer: form.elements.answer.value,
+          category: form.elements.category.value,
+        }),
+      });
+    } else {
+      await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/cached-answers`, {
+        method: 'POST',
+        body: JSON.stringify({
+          canonicalQuestion: form.elements.canonicalQuestion.value,
+          answer: form.elements.answer.value,
+          category: form.elements.category.value,
+          sourceType: form.elements.sourceType.value,
+          variants: lines(form.elements.variants.value),
+        }),
+      });
+    }
+    resetCachedAnswerForm();
+    hidePanel(form);
+    await loadCachedAnswers();
+    notify(id ? 'Respuesta actualizada.' : 'Respuesta creada.');
+  });
+
+  document.querySelector('#new-menu').addEventListener('click', () => openMenu());
   document
-    .querySelector('#cancel-knowledge-entry')
-    .addEventListener('click', closeKnowledgeEntryForm);
-
-  document.querySelector('#cached-answer-search').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    try {
-      await loadCachedAnswers(event.currentTarget.elements.search.value);
-    } catch (error) {
-      notify(error.message, true);
-    }
+    .querySelector('#cancel-menu')
+    .addEventListener('click', () => hidePanel(document.querySelector('#menu-form')));
+  document.querySelector('#clear-menu').addEventListener('click', clearMenuForm);
+  document.querySelector('#new-menu-option').addEventListener('click', () => openMenuOption());
+  document
+    .querySelector('#cancel-menu-option')
+    .addEventListener('click', () => hidePanel(document.querySelector('#menu-option-form')));
+  document
+    .querySelector('#menu-option-form [name="actionType"]')
+    .addEventListener('change', () => renderMenuActionFields());
+  bindAsyncForm('#menu-form', async (_event, form) => {
+    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/menus`, {
+      method: 'POST',
+      body: JSON.stringify({
+        ...(form.elements.id.value ? { id: Number(form.elements.id.value) } : {}),
+        parentMenuId: numberOrNull(form.elements.parentMenuId.value),
+        title: form.elements.title.value,
+        message: form.elements.message.value,
+        helpText: form.elements.helpText.value,
+        enabled: form.elements.enabled.checked,
+        isInitial: form.elements.isInitial.checked,
+        expirationMinutes: Number(form.elements.expirationMinutes.value),
+      }),
+    });
+    clearMenuForm();
+    hidePanel(form);
+    await loadMenus();
+    notify('Menú guardado.');
   });
-  document.querySelector('#cached-answer-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const payload = {
-      canonicalQuestion: form.elements.canonicalQuestion.value,
-      answer: form.elements.answer.value,
-      category: form.elements.category.value,
-      sourceType: form.elements.sourceType.value,
-      variants: lines(form.elements.variants.value),
-    };
-    try {
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/cached-answers`, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      form.reset();
-      form.elements.category.value = 'General';
-      await loadCachedAnswers();
-      notify('Respuesta guardada.');
-    } catch (error) {
-      notify(error.message, true);
-    }
-  });
-
-  document.querySelector('#menu-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const payload = {
-      ...(form.elements.id.value ? { id: Number(form.elements.id.value) } : {}),
-      parentMenuId: numberOrNull(form.elements.parentMenuId.value),
-      title: form.elements.title.value,
-      message: form.elements.message.value,
-      helpText: form.elements.helpText.value,
-      enabled: form.elements.enabled.checked,
-      isInitial: form.elements.isInitial.checked,
-      expirationMinutes: Number(form.elements.expirationMinutes.value),
-    };
-    try {
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/menus`, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      clearMenu();
-      await loadMenus();
-      notify('Menú guardado.');
-    } catch (error) {
-      notify(error.message, true);
-    }
-  });
-  document.querySelector('#clear-menu').addEventListener('click', clearMenu);
-  document.querySelector('#new-menu').addEventListener('click', clearMenu);
-  document.querySelector('#menu-option-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    try {
-      const payload = {
+  bindAsyncForm('#menu-option-form', async (_event, form) => {
+    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/menu-options`, {
+      method: 'POST',
+      body: JSON.stringify({
         ...(form.elements.id.value ? { id: Number(form.elements.id.value) } : {}),
         menuId: Number(form.elements.menuId.value),
         label: form.elements.label.value,
         aliases: lines(form.elements.aliases.value),
         order: Number(form.elements.order.value),
         actionType: form.elements.actionType.value,
-        actionPayload: JSON.parse(form.elements.actionPayload.value || '{}'),
+        actionPayload: menuActionPayload(),
         enabled: form.elements.enabled.checked,
-      };
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/menu-options`, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      clearForm(form, { actionPayload: '{}', order: 1 });
-      form.elements.id.value = '';
-      form.elements.enabled.checked = true;
-      await loadMenus();
-      notify('Opción guardada.');
-    } catch (error) {
-      notify(error.message, true);
-    }
+      }),
+    });
+    resetMenuOptionForm();
+    hidePanel(form);
+    await loadMenus();
+    notify('Opción guardada.');
   });
 
-  document.querySelector('#catalog-category-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const payload = {
-      ...(form.elements.id.value ? { id: Number(form.elements.id.value) } : {}),
-      name: form.elements.name.value,
-      description: form.elements.description.value,
-      enabled: form.elements.enabled.checked,
-    };
-    try {
-      await panelApi(
-        `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/catalog/categories`,
-        { method: 'POST', body: JSON.stringify(payload) },
-      );
-      form.reset();
-      form.elements.id.value = '';
-      form.elements.enabled.checked = true;
-      await loadCatalog();
-      notify('Categoría guardada.');
-    } catch (error) {
-      notify(error.message, true);
-    }
+  document.querySelector('#new-catalog-item').addEventListener('click', () => openCatalogItem());
+  document
+    .querySelector('#cancel-catalog-item')
+    .addEventListener('click', () => hidePanel(document.querySelector('#catalog-item-form')));
+  document.querySelector('#clear-catalog-item').addEventListener('click', resetCatalogItemForm);
+  bindAsyncForm('#catalog-category-form', async (_event, form) => {
+    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/catalog/categories`, {
+      method: 'POST',
+      body: JSON.stringify({
+        ...(form.elements.id.value ? { id: Number(form.elements.id.value) } : {}),
+        name: form.elements.name.value,
+        description: form.elements.description.value,
+        enabled: form.elements.enabled.checked,
+      }),
+    });
+    form.reset();
+    form.elements.id.value = '';
+    form.elements.enabled.checked = true;
+    await loadCatalog();
+    notify('Categoría guardada.');
   });
-  document.querySelector('#catalog-item-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const payload = {
-      id: Number(form.elements.id.value || 0),
-      categoryId: numberOrNull(form.elements.categoryId.value),
-      name: form.elements.name.value,
-      code: form.elements.code.value,
-      description: form.elements.description.value,
-      priceAmount: numberOrNull(form.elements.priceAmount.value),
-      offerPriceAmount: numberOrNull(form.elements.offerPriceAmount.value),
-      currency: form.elements.currency.value,
-      presentation: form.elements.presentation.value,
-      size: form.elements.size.value,
-      variants: lines(form.elements.variants.value),
-      availability: form.elements.availability.value,
-      informedStock: numberOrNull(form.elements.informedStock.value),
-      primaryMediaId: numberOrNull(form.elements.primaryMediaId.value),
-      authorizedLink: form.elements.authorizedLink.value.trim() || null,
-      enabled: form.elements.enabled.checked,
-    };
-    try {
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/catalog/items`, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      clearCatalogItem();
-      await loadCatalog();
-      notify('Producto o servicio guardado.');
-    } catch (error) {
-      notify(error.message, true);
-    }
+  bindAsyncForm('#catalog-item-form', async (_event, form) => {
+    const price = numberOrNull(form.elements.price.value);
+    const offerPrice = numberOrNull(form.elements.offerPrice.value);
+    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/catalog/items`, {
+      method: 'POST',
+      body: JSON.stringify({
+        id: Number(form.elements.id.value || 0),
+        categoryId: numberOrNull(form.elements.categoryId.value),
+        name: form.elements.name.value,
+        code: form.elements.code.value,
+        description: form.elements.description.value,
+        priceAmount: price === null ? null : Math.round(price * 100),
+        offerPriceAmount: offerPrice === null ? null : Math.round(offerPrice * 100),
+        currency: form.elements.currency.value,
+        presentation: form.elements.presentation.value,
+        size: form.elements.size.value,
+        variants: lines(form.elements.variants.value),
+        availability: form.elements.availability.value,
+        informedStock: numberOrNull(form.elements.informedStock.value),
+        primaryMediaId: numberOrNull(form.elements.primaryMediaId.value),
+        authorizedLink: form.elements.authorizedLink.value.trim() || null,
+        enabled: form.elements.enabled.checked,
+      }),
+    });
+    resetCatalogItemForm();
+    hidePanel(form);
+    await loadCatalog();
+    notify('Catálogo actualizado.');
   });
-  document.querySelector('#clear-catalog-item').addEventListener('click', clearCatalogItem);
 
-  document.querySelector('#media-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
+  bindAsyncForm('#media-form', async (_event, form) => {
     const file = form.elements.file.files[0];
     if (!file) return;
-    try {
-      const data = await readFileAsBase64(file);
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/media`, {
-        method: 'POST',
-        body: JSON.stringify({ mimeType: file.type, data, caption: form.elements.caption.value }),
-      });
-      form.reset();
-      await Promise.all([loadMedia(), loadCatalog()]);
-      notify('Imagen oficial guardada.');
-    } catch (error) {
-      notify(error.message, true);
-    }
+    const data = await readFileAsBase64(file);
+    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/media`, {
+      method: 'POST',
+      body: JSON.stringify({ mimeType: file.type, data, caption: form.elements.caption.value }),
+    });
+    form.reset();
+    await Promise.all([loadMedia(), loadCatalog()]);
+    notify('Imagen guardada.');
   });
 
   document.querySelector('#add-hour').addEventListener('click', () => addHourRow());
-  document.querySelector('#hours-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
+  bindAsyncForm('#hours-form', async () => {
     const hours = [...document.querySelectorAll('.hour-row')].map((row) => ({
       weekday: row.querySelector('[data-field="localDate"]').value
         ? null
@@ -1848,317 +2148,295 @@ function configureForms() {
       closed: row.querySelector('[data-field="closed"]').checked,
       label: row.querySelector('[data-field="label"]').value.trim(),
     }));
-    try {
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/hours`, {
-        method: 'PUT',
-        body: JSON.stringify({ hours }),
+    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/hours`, {
+      method: 'PUT',
+      body: JSON.stringify({ hours }),
+    });
+    await loadHours();
+    notify('Horarios guardados.');
+  });
+
+  document.querySelectorAll('[data-request-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.requestFilter = button.dataset.requestFilter;
+      document.querySelectorAll('[data-request-filter]').forEach((candidate) => {
+        candidate.classList.toggle('active', candidate === button);
       });
-      await loadHours();
-      notify('Horarios guardados.');
-    } catch (error) {
-      notify(error.message, true);
-    }
+      renderRequests();
+    });
   });
 
   document
-    .querySelector('#ai-credential-form')
-    .elements.mode.addEventListener('change', (event) => {
+    .querySelector('#ai-credential-form [name="mode"]')
+    .addEventListener('change', (event) => {
       document.querySelector('#ai-credential-form').elements.apiKey.disabled =
         event.currentTarget.value !== 'per_bot';
     });
-  document.querySelector('#ai-credential-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const payload = {
-      mode: form.elements.mode.value,
-      ...(form.elements.mode.value === 'per_bot' ? { apiKey: form.elements.apiKey.value } : {}),
-    };
-    try {
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai-key`, {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      });
-      form.elements.apiKey.value = '';
-      await loadAI();
-      notify('Configuración de clave guardada.');
-    } catch (error) {
-      form.elements.apiKey.value = '';
-      notify(error.message, true);
-    }
-  });
-  document.querySelector('#delete-ai-key').addEventListener('click', async () => {
-    if (!window.confirm('¿Eliminar la clave exclusiva cifrada de este asistente?')) return;
-    try {
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai-key`, {
-        method: 'DELETE',
-      });
-      await loadAI();
-      notify('Clave exclusiva eliminada.');
-    } catch (error) {
-      notify(error.message, true);
-    }
-  });
-  document.querySelector('#ai-settings-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
+  bindAsyncForm('#ai-settings-form', async (_event, form) => {
     const payload = {};
-    [...form.elements].forEach((input) => {
-      if (!input.name) return;
+    for (const input of form.elements) {
+      if (!input.name) continue;
       payload[input.name] =
         input.type === 'checkbox'
           ? input.checked
           : input.type === 'number'
             ? Number(input.value)
             : input.value;
+    }
+    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/ai/settings`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
     });
-    try {
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/settings`, {
-        method: 'PATCH',
-        body: JSON.stringify(payload),
+    await loadAI();
+    notify('Configuración de IA guardada.');
+  });
+  bindAsyncForm('#ai-credential-form', async (_event, form) => {
+    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/ai-key`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        mode: form.elements.mode.value,
+        ...(form.elements.mode.value === 'per_bot' ? { apiKey: form.elements.apiKey.value } : {}),
+      }),
+    });
+    form.elements.apiKey.value = '';
+    await loadAI();
+    notify('Conexión del proveedor guardada.');
+  });
+  document.querySelector('#delete-ai-key').addEventListener('click', () => {
+    void withBusy(document.querySelector('#delete-ai-key'), async () => {
+      const confirmation = await confirmAction({
+        title: 'Eliminar clave exclusiva',
+        description: 'El asistente volverá a depender de la configuración global.',
+        confirmLabel: 'Eliminar clave',
+        danger: true,
+      });
+      if (!confirmation) return;
+      await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/ai-key`, {
+        method: 'DELETE',
       });
       await loadAI();
-      notify('Límites de IA guardados.');
-    } catch (error) {
-      notify(error.message, true);
-    }
+      notify('Clave exclusiva eliminada.');
+    });
   });
-  document.querySelector('#ai-queue-settings-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
+  bindAsyncForm('#ai-queue-settings-form', async (_event, form) => {
     const payload = Object.fromEntries(
       [...form.elements]
         .filter((input) => input.name)
         .map((input) => [input.name, Number(input.value)]),
     );
-    try {
-      await panelApi(
-        `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/queue-settings`,
-        { method: 'PATCH', body: JSON.stringify(payload) },
-      );
-      await loadAI();
-      notify('Capacidad de IA guardada.');
-    } catch (error) {
-      notify(error.message, true);
-    }
+    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/ai/queue-settings`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    await loadAI();
+    notify('Capacidad de IA guardada.');
   });
-  document.querySelector('#restore-ai-queue-recommended').addEventListener('click', async () => {
-    try {
-      await panelApi(
-        `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/queue-settings/recommended`,
+  document.querySelector('#restore-ai-queue-recommended').addEventListener('click', () => {
+    const button = document.querySelector('#restore-ai-queue-recommended');
+    void withBusy(button, async () => {
+      await api(
+        `/api/bots/${encodeURIComponent(state.selectedBotId)}/ai/queue-settings/recommended`,
         { method: 'POST', body: '{}' },
       );
       await loadAI();
       notify('Valores recomendados restaurados.');
-    } catch (error) {
-      notify(error.message, true);
-    }
+    });
   });
-  document.querySelector('#ai-queue-simulator-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    try {
-      const result = await panelApi(
-        `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/simulate-queue`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            requests: Number(form.elements.requests.value),
-            scenario: form.elements.scenario.value,
-          }),
-        },
-      );
-      setCardGrid('#ai-queue-simulation-result', [
-        ['Procesándose', result.processing],
-        ['Esperando', result.waiting],
-        ['Rechazadas', result.rejected],
-        ['Agrupadas', result.coalesced],
-        ['Error simulado', result.providerError || 'Ninguno'],
-      ]);
-    } catch (error) {
-      notify(error.message, true);
-    }
+  bindAsyncForm('#ai-queue-simulator-form', async (_event, form) => {
+    const result = await api(
+      `/api/bots/${encodeURIComponent(state.selectedBotId)}/ai/simulate-queue`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          requests: Number(form.elements.requests.value),
+          scenario: form.elements.scenario.value,
+        }),
+      },
+    );
+    renderMetricGrid('#ai-queue-simulation-result', [
+      { label: 'Procesándose', value: result.processing },
+      { label: 'Esperando', value: result.waiting },
+      { label: 'Rechazadas', value: result.rejected },
+      { label: 'Agrupadas', value: result.coalesced },
+    ]);
   });
-  document.querySelector('#global-ai-limits-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
+  bindAsyncForm('#global-ai-limits-form', async (_event, form) => {
     const payload = Object.fromEntries(
       [...form.elements]
         .filter((input) => input.name)
         .map((input) => [input.name, Number(input.value)]),
     );
-    try {
-      await panelApi('/api/ai/global-limits', { method: 'PATCH', body: JSON.stringify(payload) });
-      await loadAI();
-      notify('Presupuesto global guardado.');
-    } catch (error) {
-      notify(error.message, true);
-    }
+    await api('/api/ai/global-limits', { method: 'PATCH', body: JSON.stringify(payload) });
+    await loadAI();
+    notify('Presupuesto global guardado.');
   });
-  document.querySelector('#test-ai-connection').addEventListener('click', async () => {
-    try {
-      const result = await panelApi(
-        `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/test-connection`,
-        { method: 'POST', body: '{}' },
-      );
-      await loadAI();
-      notify(
-        result.connection === 'successful'
-          ? 'Conexión con Groq verificada.'
-          : 'Groq rechazó la prueba.',
-        result.connection !== 'successful',
-      );
-    } catch (error) {
-      notify(error.message, true);
-    }
-  });
-  document.querySelector('#reset-ai-counters').addEventListener('click', async () => {
-    if (
-      !window.confirm(
-        '¿Restablecer solamente los contadores de prueba de este asistente? No se eliminarán respuestas, conocimiento ni la configuración de Meta.',
-      )
-    )
-      return;
-    const password = window.prompt('Escribe la contraseña actual del panel:');
-    if (!password) return;
-    const confirmation = window.prompt('Para confirmar, escribe: RESTABLECER CONTADORES');
-    if (confirmation !== 'RESTABLECER CONTADORES') {
-      notify('La frase de confirmación no coincide.', true);
-      return;
-    }
-    try {
-      await panelApi(
-        `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/reset-development-counters`,
+  document.querySelector('#reset-ai-counters').addEventListener('click', () => {
+    const button = document.querySelector('#reset-ai-counters');
+    void withBusy(button, async () => {
+      const confirmation = await confirmAction({
+        title: 'Restablecer contadores de prueba',
+        description: 'No se eliminarán respuestas, conocimiento ni la configuración de WhatsApp.',
+        expectedConfirmation: 'RESTABLECER CONTADORES',
+        requirePassword: true,
+        confirmLabel: 'Restablecer',
+        danger: true,
+      });
+      if (!confirmation) return;
+      await api(
+        `/api/bots/${encodeURIComponent(state.selectedBotId)}/ai/reset-development-counters`,
         {
           method: 'POST',
-          body: JSON.stringify({ password, confirmation }),
+          body: JSON.stringify({
+            password: confirmation.password,
+            confirmation: confirmation.confirmation,
+          }),
         },
       );
       await loadAI();
       notify('Contadores de prueba restablecidos.');
-    } catch (error) {
-      notify(error.message, true);
-    }
-  });
-
-  document.querySelector('#restart-connection').addEventListener('click', () => {
-    void restartBot();
-  });
-  document.querySelector('#bot-restart').addEventListener('click', () => {
-    void restartBot();
-  });
-}
-
-function clearMenu() {
-  const form = document.querySelector('#menu-form');
-  form.reset();
-  form.elements.id.value = '';
-  form.elements.expirationMinutes.value = 15;
-  form.elements.enabled.checked = true;
-}
-
-function clearCatalogItem() {
-  const form = document.querySelector('#catalog-item-form');
-  form.reset();
-  form.elements.id.value = '';
-  form.elements.currency.value = 'CLP';
-  form.elements.enabled.checked = true;
-}
-
-function readFileAsBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new window.FileReader();
-    reader.addEventListener('load', () => resolve(String(reader.result).split(',')[1] || ''));
-    reader.addEventListener('error', () => reject(new Error('No fue posible leer el archivo.')));
-    reader.readAsDataURL(file);
-  });
-}
-
-let configured = false;
-let initializationPromise = null;
-let initializationRetryTimer = null;
-
-async function refreshVisibleBotStatus() {
-  if (document.hidden) return;
-  await loadBots();
-  if (panelState.selectedBotId) await loadBotSummary(false);
-}
-
-function startBotStatusRefresh() {
-  if (panelState.botRefreshTimer !== null) return;
-  panelState.botRefreshTimer = window.setInterval(() => {
-    void refreshVisibleBotStatus().catch(() => {
-      // El siguiente ciclo vuelve a intentarlo sin interrumpir la edición del usuario.
     });
-  }, 5000);
+  });
+
+  document.querySelector('#bot-restart').addEventListener('click', () => {
+    void withBusy(document.querySelector('#bot-restart'), restartBot);
+  });
+  document.querySelector('#test-whatsapp').addEventListener('click', () => {
+    void withBusy(document.querySelector('#test-whatsapp'), testWhatsApp);
+  });
+  document.querySelector('#test-ai-connection').addEventListener('click', () => {
+    void withBusy(document.querySelector('#test-ai-connection'), testAI);
+  });
+  document.querySelector('#test-menu').addEventListener('click', () => {
+    void withBusy(document.querySelector('#test-menu'), testMenu);
+  });
+
+  const historyFilters = document.querySelector('#history-filters');
+  historyFilters.addEventListener('submit', (event) => event.preventDefault());
+  historyFilters.addEventListener('input', () => {
+    state.historyPage = 1;
+    renderHistory();
+  });
+  historyFilters.addEventListener('change', () => {
+    state.historyPage = 1;
+    renderHistory();
+  });
+  document.querySelector('#history-previous').addEventListener('click', () => {
+    state.historyPage = Math.max(1, state.historyPage - 1);
+    renderHistory();
+  });
+  document.querySelector('#history-next').addEventListener('click', () => {
+    state.historyPage += 1;
+    renderHistory();
+  });
+  document.querySelector('#refresh-history').addEventListener('click', () => {
+    void withBusy(document.querySelector('#refresh-history'), () => loadHistory());
+  });
 }
 
-async function runMultibotInitialization() {
-  const session = await panelApi('/api/auth/session');
-  panelState.csrfToken = session.csrfToken;
-  if (!configured) {
-    configureForms();
-    configured = true;
+async function enterGlobal(section) {
+  if (state.selectedBotId) {
+    state.selectedBotId = null;
+    state.bot = null;
+    state.profile = null;
+    navigation.setContext('global');
   }
-  await loadBots();
-  if (!panelState.selectedBotId) {
+  window.history.replaceState(null, '', section === 'bots' ? '#assistants' : `#${section}`);
+  if (section === 'bots') await loadBots();
+  if (section === 'trash') await loadTrash();
+}
+
+async function enterSection(section, options = {}) {
+  if (!state.selectedBotId) return;
+  if (options.history !== false) {
+    window.history.replaceState(
+      null,
+      '',
+      `#assistants/${encodeURIComponent(state.selectedBotId)}/${section}`,
+    );
+  }
+  const loaders = {
+    status: async () => {
+      await Promise.all([
+        loadBotSummary({ refreshForms: false }),
+        loadHistory({ background: true }),
+      ]);
+    },
+    whatsapp: loadWhatsApp,
+    profile: async () => loadBotSummary(),
+    knowledge: loadKnowledge,
+    'cached-answers': () => loadCachedAnswers(),
+    menus: async () => {
+      await Promise.all([loadCatalog(), loadMedia()]);
+      await loadMenus();
+    },
+    catalog: async () => {
+      await Promise.all([loadCatalog(), loadMedia()]);
+    },
+    media: loadMedia,
+    hours: loadHours,
+    requests: loadRequests,
+    ai: () => loadAI(),
+    'test-center': async () => {
+      setStatus('#test-whatsapp-status', 'Sin probar', 'neutral');
+      setStatus('#test-ai-status', 'Sin probar', 'neutral');
+      setStatus('#test-menu-status', 'Sin probar', 'neutral');
+    },
+    history: () => loadHistory(),
+    statistics: loadStatistics,
+  };
+  const loader = loaders[section];
+  if (loader) await loader();
+}
+
+function startRefresh() {
+  if (state.refreshTimer !== null) return;
+  state.refreshTimer = window.setInterval(() => {
+    if (document.hidden) return;
+    void loadBots({ background: true }).catch(() => {});
+    if (state.selectedBotId) void loadBotSummary({ refreshForms: false }).catch(() => {});
+  }, 15_000);
+}
+
+function reset() {
+  state.selectedBotId = null;
+  state.bot = null;
+  state.profile = null;
+  state.bots = [];
+  state.visibleModules = [];
+  state.history = [];
+  initializationPromise = null;
+  if (state.refreshTimer !== null) {
+    window.clearInterval(state.refreshTimer);
+    state.refreshTimer = null;
+  }
+}
+
+async function initialize({ force = false } = {}) {
+  if (force) initializationPromise = null;
+  if (initializationPromise) return initializationPromise;
+  initializationPromise = (async () => {
+    configureForms();
+    await loadBots();
     const route = window.location.hash.replace(/^#/u, '').split('/').filter(Boolean);
     if (
       route[0] === 'assistants' &&
       route.length >= 2 &&
-      panelState.bots.some((bot) => bot.id === route[1])
+      state.bots.some((bot) => bot.id === route[1])
     ) {
       await selectBot(route[1], route[2] || 'status');
     } else {
-      const globalSection = ['trash', 'global-system', 'administrators'].includes(route[0])
-        ? route[0]
-        : 'bots';
-      setGlobalContext(globalSection);
-      if (globalSection === 'trash') await loadTrash();
+      const section = ['trash', 'administrators'].includes(route[0]) ? route[0] : 'bots';
+      navigation.setContext('global');
+      await navigation.navigate(section, { focus: false });
     }
-  }
-  startBotStatusRefresh();
-}
-
-function initializeMultibotPanel() {
-  if (initializationPromise !== null) return initializationPromise;
-  initializationPromise = runMultibotInitialization()
-    .catch(() => {
-      // La vista de acceso permanece activa hasta que exista una sesión válida.
-    })
-    .finally(() => {
-      initializationPromise = null;
-    });
+    startRefresh();
+  })().finally(() => {
+    initializationPromise = null;
+  });
   return initializationPromise;
 }
 
-function requestMultibotInitialization(force = false) {
-  if (force) {
-    initializationPromise = null;
-  }
-  void initializeMultibotPanel().then(() => {
-    const target = document.querySelector('#bots-list');
-    if (target && target.childElementCount === 0) {
-      void loadBots().catch(() => {});
-    }
-  });
-  if (initializationRetryTimer !== null) window.clearTimeout(initializationRetryTimer);
-  initializationRetryTimer = window.setTimeout(() => {
-    initializationRetryTimer = null;
-    const panelVisible = !document.querySelector('#panel-view')?.classList.contains('hidden');
-    const assistantsEmpty = document.querySelector('#bots-list')?.childElementCount === 0;
-    if (panelVisible && assistantsEmpty) {
-      initializationPromise = null;
-      void initializeMultibotPanel();
-    }
-  }, 250);
-}
-
-window.addEventListener('multibot-panel-load', () => requestMultibotInitialization(true));
-window.addEventListener('pageshow', () => requestMultibotInitialization(true));
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => requestMultibotInitialization(true), {
-    once: true,
-  });
-} else {
-  requestMultibotInitialization(true);
+export function createAssistantPanel(options) {
+  navigation = options.navigation;
+  return { initialize, reset, enterGlobal, enterSection };
 }

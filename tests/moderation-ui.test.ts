@@ -3,13 +3,11 @@ import { readFileSync } from 'node:fs';
 describe('Neurobot Business sin moderación comunitaria', () => {
   const html = readFileSync('public/index.html', 'utf8');
   const panel = readFileSync('public/multibot-panel.js', 'utf8');
-  const friendly = readFileSync('public/friendly-panel.js', 'utf8');
   const server = readFileSync('src/admin/server.ts', 'utf8');
 
   it('no ofrece moderación en la navegación empresarial', () => {
-    expect(html).not.toContain('<option value="moderation"');
-    expect(friendly).not.toContain("label: 'Moderación'");
-    expect(friendly).not.toContain("id: 'community'");
+    expect(html).not.toContain('data-section="moderation"');
+    expect(html).not.toContain('Participación de la comunidad');
   });
 
   it('no carga manejadores de moderación desde el panel empresarial', () => {

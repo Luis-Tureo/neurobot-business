@@ -4,3 +4,4 @@ coverage/
 data/
 sources/
 package-lock.json
+public/panel.css

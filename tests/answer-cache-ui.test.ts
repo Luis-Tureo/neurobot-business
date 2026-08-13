@@ -1,45 +1,44 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 
 describe('panel de respuestas guardadas y consumo', () => {
-  const html = readFileSync(resolve('public/index.html'), 'utf8');
-  const javascript = readFileSync(resolve('public/multibot-panel.js'), 'utf8');
+  const html = readFileSync('public/index.html', 'utf8');
+  const javascript = readFileSync('public/multibot-panel.js', 'utf8');
 
-  it('incluye navegación móvil y lateral sin depender de desplazamiento horizontal', () => {
-    expect(html).toContain('value="cached-answers"');
+  it('incluye navegación móvil y lateral sin un selector gigante', () => {
     expect(html).toContain('data-section="cached-answers"');
     expect(html).toContain('id="section-cached-answers"');
+    expect(html).toContain('id="mobile-menu-button"');
+    expect(html).not.toContain('<option value="cached-answers"');
   });
 
-  it('muestra búsqueda, creación y todas las acciones administrativas requeridas', () => {
+  it('muestra búsqueda, creación y acciones administrativas enfocadas', () => {
     expect(html).toContain('id="cached-answer-search"');
-    expect(html).toContain('id="cached-answer-form"');
+    expect(html).toMatch(/id="cached-answer-form"\s+class="editor-panel hidden"/u);
     for (const label of [
       'Aprobar',
       'Editar',
       'Desactivar',
       'Eliminar',
-      'Convertir en FAQ',
       'Agregar variante',
-      'Invalidar',
-      'Regenerar en próxima consulta',
+      'Revisar en la próxima consulta',
       'Ver fuentes',
     ]) {
       expect(javascript).toContain(label);
     }
+    expect(javascript).not.toMatch(/window\.(alert|prompt|confirm)\(/gu);
   });
 
-  it('expone límites separados y métricas de consumo real', () => {
-    expect(html).toContain('name="interactionHourlyLimit"');
-    expect(html).toContain('name="interactionCooldownSeconds"');
-    expect(html).toContain('name="duplicateQueryWindowSeconds"');
-    expect(html).toContain('id="operational-metrics-cards"');
-    expect(javascript).toContain('operationalMetrics');
-    expect(javascript).toContain('usage.totalTokens');
+  it('presenta consumo real solamente en Estadísticas', () => {
+    expect(html).toContain('id="section-statistics"');
+    expect(javascript).toContain('operationalMetrics.localResponses');
+    expect(javascript).toContain('operationalMetrics.aiSuccesses');
+    expect(javascript).toContain('operationalMetrics.cacheHits');
+    expect(javascript).toContain('ai.usage.requests');
   });
 
-  it('protege el restablecimiento con contraseña y frase de confirmación', () => {
-    expect(javascript).toContain('RESTABLECER CONTADORES');
-    expect(javascript).toContain('contraseña actual del panel');
+  it('protege el restablecimiento de desarrollo con diálogo accesible', () => {
+    expect(javascript).toContain("expectedConfirmation: 'RESTABLECER CONTADORES'");
+    expect(javascript).toContain('requirePassword: true');
+    expect(html).toContain('id="action-dialog"');
   });
 });

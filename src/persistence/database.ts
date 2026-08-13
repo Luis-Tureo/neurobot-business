@@ -258,6 +258,18 @@ export type TechnicalEvent = {
   attempt?: number;
 };
 
+export type AssistantActivityEvent = {
+  id: number;
+  occurredAt: string;
+  eventType: string;
+  source: string | null;
+  userHash: string | null;
+  groupHash: string | null;
+  result: string;
+  errorCode: string | null;
+  durationMs: number | null;
+};
+
 export type AuditEvent = {
   botId?: string;
   actionType: string;
@@ -3824,9 +3836,7 @@ export class AppDatabase {
         )
         .run(now, botId, botId);
       this.db
-        .prepare(
-          `UPDATE bots SET lifecycle_status='CONNECTED',updated_at=? WHERE id=?`,
-        )
+        .prepare(`UPDATE bots SET lifecycle_status='CONNECTED',updated_at=? WHERE id=?`)
         .run(now, botId);
       this.db
         .prepare(
@@ -3927,11 +3937,19 @@ export class AppDatabase {
          WHERE event_hash=?`,
       )
       .get(metaIdentifierHash(eventId)) as
-      | { processing_status: 'ACCEPTED' | 'PROCESSED' | 'FAILED'; delivery_count: number; error_code: string | null }
+      | {
+          processing_status: 'ACCEPTED' | 'PROCESSED' | 'FAILED';
+          delivery_count: number;
+          error_code: string | null;
+        }
       | undefined;
     return row === undefined
       ? null
-      : { status: row.processing_status, deliveryCount: row.delivery_count, errorCode: row.error_code };
+      : {
+          status: row.processing_status,
+          deliveryCount: row.delivery_count,
+          errorCode: row.error_code,
+        };
   }
 
   public listMetaMessageStatuses(botId: string): Array<{
@@ -4005,8 +4023,7 @@ export class AppDatabase {
         `SELECT meta_phone_number_id FROM assistant_connectors
        WHERE assistant_id=? ORDER BY id DESC LIMIT 1`,
       )
-      .get(botId) as
-      { meta_phone_number_id: string | null } | undefined;
+      .get(botId) as { meta_phone_number_id: string | null } | undefined;
     if (connector?.meta_phone_number_id) {
       const conflict = this.db
         .prepare(
@@ -7899,6 +7916,41 @@ export class AppDatabase {
     return this.db.prepare('SELECT * FROM technical_events ORDER BY id').all() as Array<
       Record<string, unknown>
     >;
+  }
+
+  public listAssistantActivity(botId: string, limit = 200): AssistantActivityEvent[] {
+    const boundedLimit = Math.min(500, Math.max(1, Math.trunc(limit)));
+    const rows = this.db
+      .prepare(
+        `SELECT id, created_at, event_type, source, user_hash, group_hash, result, error_code,
+                duration_ms
+         FROM technical_events
+         WHERE bot_id = ?
+         ORDER BY id DESC
+         LIMIT ?`,
+      )
+      .all(botId, boundedLimit) as Array<{
+      id: number;
+      created_at: string;
+      event_type: string;
+      source: string | null;
+      user_hash: string | null;
+      group_hash: string | null;
+      result: string;
+      error_code: string | null;
+      duration_ms: number | null;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      occurredAt: row.created_at,
+      eventType: row.event_type,
+      source: row.source,
+      userHash: row.user_hash,
+      groupHash: row.group_hash,
+      result: row.result,
+      errorCode: row.error_code,
+      durationMs: row.duration_ms,
+    }));
   }
 
   public getAuditEvents(): Array<Record<string, unknown>> {

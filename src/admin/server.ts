@@ -1134,6 +1134,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           whatsappStatus: runtime?.connection.state ?? bot.whatsappStatus,
           aiConfigured: provider?.isConfigured() ?? false,
           aiEnabled: aiSettings.enabled,
+          aiProvider: aiSettings.provider,
           activeGroups:
             context.businessOnly === true
               ? 0
@@ -1395,6 +1396,22 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         .filter((item) => item.status === 'pending').length,
     };
   });
+
+  app.get(
+    '/api/bots/:botId/history',
+    { preHandler: requireSession(sessions) },
+    async (request, reply) => {
+      const botId = parseBotId(request.params);
+      if (context.database.getBot(botId) === null) {
+        return reply.code(404).send({ error: 'Asistente no encontrado.' });
+      }
+      const query = z
+        .object({ limit: z.coerce.number().int().min(1).max(500).default(200) })
+        .strict()
+        .parse(request.query ?? {});
+      return { items: context.database.listAssistantActivity(botId, query.limit) };
+    },
+  );
 
   app.put(
     '/api/bots/:botId/activation-aliases',

@@ -4,29 +4,142 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f8fafc" />
     <title>Neurobot Business</title>
-    <link rel="stylesheet" href="/styles.css" />
-    <link rel="stylesheet" href="/friendly-panel.css" />
-    <link rel="stylesheet" href="/community-design.css" />
+    <link rel="stylesheet" href="/panel.css" />
   </head>
   <body>
-    <main class="shell">
-      <header class="hero">
-        <div>
-          <p class="eyebrow">Panel local protegido</p>
-          <h1 id="application-title">Neurobot Business</h1>
-          <p id="application-subtitle">
-            Administra la atención automática y humana de cada negocio.
-          </p>
+    <svg class="icon-sprite" aria-hidden="true">
+      <symbol id="icon-menu" viewBox="0 0 24 24">
+        <path d="M4 7h16M4 12h16M4 17h16" />
+      </symbol>
+      <symbol id="icon-bots" viewBox="0 0 24 24">
+        <rect x="4" y="7" width="16" height="12" rx="3" />
+        <path d="M9 3h6M12 3v4M8.5 12h.01M15.5 12h.01M9 16h6" />
+      </symbol>
+      <symbol id="icon-trash" viewBox="0 0 24 24">
+        <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
+      </symbol>
+      <symbol id="icon-users" viewBox="0 0 24 24">
+        <path
+          d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 20v-2a4 4 0 0 0-3-3.87M16 2.13a4 4 0 0 1 0 7.75"
+        />
+      </symbol>
+      <symbol id="icon-home" viewBox="0 0 24 24">
+        <path d="m3 11 9-8 9 8M5 10v10h14V10M9 20v-6h6v6" />
+      </symbol>
+      <symbol id="icon-whatsapp" viewBox="0 0 24 24">
+        <path d="M20 11.5a8 8 0 0 1-11.7 7.1L4 20l1.4-4.1A8 8 0 1 1 20 11.5Z" />
+        <path d="M8.5 8.5c.6 3 2 4.4 5 5l1-1.2c.2-.2.5-.3.8-.1l2 1" />
+      </symbol>
+      <symbol id="icon-profile" viewBox="0 0 24 24">
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 21a8 8 0 0 1 16 0" />
+      </symbol>
+      <symbol id="icon-clock" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </symbol>
+      <symbol id="icon-catalog" viewBox="0 0 24 24">
+        <path d="M4 5h16v14H4zM4 9h16M8 5v4M16 5v4" />
+      </symbol>
+      <symbol id="icon-image" viewBox="0 0 24 24">
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <circle cx="9" cy="9" r="2" />
+        <path d="m4 17 5-5 4 4 2-2 5 5" />
+      </symbol>
+      <symbol id="icon-flow" viewBox="0 0 24 24">
+        <circle cx="6" cy="5" r="2" />
+        <circle cx="18" cy="12" r="2" />
+        <circle cx="6" cy="19" r="2" />
+        <path d="M8 5h3a3 3 0 0 1 3 3v1a3 3 0 0 0 3 3M8 19h3a3 3 0 0 0 3-3v-1a3 3 0 0 1 3-3" />
+      </symbol>
+      <symbol id="icon-book" viewBox="0 0 24 24">
+        <path
+          d="M4 5.5A3.5 3.5 0 0 1 7.5 2H11v17H7.5A3.5 3.5 0 0 0 4 22ZM20 5.5A3.5 3.5 0 0 0 16.5 2H13v17h3.5A3.5 3.5 0 0 1 20 22Z"
+        />
+      </symbol>
+      <symbol id="icon-message" viewBox="0 0 24 24">
+        <path
+          d="M21 15a4 4 0 0 1-4 4H8l-5 3 1.5-4A7 7 0 0 1 3 14V8a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"
+        />
+      </symbol>
+      <symbol id="icon-sparkles" viewBox="0 0 24 24">
+        <path
+          d="m12 3 1.2 3.8L17 8l-3.8 1.2L12 13l-1.2-3.8L7 8l3.8-1.2ZM19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8ZM5 13l.8 2.2L8 16l-2.2.8L5 19l-.8-2.2L2 16l2.2-.8Z"
+        />
+      </symbol>
+      <symbol id="icon-test" viewBox="0 0 24 24">
+        <path d="M9 3h6M10 3v5l-5 9a3 3 0 0 0 2.6 4h8.8a3 3 0 0 0 2.6-4l-5-9V3M7.5 14h9" />
+      </symbol>
+      <symbol id="icon-history" viewBox="0 0 24 24">
+        <path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2" />
+      </symbol>
+      <symbol id="icon-inbox" viewBox="0 0 24 24">
+        <path d="M4 4h16v14H4zM4 14h4l2 3h4l2-3h4" />
+      </symbol>
+      <symbol id="icon-chart" viewBox="0 0 24 24">
+        <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
+      </symbol>
+      <symbol id="icon-chevron-left" viewBox="0 0 24 24">
+        <path d="m15 18-6-6 6-6" />
+      </symbol>
+      <symbol id="icon-close" viewBox="0 0 24 24">
+        <path d="m6 6 12 12M18 6 6 18" />
+      </symbol>
+      <symbol id="icon-more" viewBox="0 0 24 24">
+        <circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" />
+        <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+        <circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" />
+      </symbol>
+    </svg>
+
+    <a class="skip-link" href="#main-content">Saltar al contenido</a>
+
+    <header class="app-header">
+      <div class="app-header__brand">
+        <button
+          id="mobile-menu-button"
+          class="icon-button mobile-menu-button hidden"
+          type="button"
+          aria-label="Abrir navegación"
+          aria-controls="panel-sidebar"
+          aria-expanded="false"
+        >
+          <svg aria-hidden="true"><use href="#icon-menu"></use></svg>
+        </button>
+        <div class="brand-mark" aria-hidden="true">
+          <svg><use href="#icon-bots"></use></svg>
         </div>
+        <div>
+          <p class="app-kicker">Neurobot</p>
+          <h1 id="application-title">Business</h1>
+        </div>
+      </div>
+      <p id="application-subtitle" class="app-header__subtitle">
+        Atención inteligente para cada negocio.
+      </p>
+      <div class="app-header__actions">
+        <span id="session-user" class="session-user hidden"></span>
         <button id="logout" class="secondary hidden" type="button">Cerrar sesión</button>
-      </header>
+      </div>
+    </header>
 
-      <section id="notice" class="notice hidden" role="status" aria-live="polite"></section>
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="false"></div>
 
-      <section id="login-view" class="card narrow">
-        <h2>Acceso administrativo</h2>
-        <form id="login-form">
+    <main id="main-content" class="app-shell" tabindex="-1">
+      <section id="login-view" class="login-card" aria-labelledby="login-title">
+        <div class="login-card__intro">
+          <span class="login-icon" aria-hidden="true">
+            <svg><use href="#icon-bots"></use></svg>
+          </span>
+          <div>
+            <p class="eyebrow">Administración segura</p>
+            <h2 id="login-title">Bienvenido a Neurobot Business</h2>
+            <p>Gestiona tus asistentes, contenidos y atención desde un solo lugar.</p>
+          </div>
+        </div>
+        <form id="login-form" class="stack-form">
           <label>
             Usuario
             <input name="username" value="admin" autocomplete="username" required />
@@ -35,827 +148,903 @@
             Contraseña
             <input name="password" type="password" autocomplete="current-password" required />
           </label>
-          <button type="submit">Ingresar</button>
+          <button type="submit" data-busy-label="Ingresando…">Ingresar</button>
         </form>
       </section>
 
-      <div id="panel-view" class="hidden">
-        <div class="mobile-navigation">
-          <label for="section-select">¿Qué deseas configurar?</label>
-          <select id="section-select" aria-label="Sección del panel">
-            <optgroup label="Panel general" data-global-only>
-              <option value="bots">Mis asistentes</option>
-              <option value="trash">Papelera</option>
-              <option value="global-system">Sistema</option>
-              <option value="administrators">Administradores</option>
-            </optgroup>
-            <optgroup label="Configuración principal" data-bot-only>
-              <option value="status" data-bot-only>Inicio y guía</option>
-              <option value="whatsapp" data-bot-only>Conexión de WhatsApp</option>
-              <option value="profile" data-bot-only>Nombre y perfil</option>
-              <option value="menus" data-bot-only data-module="menus">Menú de respuestas</option>
-              <option value="catalog" data-bot-only data-module="catalog">
-                Productos y servicios
-              </option>
-              <option value="hours" data-bot-only data-module="hours">Horarios</option>
-            </optgroup>
-            <optgroup label="Más opciones" data-bot-only>
-              <option value="media" data-bot-only data-module="media">Imágenes</option>
-              <option value="knowledge" data-bot-only>Información del bot</option>
-              <option value="cached-answers" data-bot-only>Respuestas guardadas</option>
-              <option value="ai" data-bot-only>Inteligencia artificial</option>
-              <option value="requests" data-bot-only data-module="requests">
-                Solicitudes humanas
-              </option>
-              <option value="statistics" data-bot-only>Estadísticas</option>
-              <option value="maintenance" data-bot-only>Mantenimiento</option>
-            </optgroup>
-          </select>
-        </div>
+      <div id="panel-view" class="panel-view hidden">
+        <button
+          id="mobile-nav-overlay"
+          class="mobile-nav-overlay hidden"
+          type="button"
+          aria-label="Cerrar navegación"
+          tabindex="-1"
+        ></button>
 
         <div class="panel-layout">
-          <aside class="panel-sidebar">
-            <nav class="tabs" aria-label="Secciones del panel">
-              <p class="nav-group-title global-only">Panel general</p>
-              <button data-section="bots" class="global-only active">
-                <span aria-hidden="true">🤖</span> Mis asistentes
+          <aside id="panel-sidebar" class="panel-sidebar" aria-label="Navegación principal">
+            <div class="sidebar-mobile-header">
+              <strong>Navegación</strong>
+              <button
+                id="mobile-menu-close"
+                class="icon-button"
+                type="button"
+                aria-label="Cerrar navegación"
+              >
+                <svg aria-hidden="true"><use href="#icon-close"></use></svg>
               </button>
-              <button data-section="trash" class="global-only">
-                <span aria-hidden="true">🗑️</span> Papelera
-              </button>
-              <button data-section="global-system" class="global-only">
-                <span aria-hidden="true">⚙️</span> Sistema
-              </button>
-              <button data-section="administrators" class="global-only">
-                <span aria-hidden="true">👥</span> Administradores
-              </button>
+            </div>
 
-              <details class="sidebar-accordion bot-only hidden" open>
-                <summary>Estado y conexión</summary>
-                <button data-section="status">Inicio e información</button>
-                <button data-section="whatsapp">WhatsApp</button>
-              </details>
+            <nav class="sidebar-nav" aria-label="Secciones del panel">
+              <div data-context="global">
+                <p class="nav-group-label">Panel general</p>
+                <button
+                  class="nav-item active"
+                  data-section="bots"
+                  type="button"
+                  aria-current="page"
+                >
+                  <svg aria-hidden="true"><use href="#icon-bots"></use></svg
+                  ><span>Mis asistentes</span>
+                </button>
+                <button class="nav-item" data-section="trash" type="button">
+                  <svg aria-hidden="true"><use href="#icon-trash"></use></svg><span>Papelera</span>
+                </button>
+                <button class="nav-item" data-section="administrators" type="button">
+                  <svg aria-hidden="true"><use href="#icon-users"></use></svg
+                  ><span>Administradores</span>
+                </button>
+              </div>
 
-              <details class="sidebar-accordion bot-only hidden">
-                <summary>Información del negocio</summary>
-                <button data-section="profile">Nombre y perfil</button>
-                <button data-section="hours" data-module="hours">Horarios</button>
-                <button data-section="media" data-module="media">Imágenes</button>
-              </details>
+              <div data-context="assistant" class="hidden">
+                <button id="back-to-assistants" class="back-link" type="button">
+                  <svg aria-hidden="true"><use href="#icon-chevron-left"></use></svg>
+                  <span>Mis asistentes</span>
+                </button>
 
-              <details class="sidebar-accordion bot-only hidden">
-                <summary>Atención automática</summary>
-                <button data-section="menus" data-module="menus">Menú de respuestas</button>
-                <button data-section="catalog" data-module="catalog">Productos y servicios</button>
-                <button data-section="knowledge">Información del bot</button>
-                <button data-section="cached-answers">Respuestas guardadas</button>
-                <button data-section="ai">Inteligencia artificial</button>
-              </details>
+                <p class="nav-group-label">General</p>
+                <button class="nav-item" data-section="status" type="button">
+                  <svg aria-hidden="true"><use href="#icon-home"></use></svg><span>Inicio</span>
+                </button>
+                <button class="nav-item" data-section="whatsapp" type="button">
+                  <svg aria-hidden="true"><use href="#icon-whatsapp"></use></svg
+                  ><span>WhatsApp</span>
+                </button>
 
-              <details class="sidebar-accordion bot-only hidden">
-                <summary>Atención humana</summary>
-                <button data-section="requests">Solicitudes de atención</button>
-              </details>
+                <p class="nav-group-label">Negocio</p>
+                <button class="nav-item" data-section="profile" type="button">
+                  <svg aria-hidden="true"><use href="#icon-profile"></use></svg><span>Perfil</span>
+                </button>
+                <button class="nav-item" data-section="hours" data-module="hours" type="button">
+                  <svg aria-hidden="true"><use href="#icon-clock"></use></svg><span>Horarios</span>
+                </button>
+                <button class="nav-item" data-section="catalog" data-module="catalog" type="button">
+                  <svg aria-hidden="true"><use href="#icon-catalog"></use></svg
+                  ><span>Catálogo</span>
+                </button>
+                <button class="nav-item" data-section="media" data-module="media" type="button">
+                  <svg aria-hidden="true"><use href="#icon-image"></use></svg
+                  ><span>Multimedia</span>
+                </button>
 
-              <details class="sidebar-accordion bot-only hidden">
-                <summary>Configuración avanzada</summary>
-                <button data-section="statistics">Estadísticas</button>
-                <button data-section="commands">Comandos</button>
-                <button data-section="settings">Ajustes del asistente</button>
-                <button data-section="maintenance">Mantenimiento</button>
-              </details>
+                <p class="nav-group-label">Automatización</p>
+                <button class="nav-item" data-section="menus" data-module="menus" type="button">
+                  <svg aria-hidden="true"><use href="#icon-flow"></use></svg><span>Menús</span>
+                </button>
+                <button class="nav-item" data-section="cached-answers" type="button">
+                  <svg aria-hidden="true"><use href="#icon-message"></use></svg
+                  ><span>Respuestas</span>
+                </button>
+                <button class="nav-item" data-section="knowledge" type="button">
+                  <svg aria-hidden="true"><use href="#icon-book"></use></svg
+                  ><span>Conocimiento</span>
+                </button>
+                <button class="nav-item" data-section="ai" type="button">
+                  <svg aria-hidden="true"><use href="#icon-sparkles"></use></svg
+                  ><span>Inteligencia artificial</span>
+                </button>
+
+                <p class="nav-group-label">Operación</p>
+                <button class="nav-item" data-section="test-center" type="button">
+                  <svg aria-hidden="true"><use href="#icon-test"></use></svg
+                  ><span>Centro de pruebas</span>
+                </button>
+                <button class="nav-item" data-section="history" type="button">
+                  <svg aria-hidden="true"><use href="#icon-history"></use></svg
+                  ><span>Historial</span>
+                </button>
+                <button
+                  class="nav-item"
+                  data-section="requests"
+                  data-module="requests"
+                  type="button"
+                >
+                  <svg aria-hidden="true"><use href="#icon-inbox"></use></svg
+                  ><span>Solicitudes</span>
+                </button>
+                <button class="nav-item" data-section="statistics" type="button">
+                  <svg aria-hidden="true"><use href="#icon-chart"></use></svg
+                  ><span>Estadísticas</span>
+                </button>
+              </div>
             </nav>
           </aside>
 
           <div class="panel-main">
+            <div id="mobile-current-section" class="mobile-current-section" aria-live="polite">
+              Mis asistentes
+            </div>
+
             <section
               id="assistant-context"
-              class="assistant-context card hidden"
-              aria-live="polite"
+              class="assistant-context hidden"
+              aria-label="Asistente seleccionado"
             >
-              <button id="back-to-assistants" class="secondary" type="button">
-                ← Volver a Mis asistentes
-              </button>
               <div>
-                <p class="eyebrow">Asistente seleccionado</p>
-                <h2 id="assistant-context-name">Asistente</h2>
-                <p id="assistant-context-detail" class="muted"></p>
-                <p id="assistant-context-warning" class="info-callout hidden"></p>
+                <p id="assistant-context-business" class="assistant-context__business">Negocio</p>
+                <div class="assistant-context__title-row">
+                  <h2 id="assistant-context-name">Asistente</h2>
+                  <span id="assistant-context-status" class="status-badge neutral">Sin datos</span>
+                  <span id="assistant-context-whatsapp" class="status-badge neutral">WhatsApp</span>
+                </div>
               </div>
+              <p id="assistant-context-detail" class="muted"></p>
             </section>
 
-            <section id="section-bots" class="panel-section">
-              <div class="section-heading">
+            <section id="section-bots" class="panel-section" aria-labelledby="bots-title">
+              <div class="page-heading">
                 <div>
-                  <p class="eyebrow">Instancias independientes</p>
-                  <h2>Mis asistentes</h2>
+                  <p class="eyebrow">Panel general</p>
+                  <h2 id="bots-title">Mis asistentes</h2>
+                  <p>Administra cada negocio y revisa su estado operativo.</p>
                 </div>
-                <button id="open-create-bot" type="button">Crear nuevo asistente</button>
+                <button id="open-create-bot" type="button">Crear asistente</button>
               </div>
-              <div id="bots-list" class="bot-grid"></div>
-              <form id="create-bot-form" class="card inset hidden">
-                <h3>Crear nuevo asistente</h3>
-                <div class="form-row">
-                  <label
-                    >Nombre del negocio<input name="organizationName" maxlength="160" required
-                  /></label>
-                  <label>Nombre del bot<input name="botName" maxlength="80" required /></label>
+              <div id="bots-list" class="assistant-grid" aria-live="polite"></div>
+
+              <form
+                id="create-bot-form"
+                class="editor-panel hidden"
+                aria-labelledby="create-bot-title"
+              >
+                <div class="editor-panel__heading">
+                  <div>
+                    <p class="eyebrow">Nuevo asistente</p>
+                    <h3 id="create-bot-title">Configura lo esencial</h3>
+                  </div>
+                  <button
+                    id="cancel-create-bot"
+                    class="icon-button secondary"
+                    type="button"
+                    aria-label="Cerrar formulario"
+                  >
+                    <svg aria-hidden="true"><use href="#icon-close"></use></svg>
+                  </button>
                 </div>
-                <div class="form-row">
-                  <label
-                    >Identificador interno<input
-                      name="id"
-                      maxlength="80"
-                      placeholder="Tienda de enmarcado de fotos"
-                      required
-                    /><small>Se convertirá automáticamente a minúsculas y guiones.</small></label
-                  >
-                  <label
-                    >Tipo de organización<select name="organizationType">
-                      <option>Tienda</option>
-                      <option>Restaurante</option>
-                      <option>Distribuidora</option>
-                      <option>Servicio profesional</option>
-                      <option>Organización social</option>
-                      <option>Institución educativa</option>
-                      <option>Otro</option>
-                    </select></label
-                  >
-                </div>
-                <div class="form-row">
-                  <input name="mode" type="hidden" value="business" />
-                  <input name="connectorType" type="hidden" value="WHATSAPP_CLOUD_API" />
-                  <label
-                    >Zona horaria<input name="timezone" value="America/Santiago" required
-                  /></label>
-                </div>
-                <div class="form-row">
-                  <label
-                    >Proveedor de IA<select name="provider">
-                      <option value="groq">Groq</option>
-                      <option value="disabled">Desactivado</option>
-                    </select></label
-                  >
-                  <label
-                    >Plantilla<select name="preset">
-                      <option value="store">Tienda</option>
-                      <option value="restaurant">Restaurante</option>
-                      <option value="distributor">Distribuidora</option>
-                      <option value="service">Servicio</option>
-                      <option value="empty">Perfil vacío</option>
-                    </select></label
-                  >
-                  <label
-                    >Tipo de menú<select name="menuType">
-                      <option value="automatic">Automático</option>
-                      <option value="native_buttons">Botones nativos</option>
-                      <option value="native_list">Lista nativa</option>
-                      <option value="numbered">Opciones numeradas</option>
-                    </select></label
-                  >
-                </div>
-                <div class="info-callout">
-                  <strong>Número exclusivo por asistente.</strong>
-                  <p>
-                    Cada número puede estar vinculado a un solo asistente. Si ya está en uso, la
-                    vinculación se rechazará sin modificar el asistente existente.
+
+                <fieldset class="form-section">
+                  <legend>Identidad</legend>
+                  <div class="form-grid two-columns">
+                    <label
+                      >Nombre del negocio<input name="organizationName" maxlength="160" required
+                    /></label>
+                    <label
+                      >Nombre del asistente<input name="botName" maxlength="80" required
+                    /></label>
+                    <label>
+                      Tipo de negocio
+                      <select name="organizationType" required>
+                        <option>Tienda</option>
+                        <option>Restaurante</option>
+                        <option>Distribuidora</option>
+                        <option>Servicio profesional</option>
+                        <option>Organización social</option>
+                        <option>Institución educativa</option>
+                        <option>Otro</option>
+                      </select>
+                    </label>
+                    <label>
+                      Identificador
+                      <input name="id" maxlength="80" placeholder="mi-negocio" required />
+                      <small>Se completa automáticamente y puedes editarlo antes de crear.</small>
+                    </label>
+                  </div>
+                </fieldset>
+
+                <fieldset class="form-section">
+                  <legend>Configuración</legend>
+                  <div class="form-grid three-columns">
+                    <label
+                      >Zona horaria<input name="timezone" value="America/Santiago" required
+                    /></label>
+                    <label>
+                      Inteligencia artificial
+                      <select name="provider">
+                        <option value="groq">Groq</option>
+                        <option value="disabled">Configurar después</option>
+                      </select>
+                    </label>
+                    <label>
+                      Plantilla inicial
+                      <select name="preset">
+                        <option value="store">Tienda</option>
+                        <option value="restaurant">Restaurante</option>
+                        <option value="distributor">Distribuidora</option>
+                        <option value="service">Servicio</option>
+                        <option value="empty">Comenzar en blanco</option>
+                      </select>
+                    </label>
+                  </div>
+                </fieldset>
+
+                <fieldset class="form-section">
+                  <legend>WhatsApp</legend>
+                  <p class="form-help">
+                    Cada asistente utiliza su propio número de WhatsApp Cloud API. La conexión se
+                    completa después de crearlo.
                   </p>
-                  <label class="toggle"
-                    ><input name="exclusiveNumberConfirmed" type="checkbox" required /> Comprendo y
-                    deseo crear este asistente independiente.</label
-                  >
-                </div>
-                <div class="actions">
-                  <button type="submit">Crear y preparar vinculación</button
-                  ><button id="cancel-create-bot" class="secondary" type="button">Cancelar</button>
+                  <label class="check-row">
+                    <input name="exclusiveNumberConfirmed" type="checkbox" required />
+                    <span>Entiendo que este asistente necesita un número exclusivo.</span>
+                  </label>
+                </fieldset>
+
+                <input name="mode" type="hidden" value="business" />
+                <input name="connectorType" type="hidden" value="WHATSAPP_CLOUD_API" />
+                <input name="menuType" type="hidden" value="automatic" />
+                <div class="form-actions">
+                  <button type="submit" data-busy-label="Creando…">Crear asistente</button>
+                  <button class="secondary" type="button" data-cancel-create>Cancelar</button>
                 </div>
               </form>
             </section>
 
-            <section id="section-trash" class="panel-section hidden">
-              <div class="section-heading">
+            <section id="section-trash" class="panel-section hidden" aria-labelledby="trash-title">
+              <div class="page-heading">
                 <div>
-                  <p class="eyebrow">Recuperación durante 30 días</p>
-                  <h2>Papelera de asistentes</h2>
+                  <p class="eyebrow">Panel general</p>
+                  <h2 id="trash-title">Papelera</h2>
+                  <p>Restaura asistentes archivados o elimínalos definitivamente.</p>
                 </div>
               </div>
-              <p class="muted">
-                Los asistentes enviados aquí quedan detenidos. Puedes restaurarlos o eliminarlos
-                definitivamente con una confirmación reforzada.
-              </p>
-              <div id="trash-list" class="bot-grid"></div>
+              <div id="trash-list" class="assistant-grid" aria-live="polite"></div>
             </section>
 
-            <section id="section-global-system" class="panel-section hidden">
-              <p class="eyebrow">Instalación completa</p>
-              <h2>Sistema</h2>
-              <div class="status-grid">
-                <div class="status-card">
-                  <span>Identidades</span><strong>Separadas por asistente</strong>
-                </div>
-                <div class="status-card"><span>Sesiones</span><strong>Aisladas</strong></div>
-                <div class="status-card">
-                  <span>Eliminación</span><strong>Papelera protegida</strong>
+            <section
+              id="section-administrators"
+              class="panel-section hidden"
+              aria-labelledby="administrators-title"
+            >
+              <div class="page-heading">
+                <div>
+                  <p class="eyebrow">Panel general</p>
+                  <h2 id="administrators-title">Administradores</h2>
+                  <p>Números autorizados para administrar el servicio por WhatsApp.</p>
                 </div>
               </div>
-              <p class="info-callout">
-                La configuración global no modifica automáticamente asistentes existentes. Los
-                cambios de conexión deben hacerse dentro de cada asistente.
-              </p>
+              <form id="administrator-form" class="inline-editor">
+                <label
+                  >Número internacional<input
+                    name="number"
+                    inputmode="tel"
+                    autocomplete="tel"
+                    placeholder="+56912345678"
+                    required
+                /></label>
+                <button type="submit" data-busy-label="Agregando…">Agregar administrador</button>
+              </form>
+              <div id="administrators-list" class="data-list" aria-live="polite"></div>
             </section>
 
-            <section id="section-status" class="panel-section hidden">
-              <div class="section-heading">
+            <section
+              id="section-status"
+              class="panel-section hidden"
+              aria-labelledby="status-title"
+            >
+              <div class="page-heading compact-heading">
                 <div>
-                  <p class="eyebrow">Resumen operativo</p>
-                  <h2>Inicio</h2>
+                  <p class="eyebrow">Resumen</p>
+                  <h2 id="status-title">Inicio</h2>
+                  <p>Comprueba en segundos si tu asistente está funcionando.</p>
                 </div>
-                <button id="restart-connection" class="secondary">Reiniciar conexión</button>
               </div>
 
-              <details class="card inset" open>
-                <summary>Estado y conexión</summary>
-                <div id="status-cards" class="status-grid"></div>
-                <div id="status-quick-actions" class="actions"></div>
-              </details>
+              <div id="status-cards" class="health-grid" aria-live="polite"></div>
 
-              <details class="card inset hidden" data-requires-module="automatic-messages">
-                <summary>Grupos vinculados</summary>
-                <div class="section-heading" style="margin-top: 1rem">
-                  <p class="muted">Se activan automáticamente al incorporar este bot.</p>
-                  <button id="refresh-bot-groups" class="secondary" type="button">
-                    Actualizar
-                  </button>
+              <section class="content-block" aria-labelledby="quick-actions-title">
+                <div class="content-block__heading">
+                  <h3 id="quick-actions-title">Acciones rápidas</h3>
                 </div>
-                <div id="bot-groups-list" class="list"></div>
-              </details>
+                <div id="status-quick-actions" class="button-row"></div>
+              </section>
 
-              <details class="advanced-settings card inset">
-                <summary>Configuración del bot</summary>
-                <form id="bot-configuration-form">
-                  <h3>Canales y comportamiento</h3>
-                  <div class="form-row">
-                    <input name="mode" type="hidden" value="business" />
-                    <label
-                      >Tipo de menú<select name="menuType">
-                        <option value="automatic">Automático</option>
-                        <option value="native_buttons">Botones nativos</option>
-                        <option value="native_list">Lista nativa</option>
-                        <option value="numbered">Opciones numeradas</option>
-                      </select></label
-                    >
-                  </div>
-                  <div class="checks">
-                    <label
-                      ><input name="enabled" type="checkbox" role="switch" /> Asistente
-                      activado</label
-                    >
-                    <label class="hidden"
-                      ><input name="groupsEnabled" type="checkbox" /> Grupos desactivados</label
-                    >
-                    <label class="hidden"
-                      ><input name="privateMessagesEnabled" type="checkbox" checked /> Mensajes
-                      privados activados</label
-                    >
-                    <label class="hidden"
-                      ><input name="realMentionRequired" type="checkbox" /> Menciones
-                      desactivadas</label
-                    >
-                    <label
-                      ><input name="continuedConversationsEnabled" type="checkbox" role="switch" />
-                      Conversaciones continuadas</label
-                    >
-                  </div>
-                  <div class="actions" style="margin-top: 1rem">
-                    <button type="submit">Guardar funcionamiento</button>
-                  </div>
-                </form>
-              </details>
-            </section>
-
-            <section id="section-whatsapp" class="panel-section hidden">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">API oficial de Meta</p>
-                  <h2>WhatsApp Cloud API</h2>
-                </div>
-                <div class="actions">
-                  <button id="bot-restart" class="secondary" type="button">
-                    Revalidar configuración</button
-                  >
-                </div>
-              </div>
-              <div id="whatsapp-cards" class="status-grid"></div>
-              <article class="card inset">
-                <h3>Configuración administrada por entorno</h3>
-                <p class="muted">
-                  El número, las credenciales y el webhook se configuran en el servidor. El panel
-                  solo muestra su estado y nunca expone secretos.
-                </p>
-              </article>
-              <article
-                class="card inset manual-tests-card hidden"
-                data-requires-module="automatic-messages"
+              <section
+                id="attention-panel"
+                class="attention-panel hidden"
+                aria-labelledby="attention-title"
               >
-                <h3>Pruebas manuales controladas</h3>
-                <p class="muted">
-                  Cada envío requiere confirmación y utiliza solamente un grupo activo de este
-                  asistente.
-                </p>
-                <div class="form-row manual-tests-fields">
-                  <label>Grupo de prueba<select id="manual-test-group"></select></label>
-                  <label>Producto o servicio<select id="manual-test-catalog"></select></label>
-                  <label>Imagen<select id="manual-test-media"></select></label>
-                  <label>Encuesta<select id="manual-test-poll"></select></label>
+                <div class="content-block__heading">
+                  <h3 id="attention-title">Requiere atención</h3>
                 </div>
-                <div class="actions manual-tests-actions">
-                  <button class="manual-bot-test" data-kind="menu" type="button">
-                    Probar menú
+                <div id="attention-list" class="data-list"></div>
+              </section>
+
+              <section class="content-block" aria-labelledby="recent-activity-title">
+                <div class="content-block__heading">
+                  <h3 id="recent-activity-title">Actividad reciente</h3>
+                  <button class="text-button" data-open-section="history" type="button">
+                    Ver historial
                   </button>
-                  <button class="manual-bot-test" data-kind="catalog_item" type="button">
-                    Probar catálogo
-                  </button>
-                  <button class="manual-bot-test" data-kind="media" type="button">
-                    Probar imagen
-                  </button>
-                  <button id="manual-poll-test" type="button">Probar encuesta</button>
                 </div>
-              </article>
+                <div id="overview-activity" class="activity-list" aria-live="polite"></div>
+              </section>
             </section>
 
-            <section id="section-profile" class="panel-section hidden">
-              <div class="section-heading">
+            <section
+              id="section-whatsapp"
+              class="panel-section hidden"
+              aria-labelledby="whatsapp-title"
+            >
+              <div class="page-heading">
                 <div>
-                  <p class="eyebrow">Identidad y marca blanca</p>
-                  <h2>Perfil del asistente</h2>
+                  <p class="eyebrow">Canal oficial</p>
+                  <h2 id="whatsapp-title">WhatsApp</h2>
+                  <p>Estado de la integración con WhatsApp Cloud API.</p>
                 </div>
-                <div class="actions hidden">
-                  <select id="profile-select" aria-label="Perfil activo"></select>
-                  <button id="activate-profile" class="secondary" type="button">
-                    Activar perfil
-                  </button>
-                  <button id="new-profile" type="button">Crear perfil</button>
-                </div>
-              </div>
-              <div class="card inset hidden">
-                <label>Plantilla inicial<select id="profile-template"></select></label>
-                <button id="apply-profile-template" class="secondary" type="button">
-                  Aplicar con respaldo
+                <button
+                  id="bot-restart"
+                  class="secondary"
+                  type="button"
+                  data-busy-label="Revalidando…"
+                >
+                  Revalidar
                 </button>
               </div>
-              <form id="profile-form">
-                <div class="form-row">
-                  <label
-                    >Nombre interno<input name="internalName" maxlength="120" required
-                  /></label>
-                  <label
-                    >Nombre público<input name="organizationName" maxlength="160" required
-                  /></label>
-                </div>
-                <div class="form-row">
-                  <label>Nombre del bot<input name="botName" maxlength="80" required /></label>
-                  <label data-community-channel
-                    >Alias visible<input
-                      name="activationAlias"
-                      maxlength="80"
-                      placeholder="@Asistente"
-                      required
-                  /></label>
-                </div>
-                <p id="neurobot-alias-help" class="info-callout hidden">
-                  Neurobot siempre se activa escribiendo <strong>@neurobot</strong>, sin importar
-                  mayúsculas, el número o cómo esté guardado el contacto.
-                </p>
-                <div id="activation-aliases-card" class="card inset hidden">
-                  <label
-                    >Alias adicionales (uno por línea)<textarea
-                      id="activation-aliases"
-                      rows="3"
-                      placeholder="@neuroayuda"
-                    ></textarea>
-                  </label>
-                  <p class="muted">
-                    El alias @neurobot siempre se conserva. Los alias solo activan al bot cuando
-                    aparecen al comienzo.
-                  </p>
-                  <button id="save-activation-aliases" type="button">Guardar alias</button>
-                </div>
-                <div class="form-row">
-                  <label
-                    >Tipo<select name="organizationType" required>
-                      <option>Tienda</option>
-                      <option>Restaurante</option>
-                      <option>Distribuidora</option>
-                      <option>Servicio profesional</option>
-                      <option>Organización social</option>
-                      <option>Institución educativa</option>
-                      <option>Otro</option>
-                    </select></label
-                  >
-                  <label>Rubro<input name="industry" maxlength="160" required /></label>
-                </div>
-                <label
-                  >Descripción<textarea
-                    name="description"
-                    maxlength="1000"
-                    rows="3"
-                    required
-                  ></textarea>
-                </label>
-                <label
-                  >Objetivo<textarea name="objective" maxlength="1200" rows="3" required></textarea>
-                </label>
-                <div class="form-row">
-                  <label
-                    >Temas permitidos (uno por línea)<textarea
-                      name="allowedTopics"
-                      rows="6"
-                      required
-                    ></textarea>
-                  </label>
-                  <label
-                    >Temas excluidos (uno por línea)<textarea
-                      name="excludedTopics"
-                      rows="6"
-                      required
-                    ></textarea>
-                  </label>
-                </div>
-                <label>Tono<input name="tone" maxlength="300" required /></label>
-                <div class="form-row">
-                  <label
-                    >Mensaje fuera de tema<textarea
-                      name="outOfScopeMessage"
-                      maxlength="600"
-                      rows="3"
-                      required
-                    ></textarea>
-                  </label>
-                  <label
-                    >Mensaje sin información<textarea
-                      name="noInformationMessage"
-                      maxlength="600"
-                      rows="3"
-                      required
-                    ></textarea>
-                  </label>
-                </div>
-                <div class="form-row">
-                  <label
-                    >Mensaje por límite<textarea
-                      name="limitMessage"
-                      maxlength="600"
-                      rows="3"
-                      required
-                    ></textarea>
-                  </label>
-                  <label
-                    >Mensaje ante error de IA<textarea
-                      name="aiErrorMessage"
-                      maxlength="600"
-                      rows="3"
-                      required
-                    ></textarea>
-                  </label>
-                </div>
-                <div class="form-row">
-                  <label
-                    >Mensaje médico<textarea
-                      name="medicalMessage"
-                      maxlength="600"
-                      rows="3"
-                      required
-                    ></textarea>
-                  </label>
-                  <label
-                    >Mensaje al mencionar sin pregunta<textarea
-                      name="mentionPromptMessage"
-                      maxlength="600"
-                      rows="3"
-                      required
-                    ></textarea>
-                  </label>
-                </div>
-                <label
-                  >Saludo local de Neurobot<textarea
-                    name="communityGreetingMessage"
-                    maxlength="1200"
-                    rows="5"
-                    required
-                  ></textarea>
-                </label>
-                <div class="form-row">
-                  <label
-                    >Contacto<textarea
-                      name="contactInformation"
-                      maxlength="1000"
-                      rows="3"
-                    ></textarea>
-                  </label>
-                  <label
-                    >Horarios<textarea name="businessHours" maxlength="1000" rows="3"></textarea>
-                  </label>
-                </div>
-                <div class="form-row">
-                  <label>Dirección opcional<input name="address" maxlength="500" /></label>
-                  <label>Zona horaria<input name="timezone" maxlength="80" required /></label>
-                </div>
-                <fieldset>
-                  <legend>Marca blanca</legend>
-                  <div class="form-row">
-                    <label
-                      >Nombre de aplicación<input name="applicationName" maxlength="120" required
-                    /></label>
-                    <label>Encabezado<input name="headerText" maxlength="160" required /></label>
-                  </div>
-                  <div class="form-row">
-                    <label>Pie<input name="footerText" maxlength="300" /></label>
-                    <label>Soporte<input name="supportInformation" maxlength="500" /></label>
-                  </div>
-                  <div class="form-row">
-                    <label>Color principal<input name="primaryColor" type="color" /></label>
-                    <label>Color secundario<input name="secondaryColor" type="color" /></label>
-                  </div>
-                  <label
-                    >Logo local (PNG, JPEG o WebP; máximo 384 KB)<input
-                      id="profile-logo-file"
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                  /></label>
-                  <input name="logoPath" type="hidden" />
-                </fieldset>
-                <button type="submit">Guardar perfil</button>
-              </form>
-              <article
-                id="profile-preview"
-                class="card inset"
-                aria-label="Vista previa del perfil"
-              ></article>
+              <div id="whatsapp-cards" class="health-grid" aria-live="polite"></div>
+              <div id="whatsapp-issues" class="attention-panel hidden" aria-live="polite"></div>
+              <p class="privacy-note">
+                Las credenciales se administran en el servidor y nunca se muestran en este panel.
+              </p>
             </section>
 
-            <section id="section-knowledge" class="panel-section hidden">
-              <div class="section-heading">
+            <section
+              id="section-profile"
+              class="panel-section hidden"
+              aria-labelledby="profile-title"
+            >
+              <div class="page-heading">
                 <div>
-                  <p class="eyebrow">Información oficial</p>
-                  <h2>Información del bot</h2>
+                  <p class="eyebrow">Negocio</p>
+                  <h2 id="profile-title">Perfil</h2>
+                  <p>Define la identidad del negocio y la personalidad del asistente.</p>
                 </div>
-                <div class="actions">
+              </div>
+
+              <form id="profile-form" class="stack-form">
+                <fieldset class="form-section">
+                  <legend>Identidad</legend>
+                  <div class="form-grid two-columns">
+                    <label
+                      >Nombre del negocio<input name="organizationName" maxlength="160" required
+                    /></label>
+                    <label
+                      >Nombre del asistente<input name="botName" maxlength="80" required
+                    /></label>
+                    <label>
+                      Tipo de negocio
+                      <select name="organizationType" required>
+                        <option>Comunidad</option>
+                        <option>Tienda</option>
+                        <option>Restaurante</option>
+                        <option>Distribuidora</option>
+                        <option>Servicio profesional</option>
+                        <option>Organización social</option>
+                        <option>Institución educativa</option>
+                        <option>Otro</option>
+                      </select>
+                    </label>
+                    <label>Rubro<input name="industry" maxlength="160" required /></label>
+                  </div>
+                  <label
+                    >Descripción<textarea
+                      name="description"
+                      maxlength="1000"
+                      rows="3"
+                      required
+                    ></textarea>
+                  </label>
+                  <label
+                    >Objetivo del asistente<textarea
+                      name="objective"
+                      maxlength="1200"
+                      rows="3"
+                      required
+                    ></textarea>
+                  </label>
+                  <label>Tono de comunicación<input name="tone" maxlength="300" required /></label>
+                </fieldset>
+
+                <fieldset class="form-section">
+                  <legend>Contacto</legend>
+                  <div class="form-grid two-columns">
+                    <label
+                      >Información de contacto<textarea
+                        name="contactInformation"
+                        maxlength="1000"
+                        rows="3"
+                      ></textarea>
+                    </label>
+                    <label>Dirección opcional<input name="address" maxlength="500" /></label>
+                    <label>Zona horaria<input name="timezone" maxlength="80" required /></label>
+                  </div>
+                </fieldset>
+
+                <details class="disclosure">
+                  <summary>
+                    <span
+                      ><strong>Respuestas especiales</strong
+                      ><small>Alcance, límites y mensajes de ayuda.</small></span
+                    >
+                  </summary>
+                  <div class="disclosure__content">
+                    <div class="form-grid two-columns">
+                      <label
+                        >Temas que puede responder<textarea
+                          name="allowedTopics"
+                          rows="5"
+                          required
+                        ></textarea>
+                      </label>
+                      <label
+                        >Temas que no debe responder<textarea
+                          name="excludedTopics"
+                          rows="5"
+                          required
+                        ></textarea>
+                      </label>
+                      <label
+                        >Mensaje fuera de tema<textarea
+                          name="outOfScopeMessage"
+                          maxlength="600"
+                          rows="3"
+                          required
+                        ></textarea>
+                      </label>
+                      <label
+                        >Mensaje sin información<textarea
+                          name="noInformationMessage"
+                          maxlength="600"
+                          rows="3"
+                          required
+                        ></textarea>
+                      </label>
+                      <label
+                        >Mensaje por límite de uso<textarea
+                          name="limitMessage"
+                          maxlength="600"
+                          rows="3"
+                          required
+                        ></textarea>
+                      </label>
+                      <label
+                        >Mensaje ante error de IA<textarea
+                          name="aiErrorMessage"
+                          maxlength="600"
+                          rows="3"
+                          required
+                        ></textarea>
+                      </label>
+                      <label
+                        >Mensaje para temas médicos<textarea
+                          name="medicalMessage"
+                          maxlength="600"
+                          rows="3"
+                          required
+                        ></textarea>
+                      </label>
+                      <label
+                        >Mensaje al recibir una consulta incompleta<textarea
+                          name="mentionPromptMessage"
+                          maxlength="600"
+                          rows="3"
+                          required
+                        ></textarea>
+                      </label>
+                    </div>
+                  </div>
+                </details>
+
+                <input name="internalName" type="hidden" />
+                <input name="activationAlias" type="hidden" />
+                <input name="communityGreetingMessage" type="hidden" />
+                <input name="businessHours" type="hidden" />
+                <input name="logoPath" type="hidden" />
+                <input name="primaryColor" type="hidden" />
+                <input name="secondaryColor" type="hidden" />
+                <input name="applicationName" type="hidden" />
+                <input name="headerText" type="hidden" />
+                <input name="footerText" type="hidden" />
+                <input name="supportInformation" type="hidden" />
+
+                <div class="form-actions">
+                  <button type="submit" data-busy-label="Guardando…">Guardar perfil</button>
+                </div>
+              </form>
+
+              <details class="disclosure">
+                <summary>
+                  <span
+                    ><strong>Funcionamiento</strong
+                    ><small>Activación, conversaciones y formato de los menús.</small></span
+                  >
+                </summary>
+                <div class="disclosure__content">
+                  <form id="bot-configuration-form" class="stack-form">
+                    <input name="mode" type="hidden" value="business" />
+                    <input name="groupsEnabled" type="hidden" value="false" />
+                    <input name="privateMessagesEnabled" type="hidden" value="true" />
+                    <input name="realMentionRequired" type="hidden" value="false" />
+                    <div class="form-grid two-columns">
+                      <label class="switch-row"
+                        ><input name="enabled" type="checkbox" role="switch" /><span
+                          >Asistente activo</span
+                        ></label
+                      >
+                      <label class="switch-row"
+                        ><input
+                          name="continuedConversationsEnabled"
+                          type="checkbox"
+                          role="switch"
+                        /><span>Continuar conversaciones</span></label
+                      >
+                      <label>
+                        Presentación de menús
+                        <select name="menuType">
+                          <option value="automatic">Automática</option>
+                          <option value="native_buttons">Botones de WhatsApp</option>
+                          <option value="native_list">Lista de WhatsApp</option>
+                          <option value="numbered">Opciones numeradas</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div class="form-actions">
+                      <button type="submit" data-busy-label="Guardando…">
+                        Guardar funcionamiento
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </details>
+            </section>
+
+            <section
+              id="section-knowledge"
+              class="panel-section hidden"
+              aria-labelledby="knowledge-title"
+            >
+              <div class="page-heading">
+                <div>
+                  <p class="eyebrow">Automatización</p>
+                  <h2 id="knowledge-title">Conocimiento</h2>
+                  <p>Agrega información oficial que el asistente puede usar para responder.</p>
+                </div>
+                <div class="button-row">
                   <button id="new-knowledge-entry" type="button">Agregar información</button>
-                  <button id="toggle-knowledge-categories" class="secondary" type="button">
-                    Administrar categorías
+                  <button
+                    id="toggle-knowledge-categories"
+                    class="secondary"
+                    type="button"
+                    aria-expanded="false"
+                    aria-controls="knowledge-category-panel"
+                  >
+                    Categorías
                   </button>
                 </div>
               </div>
 
-              <p class="info-callout knowledge-explanation">
-                <strong>Las categorías solo sirven para ordenar.</strong>
-                La información que Neurobot utilizará para responder se crea con el botón
-                <strong>Agregar información</strong>.
-              </p>
-
-              <article
+              <section
                 id="knowledge-category-panel"
-                class="card inset knowledge-category-panel hidden"
-                data-friendly-group="knowledge-categories"
+                class="editor-panel hidden"
+                aria-labelledby="knowledge-categories-title"
               >
-                <div class="section-heading">
+                <div class="editor-panel__heading">
                   <div>
-                    <h3>Administrar categorías</h3>
-                    <p class="muted">
-                      Crea carpetas para organizar la información. Renombrar una categoría no
-                      modifica su contenido.
-                    </p>
+                    <h3 id="knowledge-categories-title">Categorías</h3>
+                    <p>Organiza la información en grupos claros.</p>
                   </div>
                   <button id="new-knowledge-category" class="secondary" type="button">
                     Nueva categoría
                   </button>
                 </div>
-
-                <form id="knowledge-category-form" class="inline-form knowledge-editor hidden">
+                <form id="knowledge-category-form" class="inline-editor hidden">
                   <input name="id" type="hidden" />
-                  <label
-                    >Nombre de la categoría<input name="name" maxlength="100" required
-                  /></label>
-                  <label class="toggle"
-                    ><input name="enabled" type="checkbox" role="switch" checked /> Categoría
-                    activa</label
+                  <label>Nombre<input name="name" maxlength="100" required /></label>
+                  <label class="switch-row"
+                    ><input name="enabled" type="checkbox" role="switch" checked /><span
+                      >Activa</span
+                    ></label
                   >
-                  <div class="actions">
-                    <button id="knowledge-category-submit" type="submit">Guardar categoría</button>
+                  <div class="button-row">
+                    <button
+                      id="knowledge-category-submit"
+                      type="submit"
+                      data-busy-label="Guardando…"
+                    >
+                      Guardar
+                    </button>
                     <button id="cancel-knowledge-category" class="secondary" type="button">
                       Cancelar
                     </button>
                   </div>
                 </form>
-
-                <div id="knowledge-categories" class="list compact-list"></div>
-              </article>
-
-              <section class="knowledge-saved-section" aria-labelledby="knowledge-saved-title">
-                <div class="section-heading">
-                  <div>
-                    <h3 id="knowledge-saved-title">Información guardada</h3>
-                    <p class="muted">
-                      Cada tarjeta contiene un dato concreto que Neurobot puede consultar para
-                      responder.
-                    </p>
-                  </div>
-                </div>
-                <div id="knowledge-entries" class="list"></div>
+                <div id="knowledge-categories" class="data-list"></div>
               </section>
+
+              <div id="knowledge-entries" class="data-list" aria-live="polite"></div>
 
               <form
                 id="knowledge-entry-form"
-                class="card inset knowledge-editor friendly-primary-card hidden"
+                class="editor-panel hidden"
+                aria-labelledby="knowledge-entry-form-title"
               >
-                <div class="section-heading">
+                <div class="editor-panel__heading">
                   <div>
-                    <p class="eyebrow">Contenido para las respuestas</p>
+                    <p class="eyebrow">Contenido oficial</p>
                     <h3 id="knowledge-entry-form-title">Agregar información</h3>
                   </div>
+                  <button
+                    id="cancel-knowledge-entry"
+                    class="icon-button secondary"
+                    type="button"
+                    aria-label="Cerrar formulario"
+                  >
+                    <svg aria-hidden="true"><use href="#icon-close"></use></svg>
+                  </button>
                 </div>
                 <input name="id" type="hidden" />
-                <div class="form-row">
-                  <label
-                    >Título breve<input
-                      name="title"
-                      maxlength="200"
-                      placeholder="Ejemplo: Taller de habilidades sociales"
-                      required
-                  /></label>
-                  <label>¿En qué categoría va?<select name="categoryId" required></select></label>
+                <div class="form-grid two-columns">
+                  <label>Título breve<input name="title" maxlength="200" required /></label>
+                  <label>Categoría<select name="categoryId" required></select></label>
                 </div>
                 <label
-                  >Información que Neurobot debe conocer<textarea
+                  >Información que debe conocer<textarea
                     name="content"
                     maxlength="8000"
                     rows="7"
-                    placeholder="Escribe aquí la información oficial, completa y actualizada."
                     required
                   ></textarea>
                 </label>
-                <div class="form-row">
+                <div class="form-grid two-columns">
                   <label
-                    >Palabras que las personas podrían utilizar<textarea
+                    >Palabras relacionadas<textarea
                       name="keywords"
                       rows="4"
-                      placeholder="taller&#10;actividades&#10;inscripción"
+                      placeholder="Una por línea"
                     ></textarea>
                   </label>
                   <label
-                    >Otras formas de decir lo mismo<textarea
+                    >Otras formas de decirlo<textarea
                       name="synonyms"
                       rows="4"
-                      placeholder="curso&#10;jornada&#10;encuentro"
+                      placeholder="Una por línea"
                     ></textarea>
                   </label>
                 </div>
-
-                <div class="knowledge-priority-control">
-                  <div class="knowledge-priority-heading">
-                    <span>¿Qué tan importante es esta información?</span>
-                    <strong id="knowledge-priority-label">Prioridad normal</strong>
-                  </div>
-                  <input
-                    name="priority"
-                    type="range"
-                    min="-100"
-                    max="100"
-                    step="25"
-                    value="0"
-                    aria-describedby="knowledge-priority-help"
-                  />
-                  <div class="knowledge-priority-scale" aria-hidden="true">
-                    <span>Menor</span>
-                    <span>Normal</span>
-                    <span>Mayor</span>
-                  </div>
-                  <p id="knowledge-priority-help" class="muted">
-                    Usa una prioridad mayor solo cuando esta información deba preferirse frente a
-                    otros datos similares.
-                  </p>
-                </div>
-
+                <label class="range-field">
+                  <span>Importancia <strong id="knowledge-priority-label">Normal</strong></span>
+                  <input name="priority" type="range" min="-100" max="100" step="25" value="0" />
+                </label>
                 <input name="internalSource" type="hidden" />
-                <label class="toggle"
-                  ><input name="enabled" type="checkbox" role="switch" checked /> Información
-                  activa</label
+                <label class="switch-row"
+                  ><input name="enabled" type="checkbox" role="switch" checked /><span
+                    >Información activa</span
+                  ></label
                 >
-                <div class="actions">
-                  <button type="submit">Guardar información</button>
-                  <button id="cancel-knowledge-entry" class="secondary" type="button">
-                    Cancelar
-                  </button>
+                <div class="form-actions">
+                  <button type="submit" data-busy-label="Guardando…">Guardar información</button>
                 </div>
               </form>
             </section>
 
-            <section id="section-menus" class="panel-section hidden">
-              <div class="section-heading">
+            <section id="section-menus" class="panel-section hidden" aria-labelledby="menus-title">
+              <div class="page-heading">
                 <div>
-                  <p class="eyebrow">Flujos locales</p>
-                  <h2>Menús y opciones</h2>
+                  <p class="eyebrow">Automatización</p>
+                  <h2 id="menus-title">Menús</h2>
+                  <p>Organiza recorridos simples para las personas que escriben al negocio.</p>
                 </div>
-                <button id="new-menu" type="button">Nuevo menú</button>
+                <div class="button-row">
+                  <button id="new-menu" type="button">Crear menú</button>
+                  <button id="new-menu-option" class="secondary" type="button">
+                    Agregar opción
+                  </button>
+                </div>
               </div>
-              <form id="menu-form" class="card inset">
+              <section class="content-block">
+                <div class="content-block__heading"><h3>Menús disponibles</h3></div>
+                <div id="menus-list" class="data-list"></div>
+              </section>
+              <section class="content-block">
+                <div class="content-block__heading"><h3>Opciones</h3></div>
+                <div id="menu-options-list" class="data-list"></div>
+              </section>
+
+              <form id="menu-form" class="editor-panel hidden" aria-labelledby="menu-form-title">
+                <div class="editor-panel__heading">
+                  <h3 id="menu-form-title">Crear menú</h3>
+                  <button
+                    id="cancel-menu"
+                    class="icon-button secondary"
+                    type="button"
+                    aria-label="Cerrar formulario"
+                  >
+                    <svg aria-hidden="true"><use href="#icon-close"></use></svg>
+                  </button>
+                </div>
                 <input name="id" type="hidden" />
-                <div class="form-row">
-                  <label>Título<input name="title" maxlength="120" required /></label
-                  ><label
-                    >Menú padre<select name="parentMenuId">
-                      <option value="">Sin menú padre</option>
+                <div class="form-grid three-columns">
+                  <label>Título<input name="title" maxlength="120" required /></label>
+                  <label
+                    >Menú anterior<select name="parentMenuId">
+                      <option value="">Ninguno</option>
                     </select></label
-                  ><label
-                    >Expira en minutos<input
+                  >
+                  <label
+                    >Tiempo disponible (minutos)<input
                       name="expirationMinutes"
                       type="number"
                       min="1"
                       max="1440"
                       value="15"
+                      required
                   /></label>
                 </div>
                 <label
                   >Mensaje<textarea name="message" maxlength="600" rows="4" required></textarea>
                 </label>
                 <label>Texto de ayuda<input name="helpText" maxlength="300" /></label>
-                <div class="checks">
-                  <label
-                    ><input name="enabled" type="checkbox" role="switch" checked /> Activo</label
-                  ><label><input name="isInitial" type="checkbox" /> Menú inicial</label>
+                <div class="form-grid two-columns">
+                  <label class="switch-row"
+                    ><input name="enabled" type="checkbox" role="switch" checked /><span
+                      >Menú activo</span
+                    ></label
+                  >
+                  <label class="check-row"
+                    ><input name="isInitial" type="checkbox" /><span
+                      >Usar como menú inicial</span
+                    ></label
+                  >
                 </div>
-                <div class="actions">
-                  <button type="submit">Guardar menú</button
+                <div class="form-actions">
+                  <button type="submit" data-busy-label="Guardando…">Guardar menú</button
                   ><button id="clear-menu" class="secondary" type="button">Limpiar</button>
                 </div>
               </form>
-              <div id="menus-list" class="list"></div>
-              <form id="menu-option-form" class="card inset">
-                <h3>Opción de menú</h3>
+
+              <form
+                id="menu-option-form"
+                class="editor-panel hidden"
+                aria-labelledby="menu-option-form-title"
+              >
+                <div class="editor-panel__heading">
+                  <h3 id="menu-option-form-title">Agregar opción</h3>
+                  <button
+                    id="cancel-menu-option"
+                    class="icon-button secondary"
+                    type="button"
+                    aria-label="Cerrar formulario"
+                  >
+                    <svg aria-hidden="true"><use href="#icon-close"></use></svg>
+                  </button>
+                </div>
                 <input name="id" type="hidden" />
-                <div class="form-row">
-                  <label>Menú<select name="menuId" required></select></label
-                  ><label>Etiqueta<input name="label" maxlength="100" required /></label
-                  ><label
-                    >Orden<input name="order" type="number" min="1" max="100" value="1"
+                <div class="form-grid three-columns">
+                  <label>Menú<select name="menuId" required></select></label>
+                  <label>Nombre de la opción<input name="label" maxlength="100" required /></label>
+                  <label
+                    >Posición<input name="order" type="number" min="1" max="100" value="1" required
                   /></label>
                 </div>
-                <div class="form-row">
-                  <label
-                    >Acción<select name="actionType">
-                      <option value="text">Mostrar texto</option>
-                      <option value="catalog_item">Mostrar producto</option>
-                      <option value="catalog_category">Mostrar categoría</option>
-                      <option value="media">Enviar imagen</option>
-                      <option value="submenu">Abrir submenú</option>
-                      <option value="knowledge">Consultar conocimiento</option>
-                      <option value="ai">Pregunta a IA</option>
-                      <option value="hours">Mostrar horario</option>
+                <div class="form-grid two-columns">
+                  <label>
+                    Qué debe hacer
+                    <select name="actionType">
+                      <option value="text">Mostrar un mensaje</option>
+                      <option value="catalog_item">Mostrar un producto o servicio</option>
+                      <option value="catalog_category">Mostrar una categoría</option>
+                      <option value="media">Enviar una imagen</option>
+                      <option value="submenu">Abrir otro menú</option>
+                      <option value="knowledge">Buscar en el conocimiento</option>
+                      <option value="ai">Responder con IA</option>
+                      <option value="hours">Mostrar horarios</option>
                       <option value="address">Mostrar dirección</option>
-                      <option value="payments">Formas de pago</option>
-                      <option value="shipping">Despachos</option>
-                      <option value="human_assistance">Atención humana</option>
-                      <option value="reservation_request">Solicitud de reserva</option>
-                      <option value="back">Volver</option>
-                      <option value="exit">Salir</option>
-                    </select></label
-                  ><label>Alias (uno por línea)<textarea name="aliases" rows="3"></textarea></label>
+                      <option value="payments">Informar formas de pago</option>
+                      <option value="shipping">Informar despachos</option>
+                      <option value="human_assistance">Solicitar atención humana</option>
+                      <option value="reservation_request">Solicitar una reserva</option>
+                      <option value="back">Volver al menú anterior</option>
+                      <option value="exit">Finalizar</option>
+                    </select>
+                  </label>
+                  <label
+                    >Palabras equivalentes<textarea
+                      name="aliases"
+                      rows="3"
+                      placeholder="Una por línea"
+                    ></textarea>
+                  </label>
                 </div>
-                <label
-                  >Datos de acción en formato JSON simple<textarea name="actionPayload" rows="3">
-{}</textarea>
-                </label>
-                <label class="toggle"
-                  ><input name="enabled" type="checkbox" role="switch" checked /> Opción
-                  activa</label
+                <div id="menu-action-fields" class="form-section"></div>
+                <label class="switch-row"
+                  ><input name="enabled" type="checkbox" role="switch" checked /><span
+                    >Opción activa</span
+                  ></label
                 >
-                <button type="submit">Guardar opción</button>
+                <div class="form-actions">
+                  <button type="submit" data-busy-label="Guardando…">Guardar opción</button>
+                </div>
               </form>
-              <div id="menu-options-list" class="list"></div>
             </section>
 
-            <section id="section-catalog" class="panel-section hidden">
-              <div class="section-heading">
+            <section
+              id="section-catalog"
+              class="panel-section hidden"
+              aria-labelledby="catalog-title"
+            >
+              <div class="page-heading">
                 <div>
-                  <p class="eyebrow">Información comercial oficial</p>
-                  <h2>Catálogo</h2>
+                  <p class="eyebrow">Negocio</p>
+                  <h2 id="catalog-title">Catálogo</h2>
+                  <p>Gestiona productos y servicios con información clara para tus clientes.</p>
                 </div>
+                <button id="new-catalog-item" type="button">Agregar producto o servicio</button>
               </div>
-              <form id="catalog-category-form" class="inline-form">
-                <input name="id" type="hidden" /><label
-                  >Categoría<input name="name" required /></label
-                ><label>Descripción<input name="description" /></label
-                ><label class="toggle"
-                  ><input name="enabled" type="checkbox" role="switch" checked /> Activa</label
-                ><button type="submit">Guardar categoría</button>
-              </form>
-              <div id="catalog-categories" class="list compact-list"></div>
-              <form id="catalog-item-form" class="card inset">
+              <div id="catalog-items" class="catalog-grid" aria-live="polite"></div>
+
+              <details class="disclosure">
+                <summary>
+                  <span
+                    ><strong>Categorías</strong
+                    ><small>Organiza el catálogo para encontrarlo más rápido.</small></span
+                  >
+                </summary>
+                <div class="disclosure__content">
+                  <form id="catalog-category-form" class="inline-editor">
+                    <input name="id" type="hidden" />
+                    <label>Nombre<input name="name" maxlength="120" required /></label>
+                    <label>Descripción<input name="description" maxlength="600" /></label>
+                    <label class="switch-row"
+                      ><input name="enabled" type="checkbox" role="switch" checked /><span
+                        >Activa</span
+                      ></label
+                    >
+                    <button type="submit" data-busy-label="Guardando…">Guardar categoría</button>
+                  </form>
+                  <div id="catalog-categories" class="data-list"></div>
+                </div>
+              </details>
+
+              <form
+                id="catalog-item-form"
+                class="editor-panel hidden"
+                aria-labelledby="catalog-item-title"
+              >
+                <div class="editor-panel__heading">
+                  <h3 id="catalog-item-title">Agregar producto o servicio</h3>
+                  <button
+                    id="cancel-catalog-item"
+                    class="icon-button secondary"
+                    type="button"
+                    aria-label="Cerrar formulario"
+                  >
+                    <svg aria-hidden="true"><use href="#icon-close"></use></svg>
+                  </button>
+                </div>
                 <input name="id" type="hidden" />
-                <div class="form-row">
-                  <label>Nombre<input name="name" maxlength="160" required /></label
-                  ><label>Código<input name="code" maxlength="80" required /></label
-                  ><label
+                <div class="form-grid three-columns">
+                  <label>Nombre<input name="name" maxlength="160" required /></label>
+                  <label>Código<input name="code" maxlength="80" required /></label>
+                  <label
                     >Categoría<select name="categoryId">
                       <option value="">Sin categoría</option>
                     </select></label
@@ -864,192 +1053,143 @@
                 <label
                   >Descripción<textarea name="description" maxlength="1200" rows="4"></textarea>
                 </label>
-                <div class="form-row">
-                  <label>Precio en centavos<input name="priceAmount" type="number" min="0" /></label
-                  ><label
-                    >Oferta en centavos<input
-                      name="offerPriceAmount"
+                <div class="form-grid three-columns">
+                  <label
+                    >Precio<input
+                      name="price"
                       type="number"
-                      min="0" /></label
-                  ><label>Moneda<input name="currency" value="CLP" maxlength="8" /></label
-                  ><label
-                    >Stock informado<input name="informedStock" type="number" min="0"
+                      min="0"
+                      step="0.01"
+                      inputmode="decimal"
                   /></label>
+                  <label
+                    >Precio de oferta<input
+                      name="offerPrice"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      inputmode="decimal"
+                  /></label>
+                  <label>Moneda<input name="currency" value="CLP" maxlength="8" /></label>
+                  <label>Stock informado<input name="informedStock" type="number" min="0" /></label>
+                  <label>Presentación<input name="presentation" maxlength="200" /></label>
+                  <label>Tamaño<input name="size" maxlength="100" /></label>
                 </div>
-                <div class="form-row">
-                  <label>Presentación<input name="presentation" /></label
-                  ><label>Tamaño<input name="size" /></label
-                  ><label>Disponibilidad<input name="availability" /></label>
+                <div class="form-grid two-columns">
+                  <label>Disponibilidad<input name="availability" maxlength="300" /></label>
+                  <label
+                    >Imagen principal<select name="primaryMediaId">
+                      <option value="">Sin imagen</option>
+                    </select></label
+                  >
+                  <label
+                    >Enlace autorizado<input
+                      name="authorizedLink"
+                      type="url"
+                      placeholder="https://"
+                  /></label>
+                  <label
+                    >Variantes<textarea
+                      name="variants"
+                      rows="3"
+                      placeholder="Una por línea"
+                    ></textarea>
+                  </label>
                 </div>
-                <label
-                  >Variantes (una por línea)<textarea name="variants" rows="3"></textarea></label
-                ><label>Enlace HTTPS autorizado<input name="authorizedLink" type="url" /></label
-                ><label
-                  >Imagen principal<select name="primaryMediaId">
-                    <option value="">Sin imagen</option>
-                  </select></label
+                <label class="switch-row"
+                  ><input name="enabled" type="checkbox" role="switch" checked /><span
+                    >Disponible</span
+                  ></label
                 >
-                <label class="toggle"
-                  ><input name="enabled" type="checkbox" role="switch" checked /> Activo</label
-                >
-                <div class="actions">
-                  <button type="submit">Guardar producto o servicio</button
+                <div class="form-actions">
+                  <button type="submit" data-busy-label="Guardando…">Guardar</button
                   ><button id="clear-catalog-item" class="secondary" type="button">Limpiar</button>
                 </div>
               </form>
-              <div id="catalog-items" class="list"></div>
             </section>
 
-            <section id="section-media" class="panel-section hidden">
-              <div class="section-heading">
+            <section id="section-media" class="panel-section hidden" aria-labelledby="media-title">
+              <div class="page-heading">
                 <div>
-                  <p class="eyebrow">Archivos oficiales</p>
-                  <h2>Imágenes</h2>
+                  <p class="eyebrow">Negocio</p>
+                  <h2 id="media-title">Multimedia</h2>
+                  <p>Imágenes oficiales para menús, productos y respuestas.</p>
                 </div>
               </div>
-              <form id="media-form" class="inline-form">
+              <form id="media-form" class="inline-editor">
                 <label
-                  >JPG, PNG o WebP<input
+                  >Imagen<input
                     name="file"
                     type="file"
                     accept="image/png,image/jpeg,image/webp"
-                    required /></label
-                ><label>Texto breve<input name="caption" maxlength="300" /></label
-                ><button type="submit">Subir imagen</button>
+                    required
+                /></label>
+                <label>Descripción breve<input name="caption" maxlength="300" /></label>
+                <button type="submit" data-busy-label="Subiendo…">Subir imagen</button>
               </form>
-              <div id="media-list" class="media-grid"></div>
+              <div id="media-list" class="media-grid" aria-live="polite"></div>
             </section>
 
-            <section id="section-hours" class="panel-section hidden">
-              <div class="section-heading">
+            <section id="section-hours" class="panel-section hidden" aria-labelledby="hours-title">
+              <div class="page-heading">
                 <div>
-                  <p class="eyebrow">Atención oficial</p>
-                  <h2>Horarios</h2>
+                  <p class="eyebrow">Negocio</p>
+                  <h2 id="hours-title">Horarios</h2>
+                  <p>Define cuándo atiende el negocio y cómo debe informarlo el asistente.</p>
                 </div>
-                <button id="add-hour" type="button">Agregar intervalo</button>
+                <button id="add-hour" type="button">Agregar horario</button>
               </div>
-              <form id="hours-form">
-                <div id="hours-editor" class="list"></div>
-                <button type="submit">Guardar horarios</button>
+              <form id="hours-form" class="stack-form">
+                <div id="hours-editor" class="data-list"></div>
+                <div class="form-actions">
+                  <button type="submit" data-busy-label="Guardando…">Guardar horarios</button>
+                </div>
               </form>
             </section>
 
-            <section id="section-requests" class="panel-section hidden">
-              <div class="section-heading">
+            <section
+              id="section-cached-answers"
+              class="panel-section hidden"
+              aria-labelledby="answers-title"
+            >
+              <div class="page-heading">
                 <div>
-                  <p class="eyebrow">Derivación controlada</p>
-                  <h2>Solicitudes de atención</h2>
+                  <p class="eyebrow">Automatización</p>
+                  <h2 id="answers-title">Respuestas</h2>
+                  <p>Preguntas frecuentes y respuestas aprobadas para reutilizar.</p>
                 </div>
+                <button id="new-cached-answer" type="button">Crear respuesta</button>
               </div>
-              <p class="muted">
-                Solo se muestran identificadores anonimizados, intervalo, fecha y estado.
-              </p>
-              <div id="requests-list" class="list"></div>
-            </section>
-
-            <section id="section-statistics" class="panel-section hidden">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">Datos agregados</p>
-                  <h2>Estadísticas</h2>
-                </div>
-              </div>
-              <p class="muted">
-                Solo se guardan cantidades y eventos técnicos seguros; no se almacenan preguntas ni
-                respuestas.
-              </p>
-              <div id="statistics-cards" class="status-grid"></div>
-              <div id="statistics-events" class="list"></div>
-            </section>
-
-            <section id="section-commands" class="panel-section hidden">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">Respuestas editables</p>
-                  <h2>Comandos</h2>
-                </div>
-                <button id="new-command">Crear comando</button>
-              </div>
-              <div id="command-editor" class="card inset hidden">
-                <h3 id="command-editor-title">Nuevo comando</h3>
-                <form id="command-form">
-                  <input name="id" type="hidden" />
-                  <div class="form-row">
-                    <label>Nombre<input name="name" pattern="[a-z0-9_-]{2,32}" required /></label>
-                    <label
-                      >Prioridad<input
-                        name="priority"
-                        type="number"
-                        min="-1000"
-                        max="1000"
-                        value="0"
-                        required
-                    /></label>
-                  </div>
-                  <label
-                    >Respuesta<textarea
-                      name="response"
-                      maxlength="4000"
-                      rows="5"
-                      required
-                    ></textarea>
-                  </label>
-                  <label
-                    >Palabras clave (una por línea)<textarea
-                      name="keywords"
-                      maxlength="4000"
-                      rows="3"
-                    ></textarea>
-                  </label>
-                  <div class="preview">
-                    <span>Vista previa</span>
-                    <p id="response-preview"></p>
-                  </div>
-                  <div class="checks">
-                    <label
-                      ><input name="enabled" type="checkbox" role="switch" checked /> Activo</label
-                    >
-                    <label
-                      ><input name="healthRelated" type="checkbox" /> Relacionado con salud</label
-                    >
-                  </div>
-                  <div class="actions">
-                    <button type="submit">Guardar</button
-                    ><button id="restore-command-default" class="secondary hidden" type="button">
-                      Restaurar texto predeterminado</button
-                    ><button id="cancel-command" class="secondary" type="button">Cancelar</button>
-                  </div>
-                  <p id="command-message-metrics" class="template-metrics muted"></p>
-                </form>
-              </div>
-              <div id="commands-list" class="list"></div>
-            </section>
-
-            <section id="section-cached-answers" class="panel-section hidden">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">Respuestas locales reutilizables</p>
-                  <h2>Respuestas guardadas</h2>
-                </div>
-              </div>
-              <p class="muted">
-                Las preguntas frecuentes aprobadas tienen prioridad. Las respuestas automáticas solo
-                se guardan cuando son generales, seguras y están respaldadas por información
-                oficial.
-              </p>
-              <form id="cached-answer-search" class="inline-form">
+              <form id="cached-answer-search" class="filter-bar">
                 <label
                   >Buscar<input
                     name="search"
+                    type="search"
                     maxlength="200"
-                    placeholder="Pregunta, categoría o respuesta"
+                    placeholder="Pregunta, respuesta o categoría"
                 /></label>
-                <button type="submit" class="secondary">Buscar</button>
+                <button type="submit" class="secondary" data-busy-label="Buscando…">Buscar</button>
               </form>
-              <form id="cached-answer-form" class="card inset">
-                <h3>Agregar respuesta o pregunta frecuente</h3>
+              <div id="cached-answers-list" class="data-list" aria-live="polite"></div>
+              <form
+                id="cached-answer-form"
+                class="editor-panel hidden"
+                aria-labelledby="cached-answer-form-title"
+              >
+                <div class="editor-panel__heading">
+                  <h3 id="cached-answer-form-title">Crear respuesta</h3>
+                  <button
+                    id="cancel-cached-answer"
+                    class="icon-button secondary"
+                    type="button"
+                    aria-label="Cerrar formulario"
+                  >
+                    <svg aria-hidden="true"><use href="#icon-close"></use></svg>
+                  </button>
+                </div>
+                <input name="id" type="hidden" />
                 <label
-                  >Pregunta canónica<textarea
+                  >Pregunta principal<textarea
                     name="canonicalQuestion"
                     maxlength="1000"
                     rows="2"
@@ -1059,63 +1199,52 @@
                 <label
                   >Respuesta<textarea name="answer" maxlength="8000" rows="5" required></textarea>
                 </label>
-                <div class="form-row">
+                <div class="form-grid two-columns">
                   <label
                     >Categoría<input name="category" maxlength="200" value="General" required
                   /></label>
                   <label
-                    >Origen<select name="sourceType">
-                      <option value="ADMIN_FAQ">Pregunta frecuente aprobada</option>
+                    >Tipo<select name="sourceType">
+                      <option value="ADMIN_FAQ">Pregunta frecuente</option>
                       <option value="MANUAL">Respuesta manual</option>
                     </select></label
                   >
                 </div>
                 <label
-                  >Variantes (una por línea)<textarea name="variants" rows="3"></textarea>
+                  >Otras formas de preguntar<textarea
+                    name="variants"
+                    rows="3"
+                    placeholder="Una por línea"
+                  ></textarea>
                 </label>
-                <button type="submit">Guardar respuesta</button>
+                <div class="form-actions">
+                  <button type="submit" data-busy-label="Guardando…">Guardar respuesta</button>
+                </div>
               </form>
-              <div id="cached-answers-list" class="list"></div>
             </section>
 
-            <section id="section-ai" class="panel-section hidden">
-              <div class="section-heading ai-heading">
+            <section id="section-ai" class="panel-section hidden" aria-labelledby="ai-title">
+              <div class="page-heading">
                 <div>
-                  <p class="eyebrow">Configuración simplificada</p>
-                  <h2>Inteligencia artificial</h2>
-                  <p class="muted">
-                    Configura solo lo necesario. Los controles técnicos quedan guardados en opciones
-                    avanzadas.
-                  </p>
-                </div>
-                <div class="actions">
-                  <button id="test-ai-connection" class="secondary" type="button">
-                    Probar conexión con Groq
-                  </button>
-                  <a class="button-link secondary" href="/api/ai/export">Exportar estadísticas</a>
+                  <p class="eyebrow">Automatización</p>
+                  <h2 id="ai-title">Inteligencia artificial</h2>
+                  <p>Activa la IA, revisa su estado y ajusta sus límites principales.</p>
                 </div>
               </div>
+              <div id="ai-status-cards" class="health-grid" aria-live="polite"></div>
 
-              <div id="ai-status-cards" class="status-grid ai-status-overview"></div>
-              <p class="info-callout">
-                <strong>Uso protegido.</strong> Solo las llamadas reales y exitosas a Groq
-                descuentan el límite de IA. Los valores recomendados funcionan bien para la mayoría
-                de los asistentes.
-              </p>
-
-              <form id="ai-settings-form" class="card inset ai-essential-card">
-                <div>
-                  <p class="eyebrow">Lo más importante</p>
-                  <h3>Opciones principales</h3>
-                  <p class="muted">
-                    Activa la IA y define límites sencillos. No necesitas cambiar los ajustes
-                    técnicos para usar Neurobot.
-                  </p>
+              <form id="ai-settings-form" class="editor-panel">
+                <div class="editor-panel__heading">
+                  <div>
+                    <h3>Opciones principales</h3>
+                    <p>Los valores actuales funcionan para la mayoría de los asistentes.</p>
+                  </div>
                 </div>
-
-                <div class="ai-essential-grid">
-                  <label class="toggle ai-primary-toggle"
-                    ><input name="enabled" type="checkbox" role="switch" /> IA activada</label
+                <div class="form-grid two-columns">
+                  <label class="switch-row"
+                    ><input name="enabled" type="checkbox" role="switch" /><span
+                      >IA activa</span
+                    ></label
                   >
                   <label
                     >Proveedor<select name="provider">
@@ -1123,71 +1252,53 @@
                       <option value="disabled">Desactivado</option>
                     </select></label
                   >
+                  <label
+                    >Máximo de caracteres por respuesta<input
+                      name="responseMaxChars"
+                      type="number"
+                      min="1"
+                  /></label>
+                  <label
+                    >Máximo de líneas por respuesta<input
+                      name="responseMaxLines"
+                      type="number"
+                      min="1"
+                  /></label>
+                  <label
+                    >Consultas por hora por persona<input
+                      name="userHourlyLimit"
+                      type="number"
+                      min="1"
+                  /></label>
+                  <label
+                    >Consultas diarias por persona<input
+                      name="userDailyLimit"
+                      type="number"
+                      min="1"
+                  /></label>
+                  <label
+                    >Consultas diarias del asistente<input
+                      name="globalDailyLimit"
+                      type="number"
+                      min="1"
+                  /></label>
+                  <label
+                    >Consultas mensuales del asistente<input
+                      name="globalMonthlyLimit"
+                      type="number"
+                      min="1"
+                  /></label>
                 </div>
 
-                <div class="ai-simple-group">
-                  <h4>Extensión de las respuestas</h4>
-                  <div class="ai-essential-grid">
-                    <label
-                      >Máximo de caracteres<input name="responseMaxChars" type="number" min="1"
-                    /></label>
-                    <label
-                      >Máximo de líneas<input name="responseMaxLines" type="number" min="1"
-                    /></label>
-                  </div>
-                  <p class="muted">
-                    Estos dos valores controlan qué tan largas serán las respuestas del asistente.
-                  </p>
-                </div>
-
-                <div class="ai-simple-group">
-                  <h4>Límites por persona</h4>
-                  <div class="ai-essential-grid">
-                    <label
-                      >Consultas por hora<input name="userHourlyLimit" type="number" min="1"
-                    /></label>
-                    <label
-                      >Consultas por día<input name="userDailyLimit" type="number" min="1"
-                    /></label>
-                  </div>
-                </div>
-
-                <div class="ai-simple-group">
-                  <h4>Límites por grupo</h4>
-                  <div class="ai-essential-grid">
-                    <label
-                      >Consultas por hora<input name="groupHourlyLimit" type="number" min="1"
-                    /></label>
-                    <label
-                      >Consultas por día<input name="groupDailyLimit" type="number" min="1"
-                    /></label>
-                  </div>
-                </div>
-
-                <div class="ai-simple-group">
-                  <h4>Límite total de este asistente</h4>
-                  <div class="ai-essential-grid">
-                    <label
-                      >Consultas diarias<input name="globalDailyLimit" type="number" min="1"
-                    /></label>
-                    <label
-                      >Consultas mensuales<input name="globalMonthlyLimit" type="number" min="1"
-                    /></label>
-                  </div>
-                </div>
-
-                <div class="actions ai-essential-actions">
-                  <button type="submit">Guardar opciones principales</button>
-                </div>
-
-                <details class="advanced-settings ai-advanced-panel">
-                  <summary>Configuración avanzada del modelo y los límites</summary>
-                  <div class="ai-advanced-content">
-                    <p class="muted">
-                      Modifica estos valores únicamente cuando conozcas su función. Los valores
-                      actuales se mantienen aunque la sección esté cerrada.
-                    </p>
-                    <div class="form-row">
+                <details class="disclosure">
+                  <summary>
+                    <span
+                      ><strong>Opciones avanzadas</strong
+                      ><small>Modelo, procesamiento, límites técnicos y presupuesto.</small></span
+                    >
+                  </summary>
+                  <div class="disclosure__content">
+                    <div class="form-grid three-columns">
                       <label
                         >Temperatura<input
                           name="temperature"
@@ -1197,125 +1308,134 @@
                           step="0.1"
                       /></label>
                       <label
-                        >Espera máxima (ms)<input
+                        >Tiempo máximo (ms)<input
                           name="timeoutMs"
                           type="number"
                           min="1000"
                           max="60000"
                       /></label>
-                    </div>
-                    <h4>Procesamiento por mensaje</h4>
-                    <div class="form-row limits-grid">
                       <label
-                        >Pregunta (caracteres)<input name="questionMaxChars" type="number" min="1"
+                        >Pregunta máxima<input name="questionMaxChars" type="number" min="1"
                       /></label>
                       <label
-                        >Contexto (tokens)<input name="contextMaxTokens" type="number" min="1"
+                        >Contexto máximo<input name="contextMaxTokens" type="number" min="1"
                       /></label>
                       <label
-                        >Entrada (tokens)<input name="inputMaxTokens" type="number" min="1"
+                        >Entrada máxima<input name="inputMaxTokens" type="number" min="1"
                       /></label>
                       <label
-                        >Respuesta (tokens)<input name="responseMaxTokens" type="number" min="1"
+                        >Respuesta máxima<input name="responseMaxTokens" type="number" min="1"
                       /></label>
-                    </div>
-                    <h4>Control de interacciones</h4>
-                    <div class="form-row limits-grid">
                       <label
-                        >Espera por persona (s)<input
+                        >Pausa por persona (s)<input
                           name="userCooldownSeconds"
                           type="number"
                           min="0"
                       /></label>
                       <label
-                        >Activaciones por hora<input
+                        >Interacciones por hora<input
                           name="interactionHourlyLimit"
                           type="number"
                           min="1"
                       /></label>
                       <label
-                        >Espera entre mensajes (s)<input
+                        >Pausa entre mensajes (s)<input
                           name="interactionCooldownSeconds"
                           type="number"
                           min="0"
                       /></label>
                       <label
-                        >Ventana de consulta idéntica (s)<input
+                        >Ventana de duplicados (s)<input
                           name="duplicateQueryWindowSeconds"
                           type="number"
                           min="0"
                       /></label>
-                    </div>
-                    <h4>Presupuesto de tokens</h4>
-                    <div class="form-row limits-grid">
                       <label
-                        >Tokens diarios<input name="globalDailyTokenLimit" type="number" min="1"
+                        >Consultas por hora por conversación<input
+                          name="groupHourlyLimit"
+                          type="number"
+                          min="1"
                       /></label>
                       <label
-                        >Tokens mensuales<input
+                        >Consultas diarias por conversación<input
+                          name="groupDailyLimit"
+                          type="number"
+                          min="1"
+                      /></label>
+                      <label
+                        >Presupuesto diario<input
+                          name="globalDailyTokenLimit"
+                          type="number"
+                          min="1"
+                      /></label>
+                      <label
+                        >Presupuesto mensual<input
                           name="globalMonthlyTokenLimit"
                           type="number"
                           min="1"
                       /></label>
                     </div>
-                    <label class="toggle"
-                      ><input name="confirmIncreasedLimits" type="checkbox" /> Confirmo aumentos
-                      sobre los máximos seguros iniciales</label
+                    <label class="check-row"
+                      ><input name="confirmIncreasedLimits" type="checkbox" /><span
+                        >Confirmo los límites superiores a los valores iniciales seguros.</span
+                      ></label
                     >
-                    <div class="actions">
-                      <button type="submit">Guardar toda la configuración</button>
-                      <button id="reset-ai-counters" class="danger" type="button">
-                        Restablecer contadores de prueba
-                      </button>
-                    </div>
                   </div>
                 </details>
+                <div class="form-actions">
+                  <button type="submit" data-busy-label="Guardando…">Guardar configuración</button>
+                </div>
               </form>
 
-              <form id="ai-credential-form" class="card inset ai-credential-card">
-                <div>
-                  <p class="eyebrow">Conexión</p>
-                  <h3>Clave de Groq</h3>
-                  <p class="muted">
-                    Solo debes cambiarla cuando quieras configurar o reemplazar la clave. Nunca
-                    vuelve al navegador después de guardarla.
-                  </p>
-                </div>
-                <div class="form-row">
-                  <label
-                    >Modalidad<select name="mode">
-                      <option value="global">Usar clave global de la instalación</option>
-                      <option value="per_bot">Usar clave exclusiva de este asistente</option>
-                    </select></label
+              <details class="disclosure">
+                <summary>
+                  <span
+                    ><strong>Conexión del proveedor</strong
+                    ><small>Usa la clave global o una clave exclusiva del asistente.</small></span
                   >
-                  <label
-                    >Nueva clave exclusiva<input
-                      name="apiKey"
-                      type="password"
-                      autocomplete="new-password"
-                      minlength="16"
-                      maxlength="500"
-                      placeholder="Déjalo vacío para conservar la clave actual"
-                  /></label>
+                </summary>
+                <div class="disclosure__content">
+                  <form id="ai-credential-form" class="stack-form">
+                    <div class="form-grid two-columns">
+                      <label
+                        >Modalidad<select name="mode">
+                          <option value="global">Clave global</option>
+                          <option value="per_bot">Clave exclusiva</option>
+                        </select></label
+                      >
+                      <label
+                        >Nueva clave exclusiva<input
+                          name="apiKey"
+                          type="password"
+                          autocomplete="new-password"
+                          minlength="16"
+                          maxlength="500"
+                      /></label>
+                    </div>
+                    <p class="privacy-note">
+                      La clave nunca vuelve al navegador después de guardarla.
+                    </p>
+                    <div class="form-actions">
+                      <button type="submit" data-busy-label="Guardando…">Guardar conexión</button
+                      ><button id="delete-ai-key" class="danger" type="button">
+                        Eliminar clave exclusiva
+                      </button>
+                    </div>
+                  </form>
                 </div>
-                <div class="actions">
-                  <button type="submit">Guardar conexión</button>
-                  <button id="delete-ai-key" class="danger" type="button">
-                    Eliminar clave exclusiva
-                  </button>
-                </div>
-              </form>
+              </details>
 
-              <details class="card inset ai-advanced-panel">
-                <summary>Capacidad y disponibilidad</summary>
-                <div class="ai-advanced-content">
-                  <p class="muted">
-                    Estos controles regulan concurrencia, espera y reintentos. Mantén los valores
-                    recomendados cuando no necesites una configuración especial.
-                  </p>
-                  <div id="ai-queue-cards" class="status-grid"></div>
-                  <form id="ai-queue-settings-form">
-                    <div class="form-row limits-grid">
+              <details class="disclosure">
+                <summary>
+                  <span
+                    ><strong>Capacidad y disponibilidad</strong
+                    ><small>Concurrencia, espera y reintentos.</small></span
+                  >
+                </summary>
+                <div class="disclosure__content">
+                  <div id="ai-queue-cards" class="metric-grid"></div>
+                  <form id="ai-queue-settings-form" class="stack-form">
+                    <div class="form-grid three-columns">
                       <label
                         >Llamadas simultáneas<input
                           name="maxConcurrent"
@@ -1333,7 +1453,7 @@
                           required
                       /></label>
                       <label
-                        >Espera máxima en cola (s)<input
+                        >Espera máxima (s)<input
                           name="maxQueueWaitSeconds"
                           type="number"
                           min="5"
@@ -1341,7 +1461,7 @@
                           required
                       /></label>
                       <label
-                        >Timeout de Groq (s)<input
+                        >Tiempo del proveedor (s)<input
                           name="providerTimeoutSeconds"
                           type="number"
                           min="5"
@@ -1352,7 +1472,7 @@
                         >Reintentos<input name="maxRetries" type="number" min="0" max="5" required
                       /></label>
                       <label
-                        >Espera inicial de reintento (s)<input
+                        >Espera inicial (s)<input
                           name="initialRetryDelaySeconds"
                           type="number"
                           min="1"
@@ -1392,7 +1512,7 @@
                           required
                       /></label>
                       <label
-                        >Ventana single-flight (s)<input
+                        >Ventana compartida (s)<input
                           name="singleFlightWindowSeconds"
                           type="number"
                           min="1"
@@ -1400,7 +1520,7 @@
                           required
                       /></label>
                       <label
-                        >Intervalo entre mensajes (ms)<input
+                        >Intervalo de salida (ms)<input
                           name="outboundMessageIntervalMs"
                           type="number"
                           min="0"
@@ -1416,19 +1536,15 @@
                           required
                       /></label>
                     </div>
-                    <div class="actions">
-                      <button type="submit">Guardar capacidad técnica</button>
-                      <button id="restore-ai-queue-recommended" class="secondary" type="button">
-                        Restaurar valores recomendados
+                    <div class="form-actions">
+                      <button type="submit" data-busy-label="Guardando…">Guardar capacidad</button
+                      ><button id="restore-ai-queue-recommended" class="secondary" type="button">
+                        Restaurar recomendados
                       </button>
                     </div>
                   </form>
-                  <article id="ai-queue-simulator" class="card inset hidden">
-                    <h4>Probar cola de IA</h4>
-                    <p class="muted">
-                      Simulación local: no llama a Groq ni envía mensajes a WhatsApp.
-                    </p>
-                    <form id="ai-queue-simulator-form" class="inline-form">
+                  <div id="ai-queue-simulator" class="hidden">
+                    <form id="ai-queue-simulator-form" class="inline-editor">
                       <label
                         >Consultas<input
                           name="requests"
@@ -1441,27 +1557,28 @@
                       <label
                         >Escenario<select name="scenario">
                           <option value="normal">Normal</option>
-                          <option value="repeated">Preguntas repetidas</option>
-                          <option value="rate_limited">Error 429</option>
-                          <option value="timeout">Timeout</option>
+                          <option value="repeated">Repetidas</option>
+                          <option value="rate_limited">Límite del proveedor</option>
+                          <option value="timeout">Tiempo agotado</option>
                         </select></label
                       >
-                      <button type="submit">Probar cola de IA</button>
+                      <button type="submit">Simular</button>
                     </form>
-                    <div id="ai-queue-simulation-result" class="status-grid"></div>
-                  </article>
+                    <div id="ai-queue-simulation-result" class="metric-grid"></div>
+                  </div>
                 </div>
               </details>
 
-              <details class="card inset ai-advanced-panel">
-                <summary>Presupuesto global de todos los asistentes</summary>
-                <div class="ai-advanced-content">
-                  <form id="global-ai-limits-form">
-                    <p class="muted">
-                      Este límite protege el presupuesto compartido entre todos los asistentes de la
-                      instalación.
-                    </p>
-                    <div class="form-row limits-grid">
+              <details class="disclosure">
+                <summary>
+                  <span
+                    ><strong>Presupuesto global</strong
+                    ><small>Límites compartidos por toda la instalación.</small></span
+                  >
+                </summary>
+                <div class="disclosure__content">
+                  <form id="global-ai-limits-form" class="stack-form">
+                    <div class="form-grid two-columns">
                       <label
                         >Consultas diarias<input
                           name="dailyRequestLimit"
@@ -1477,335 +1594,266 @@
                           required
                       /></label>
                       <label
-                        >Tokens diarios<input name="dailyTokenLimit" type="number" min="1" required
+                        >Presupuesto diario<input
+                          name="dailyTokenLimit"
+                          type="number"
+                          min="1"
+                          required
                       /></label>
                       <label
-                        >Tokens mensuales<input
+                        >Presupuesto mensual<input
                           name="monthlyTokenLimit"
                           type="number"
                           min="1"
                           required
                       /></label>
                     </div>
-                    <button type="submit">Guardar presupuesto global</button>
+                    <div class="form-actions">
+                      <button type="submit" data-busy-label="Guardando…">
+                        Guardar presupuesto
+                      </button>
+                    </div>
                   </form>
                 </div>
               </details>
 
-              <details class="card inset ai-advanced-panel">
-                <summary>Estadísticas y eventos detallados</summary>
-                <div class="ai-advanced-content">
-                  <h3>Actividad operativa</h3>
-                  <div id="operational-metrics-cards" class="status-grid"></div>
-                  <h3>Eventos recientes de IA</h3>
-                  <div id="ai-events" class="list"></div>
-                </div>
-              </details>
-            </section>
-
-            <section id="section-administrators" class="panel-section hidden">
-              <p class="eyebrow">Identidad verificada por número</p>
-              <h2>Administradores de WhatsApp</h2>
-              <form id="administrator-form" class="inline-form">
-                <label
-                  >Número internacional<input name="number" placeholder="+56912345678" required
-                /></label>
-                <button type="submit">Agregar</button>
-              </form>
-              <div id="administrators-list" class="list"></div>
-            </section>
-
-            <section id="section-settings" class="panel-section hidden">
-              <p class="eyebrow">Comportamiento general</p>
-              <h2>Configuración</h2>
-              <form id="settings-form">
-                <label class="toggle"
-                  ><input name="bot_enabled" type="checkbox" role="switch" /> Bot activado</label
-                >
-                <label
-                  >Respuesta de respaldo<textarea
-                    name="fallback_response"
-                    maxlength="4000"
-                    rows="4"
-                    required
-                  ></textarea>
-                </label>
-                <label
-                  >Advertencia profesional<textarea
-                    name="professional_warning"
-                    maxlength="1000"
-                    rows="3"
-                    required
-                  ></textarea>
-                </label>
-                <label
-                  >Nivel de registros<select name="log_level">
-                    <option>error</option>
-                    <option>warn</option>
-                    <option>info</option>
-                    <option>debug</option>
-                  </select></label
-                >
-                <div class="form-row">
-                  <label
-                    >Máximo por usuario<input
-                      name="user_rate_limit"
-                      type="number"
-                      min="1"
-                      max="100"
-                      required
-                    />
-                  </label>
-                  <label
-                    >Máximo por grupo<input
-                      name="group_rate_limit"
-                      type="number"
-                      min="1"
-                      max="500"
-                      required
-                    />
-                  </label>
-                </div>
-                <div class="form-row">
-                  <label
-                    >Ventana (segundos)<input
-                      name="rate_window_seconds"
-                      type="number"
-                      min="10"
-                      max="3600"
-                      required
-                    />
-                  </label>
-                  <label
-                    >Enfriamiento (segundos)<input
-                      name="user_cooldown_seconds"
-                      type="number"
-                      min="0"
-                      max="3600"
-                      required
-                    />
-                  </label>
-                </div>
-                <label
-                  >Prevención de repetición (segundos)<input
-                    name="repeat_window_seconds"
-                    type="number"
-                    min="0"
-                    max="86400"
-                    required
-                  />
-                </label>
-                <fieldset>
-                  <legend>Vigencia de grupos</legend>
-                  <label class="toggle"
-                    ><input
-                      name="require_authorized_admin_in_group"
-                      type="checkbox"
-                      role="switch"
-                    />
-                    Requerir al menos un administrador autorizado dentro del grupo</label
-                  >
-                  <div class="form-row">
-                    <label
-                      >Horas antes de archivar<input
-                        name="group_archive_after_hours"
-                        type="number"
-                        min="1"
-                        max="720"
-                        required
-                    /></label>
-                    <label
-                      >Días antes de eliminar<input
-                        name="group_delete_after_days"
-                        type="number"
-                        min="1"
-                        max="3650"
-                        required
-                    /></label>
-                  </div>
-                  <label
-                    >Frecuencia de sincronización (minutos)<input
-                      name="group_sync_interval_minutes"
-                      type="number"
-                      min="5"
-                      max="1440"
-                      required
-                  /></label>
-                  <label class="toggle"
-                    ><input name="group_auto_delete_enabled" type="checkbox" role="switch" />
-                    Eliminar automáticamente registros archivados cuando venza la retención</label
-                  >
-                </fieldset>
-                <p class="muted">
-                  Los cambios de límites se aplican después de reiniciar la aplicación.
-                </p>
-                <button type="submit">Guardar cambios</button>
-              </form>
-            </section>
-
-            <section id="section-maintenance" class="panel-section hidden">
-              <p class="eyebrow">Diagnóstico y control local</p>
-              <h2>Mantenimiento</h2>
-              <article class="card inset">
-                <p class="eyebrow danger-eyebrow">Zona peligrosa del asistente</p>
-                <h3>Enviar asistente a la papelera</h3>
-                <p id="assistant-trash-help" class="muted">
-                  Detiene solamente este conector y conserva sus datos durante 30 días.
-                </p>
-                <button id="maintenance-send-to-trash" class="danger" type="button">
-                  Enviar asistente a la papelera
+              <div id="ai-development-actions" class="hidden">
+                <button id="reset-ai-counters" class="danger" type="button">
+                  Restablecer contadores de prueba
                 </button>
-              </article>
-              <div id="neurobot-maintenance-tools">
-                <article class="card inset">
-                  <div class="section-heading">
-                    <div>
-                      <h3>Grupos vinculados</h3>
-                      <p class="muted">
-                        Los grupos se activan al detectar al bot. Aquí solo pueden bloquearse o
-                        desbloquearse.
-                      </p>
-                    </div>
-                    <button id="refresh-linked-groups" class="secondary" type="button">
-                      Actualizar
-                    </button>
-                  </div>
-                  <div id="linked-groups-list" class="list"></div>
-                </article>
-                <p class="eyebrow danger-eyebrow">Operaciones destructivas</p>
-                <h2>Zona de peligro</h2>
-                <p class="muted">
-                  Estas opciones eliminan la configuración local del chatbot. Las credenciales de
-                  Meta se administran en el entorno y nunca se guardan en el panel.
-                </p>
-                <div class="danger-zone">
-                  <article class="danger-option critical">
-                    <div>
-                      <h3>Restablecimiento completo del bot</h3>
-                      <p>
-                        Esta acción elimina la vinculación y todas las configuraciones del chatbot.
-                        No modifica las credenciales de Meta guardadas en el entorno.
-                      </p>
-                    </div>
-                    <button id="open-factory-reset" class="danger-primary" type="button">
-                      Restablecer bot de fábrica
-                    </button>
-                  </article>
+              </div>
+            </section>
+
+            <section
+              id="section-test-center"
+              class="panel-section hidden"
+              aria-labelledby="test-center-title"
+            >
+              <div class="page-heading">
+                <div>
+                  <p class="eyebrow">Operación</p>
+                  <h2 id="test-center-title">Centro de pruebas</h2>
+                  <p>Comprueba cada integración sin abrir varios formularios.</p>
                 </div>
               </div>
+              <div class="test-list">
+                <article class="test-item">
+                  <div>
+                    <h3>Configuración de WhatsApp</h3>
+                    <p>
+                      Revisa el estado del número, la API y el webhook sin mostrar credenciales.
+                    </p>
+                  </div>
+                  <span id="test-whatsapp-status" class="status-badge neutral">Sin probar</span>
+                  <button
+                    id="test-whatsapp"
+                    class="secondary"
+                    type="button"
+                    data-busy-label="Probando…"
+                  >
+                    Probar
+                  </button>
+                  <div
+                    id="test-whatsapp-result"
+                    class="test-result hidden"
+                    aria-live="polite"
+                  ></div>
+                </article>
+                <article class="test-item">
+                  <div>
+                    <h3>Conexión de inteligencia artificial</h3>
+                    <p>Comprueba que el proveedor configurado responde correctamente.</p>
+                  </div>
+                  <span id="test-ai-status" class="status-badge neutral">Sin probar</span>
+                  <button
+                    id="test-ai-connection"
+                    class="secondary"
+                    type="button"
+                    data-busy-label="Probando…"
+                  >
+                    Probar
+                  </button>
+                  <div id="test-ai-result" class="test-result hidden" aria-live="polite"></div>
+                </article>
+                <article class="test-item" data-requires-module="menus">
+                  <div>
+                    <h3>Menú principal</h3>
+                    <p>Valida que exista un menú inicial activo con opciones disponibles.</p>
+                  </div>
+                  <span id="test-menu-status" class="status-badge neutral">Sin probar</span>
+                  <button
+                    id="test-menu"
+                    class="secondary"
+                    type="button"
+                    data-busy-label="Probando…"
+                  >
+                    Probar
+                  </button>
+                  <div id="test-menu-result" class="test-result hidden" aria-live="polite"></div>
+                </article>
+              </div>
+            </section>
+
+            <section
+              id="section-history"
+              class="panel-section hidden"
+              aria-labelledby="history-title"
+            >
+              <div class="page-heading">
+                <div>
+                  <p class="eyebrow">Operación</p>
+                  <h2 id="history-title">Historial</h2>
+                  <p>Actividad segura y anonimizada del asistente.</p>
+                </div>
+                <button
+                  id="refresh-history"
+                  class="secondary"
+                  type="button"
+                  data-busy-label="Actualizando…"
+                >
+                  Actualizar
+                </button>
+              </div>
+              <p class="privacy-note">
+                Por privacidad, Neurobot no almacena el texto de las preguntas ni de las respuestas.
+              </p>
+              <form id="history-filters" class="filter-bar">
+                <label
+                  >Buscar<input
+                    name="search"
+                    type="search"
+                    placeholder="Actividad, fuente o usuario"
+                /></label>
+                <label
+                  >Estado<select name="status">
+                    <option value="all">Todos</option>
+                    <option value="success">Correcto</option>
+                    <option value="warning">Advertencia</option>
+                    <option value="error">Error</option>
+                  </select></label
+                >
+                <label
+                  >Orden<select name="order">
+                    <option value="desc">Más recientes</option>
+                    <option value="asc">Más antiguos</option>
+                  </select></label
+                >
+                <label
+                  >Por página<select name="pageSize">
+                    <option value="10">10</option>
+                    <option value="20" selected>20</option>
+                    <option value="50">50</option>
+                  </select></label
+                >
+              </form>
+              <div id="history-table-region" class="responsive-table" aria-live="polite">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Usuario</th>
+                      <th>Actividad</th>
+                      <th>Fuente</th>
+                      <th>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody id="history-table-body"></tbody>
+                </table>
+                <div id="history-empty" class="empty-state hidden"></div>
+              </div>
+              <div class="pagination" aria-label="Paginación del historial">
+                <button id="history-previous" class="secondary" type="button">Anterior</button>
+                <span id="history-page-status">Página 1</span>
+                <button id="history-next" class="secondary" type="button">Siguiente</button>
+              </div>
+            </section>
+
+            <section
+              id="section-requests"
+              class="panel-section hidden"
+              aria-labelledby="requests-title"
+            >
+              <div class="page-heading">
+                <div>
+                  <p class="eyebrow">Operación</p>
+                  <h2 id="requests-title">Solicitudes</h2>
+                  <p>Bandeja de trabajo para los casos que necesitan atención humana.</p>
+                </div>
+              </div>
+              <div class="segmented-control" role="group" aria-label="Filtrar solicitudes">
+                <button class="active" data-request-filter="pending" type="button">
+                  Pendientes <span id="requests-pending-count">0</span>
+                </button>
+                <button data-request-filter="attended" type="button">
+                  Atendidas <span id="requests-attended-count">0</span>
+                </button>
+                <button data-request-filter="all" type="button">Todas</button>
+              </div>
+              <div id="requests-list" class="work-inbox" aria-live="polite"></div>
+            </section>
+
+            <section
+              id="section-statistics"
+              class="panel-section hidden"
+              aria-labelledby="statistics-title"
+            >
+              <div class="page-heading">
+                <div>
+                  <p class="eyebrow">Operación</p>
+                  <h2 id="statistics-title">Estadísticas</h2>
+                  <p>Indicadores disponibles sobre actividad, respuestas y atención.</p>
+                </div>
+              </div>
+              <div id="statistics-cards" class="metric-grid" aria-live="polite"></div>
             </section>
           </div>
         </div>
       </div>
     </main>
 
-    <dialog id="maintenance-dialog" aria-labelledby="maintenance-title">
-      <div class="dialog-card">
-        <div id="maintenance-confirmation-view">
-          <p class="eyebrow danger-eyebrow">Confirmación obligatoria</p>
-          <h2 id="maintenance-title">Confirmar operación</h2>
-          <p id="maintenance-description"></p>
-          <div id="factory-reset-details" class="warning-details hidden">
-            <p><strong>Se eliminarán:</strong></p>
-            <ul>
-              <li>Estado local del conector y del chatbot.</li>
-              <li>Estados temporales y solicitudes pendientes del asistente.</li>
-              <li>Datos temporales de administración local.</li>
-              <li>Comandos, respuestas, silencios, configuración y registros locales.</li>
-            </ul>
-            <p><strong>Se conservarán:</strong></p>
-            <ul>
-              <li>.env, código fuente, dependencias, archivos de npm y repositorio Git.</li>
-              <li>Credenciales de Meta administradas mediante variables de entorno.</li>
-            </ul>
+    <dialog
+      id="action-dialog"
+      aria-labelledby="action-dialog-title"
+      aria-describedby="action-dialog-description"
+    >
+      <form id="action-dialog-form" class="dialog-card" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p id="action-dialog-eyebrow" class="eyebrow">Confirmación</p>
+            <h2 id="action-dialog-title">Confirmar acción</h2>
           </div>
-          <form id="maintenance-form" autocomplete="off">
-            <label>
-              Contraseña actual del panel
-              <input
-                name="currentPassword"
-                type="password"
-                autocomplete="current-password"
-                maxlength="128"
-                required
-              />
-            </label>
-            <label>
-              Escriba exactamente <strong id="required-maintenance-phrase"></strong>
-              <input name="confirmation" maxlength="40" spellcheck="false" required />
-            </label>
-            <div id="factory-password-options" class="hidden">
-              <label class="toggle">
-                <input name="understood" type="checkbox" />
-                Comprendo que se eliminarán las configuraciones actuales del bot.
-              </label>
-              <fieldset>
-                <legend>Contraseña posterior al restablecimiento</legend>
-                <label class="toggle">
-                  <input name="passwordChoice" type="radio" value="keep" checked />
-                  Conservar la contraseña actual
-                </label>
-                <label class="toggle">
-                  <input name="passwordChoice" type="radio" value="replace" />
-                  Configurar una contraseña nueva
-                </label>
-              </fieldset>
-              <div id="new-password-fields" class="hidden">
-                <label>
-                  Nueva contraseña
-                  <input
-                    name="newPassword"
-                    type="password"
-                    autocomplete="new-password"
-                    minlength="12"
-                    maxlength="128"
-                  />
-                </label>
-                <label>
-                  Confirmar nueva contraseña
-                  <input
-                    name="newPasswordConfirmation"
-                    type="password"
-                    autocomplete="new-password"
-                    minlength="12"
-                    maxlength="128"
-                  />
-                </label>
-              </div>
-            </div>
-            <div class="actions dialog-actions">
-              <button id="cancel-maintenance" class="secondary" type="button">Cancelar</button>
-              <button id="confirm-maintenance" class="danger-primary" type="submit" disabled>
-                Confirmar operación
-              </button>
-            </div>
-          </form>
-        </div>
-
-        <div id="maintenance-progress-view" class="hidden" aria-live="polite">
-          <p class="eyebrow danger-eyebrow">Mantenimiento en curso</p>
-          <h2>No cierre esta ventana</h2>
-          <p id="maintenance-progress-message">Preparando la operación segura.</p>
-          <ol id="maintenance-progress" class="progress-list">
-            <li data-stage="verifying_authorization">Verificando autorización.</li>
-            <li data-stage="stopping_messaging">Deteniendo mensajería.</li>
-            <li data-stage="closing_database">Cerrando base de datos.</li>
-            <li data-stage="deleting_previous_state">Eliminando estado anterior.</li>
-            <li data-stage="creating_database">Creando base de datos nueva.</li>
-            <li data-stage="restoring_defaults">Restaurando comandos predeterminados.</li>
-            <li data-stage="restarting_services">Reiniciando servicios.</li>
-            <li data-stage="ready">Verificando servicios.</li>
-            <li data-stage="finished">Operación terminada.</li>
-          </ol>
-          <p id="maintenance-result-code" class="technical-code"></p>
-          <button id="close-maintenance-result" class="secondary hidden" type="button">
-            Cerrar
+          <button
+            id="action-dialog-close"
+            class="icon-button secondary"
+            type="button"
+            aria-label="Cerrar"
+          >
+            <svg aria-hidden="true"><use href="#icon-close"></use></svg>
           </button>
         </div>
-      </div>
+        <p id="action-dialog-description"></p>
+        <label id="action-dialog-value-field" class="hidden"
+          ><span id="action-dialog-value-label">Valor</span
+          ><textarea id="action-dialog-value" rows="4"></textarea>
+        </label>
+        <label id="action-dialog-confirmation-field" class="hidden"
+          ><span id="action-dialog-confirmation-label">Confirmación</span
+          ><input id="action-dialog-confirmation" autocomplete="off"
+        /></label>
+        <label id="action-dialog-password-field" class="hidden"
+          >Contraseña actual<input
+            id="action-dialog-password"
+            type="password"
+            autocomplete="current-password"
+        /></label>
+        <p id="action-dialog-error" class="field-error hidden" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="action-dialog-cancel" class="secondary" type="button">Cancelar</button>
+          <button id="action-dialog-confirm" type="submit">Confirmar</button>
+        </div>
+      </form>
     </dialog>
+
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/multibot-panel.js"></script>
-    <script type="module" src="/friendly-panel.js"></script>
   </body>
 </html>
