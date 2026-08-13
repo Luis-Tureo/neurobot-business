@@ -32,8 +32,16 @@ describe('aislamiento multibot', () => {
   afterEach(() => database.close());
 
   it('crea dos bots con perfiles, sesiones, menús y datos independientes', () => {
-    const first = database.createBot({ id: 'tienda-uno', mode: 'business', profile: storeProfile('Uno') });
-    const second = database.createBot({ id: 'tienda-dos', mode: 'mixed', profile: storeProfile('Dos') });
+    const first = database.createBot({
+      id: 'tienda-uno',
+      mode: 'business',
+      profile: storeProfile('Uno'),
+    });
+    const second = database.createBot({
+      id: 'tienda-dos',
+      mode: 'mixed',
+      profile: storeProfile('Dos'),
+    });
 
     expect(first.clientId).not.toBe(second.clientId);
     expect(first).toMatchObject({
@@ -51,9 +59,22 @@ describe('aislamiento multibot', () => {
   });
 
   it('no permite leer conocimiento, catálogo ni solicitudes de otro bot', () => {
-    const first = database.createBot({ id: 'tienda-uno', mode: 'business', profile: storeProfile('Uno') });
-    const second = database.createBot({ id: 'tienda-dos', mode: 'business', profile: storeProfile('Dos') });
-    const category = database.saveCatalogCategory({ botId: first.id, name: 'Productos', description: '', enabled: true });
+    const first = database.createBot({
+      id: 'tienda-uno',
+      mode: 'business',
+      profile: storeProfile('Uno'),
+    });
+    const second = database.createBot({
+      id: 'tienda-dos',
+      mode: 'business',
+      profile: storeProfile('Dos'),
+    });
+    const category = database.saveCatalogCategory({
+      botId: first.id,
+      name: 'Productos',
+      description: '',
+      enabled: true,
+    });
     database.saveCatalogItem({
       id: 0,
       botId: first.id,
@@ -73,7 +94,13 @@ describe('aislamiento multibot', () => {
       authorizedLink: null,
       enabled: true,
     });
-    database.createHumanAssistanceRequest({ botId: first.id, chatHash: 'chat-a', userHash: 'user-a', requestedInterval: 'Mañana', localDate: '2026-08-02' });
+    database.createHumanAssistanceRequest({
+      botId: first.id,
+      chatHash: 'chat-a',
+      userHash: 'user-a',
+      requestedInterval: 'Mañana',
+      localDate: '2026-08-02',
+    });
 
     expect(database.listCatalogItems(first.id)).toHaveLength(1);
     expect(database.listCatalogItems(second.id)).toHaveLength(0);
@@ -85,12 +112,18 @@ describe('aislamiento multibot', () => {
     const vault = new SecretVault('k'.repeat(32));
     const encrypted = vault.encrypt('clave-de-prueba-no-real', 'bot:tienda-uno:groq');
     expect(encrypted.encrypted).not.toContain('clave-de-prueba-no-real');
-    expect(vault.decrypt(encrypted.encrypted, 'bot:tienda-uno:groq')).toBe('clave-de-prueba-no-real');
+    expect(vault.decrypt(encrypted.encrypted, 'bot:tienda-uno:groq')).toBe(
+      'clave-de-prueba-no-real',
+    );
     expect(() => vault.decrypt(encrypted.encrypted, 'bot:tienda-dos:groq')).toThrow();
   });
 
   it('selecciona opciones por número, nombre y alias', () => {
-    const bot = database.createBot({ id: 'tienda-menu', mode: 'business', profile: storeProfile('Menú') });
+    const bot = database.createBot({
+      id: 'tienda-menu',
+      mode: 'business',
+      profile: storeProfile('Menú'),
+    });
     const menu = database.listMenus(bot.id)[0];
     const options = database.listMenuOptions(bot.id, menu?.id);
     expect(selectOption(options, '1')?.label).toBe('Productos o servicios');
@@ -99,9 +132,20 @@ describe('aislamiento multibot', () => {
   });
 
   it('usa fallback numerado y mantiene un estado temporal sin conversación completa', async () => {
-    const bot = database.createBot({ id: 'tienda-flujo', mode: 'business', profile: storeProfile('Flujo'), menuType: 'automatic' });
+    const bot = database.createBot({
+      id: 'tienda-flujo',
+      mode: 'business',
+      profile: storeProfile('Flujo'),
+      menuType: 'automatic',
+    });
     const client = new SimulatedMessagingClient();
-    const flow = new ConversationFlowService(database, client, createLogger('silent'), bot.id, 'data/media');
+    const flow = new ConversationFlowService(
+      database,
+      client,
+      createLogger('silent'),
+      bot.id,
+      'data/media',
+    );
     await flow.start('chat@c.us', 'chat-hash', 'user-hash', new Date('2026-08-02T12:00:00Z'));
     expect(client.sentMessages[0]?.text).toContain('1. Productos o servicios');
     const state = database.getConversationState(bot.id, 'chat-hash', 'user-hash');
@@ -110,19 +154,52 @@ describe('aislamiento multibot', () => {
   });
 
   it('no inventa precios ausentes', () => {
-    const bot = database.createBot({ id: 'tienda-precio', mode: 'business', profile: storeProfile('Precio') });
-    const category = database.saveCatalogCategory({ botId: bot.id, name: 'General', description: '', enabled: true });
-    const item = database.saveCatalogItem({
-      id: 0, botId: bot.id, categoryId: category.id, name: 'Servicio', code: 'SERV-1', description: '',
-      priceAmount: null, offerPriceAmount: null, currency: 'CLP', presentation: '', size: '', variants: [],
-      availability: '', informedStock: null, primaryMediaId: null, authorizedLink: null, enabled: true,
+    const bot = database.createBot({
+      id: 'tienda-precio',
+      mode: 'business',
+      profile: storeProfile('Precio'),
     });
-    expect(new CatalogService(database, bot.id).itemText(item.id)).toContain('No tengo un precio actualizado');
+    const category = database.saveCatalogCategory({
+      botId: bot.id,
+      name: 'General',
+      description: '',
+      enabled: true,
+    });
+    const item = database.saveCatalogItem({
+      id: 0,
+      botId: bot.id,
+      categoryId: category.id,
+      name: 'Servicio',
+      code: 'SERV-1',
+      description: '',
+      priceAmount: null,
+      offerPriceAmount: null,
+      currency: 'CLP',
+      presentation: '',
+      size: '',
+      variants: [],
+      availability: '',
+      informedStock: null,
+      primaryMediaId: null,
+      authorizedLink: null,
+      enabled: true,
+    });
+    expect(new CatalogService(database, bot.id).itemText(item.id)).toContain(
+      'No tengo un precio actualizado',
+    );
   });
 
   it('mantiene automatizaciones y encuestas separadas por bot', () => {
-    const first = database.createBot({ id: 'tienda-auto-uno', mode: 'business', profile: storeProfile('Auto Uno') });
-    const second = database.createBot({ id: 'tienda-auto-dos', mode: 'business', profile: storeProfile('Auto Dos') });
+    const first = database.createBot({
+      id: 'tienda-auto-uno',
+      mode: 'business',
+      profile: storeProfile('Auto Uno'),
+    });
+    const second = database.createBot({
+      id: 'tienda-auto-dos',
+      mode: 'business',
+      profile: storeProfile('Auto Dos'),
+    });
     const firstAutomatic = database.getAutomaticMessageConfiguration(first.id);
     firstAutomatic.welcome.template = 'Bienvenida exclusiva del primer asistente.';
     firstAutomatic.welcome.enabled = true;
@@ -142,15 +219,29 @@ describe('aislamiento multibot', () => {
       disabledUntil: originalFirst.disabledUntil,
     });
 
-    expect(database.getAutomaticMessageConfiguration(first.id).welcome.template).toContain('primer asistente');
-    expect(database.getAutomaticMessageConfiguration(second.id).welcome.template).not.toContain('primer asistente');
+    expect(database.getAutomaticMessageConfiguration(first.id).welcome.template).toContain(
+      'primer asistente',
+    );
+    expect(database.getAutomaticMessageConfiguration(second.id).welcome.template).not.toContain(
+      'primer asistente',
+    );
     expect(firstPolls.templates()[0]?.question).toContain('primer asistente');
-    expect(secondPolls.templates().some((template) => template.question.includes('primer asistente'))).toBe(false);
+    expect(
+      secondPolls.templates().some((template) => template.question.includes('primer asistente')),
+    ).toBe(false);
   });
 
   it('aplica el presupuesto global entre bots sin mezclar sus consumos', () => {
-    const first = database.createBot({ id: 'tienda-ia-uno', mode: 'business', profile: storeProfile('IA Uno') });
-    const second = database.createBot({ id: 'tienda-ia-dos', mode: 'business', profile: storeProfile('IA Dos') });
+    const first = database.createBot({
+      id: 'tienda-ia-uno',
+      mode: 'business',
+      profile: storeProfile('IA Uno'),
+    });
+    const second = database.createBot({
+      id: 'tienda-ia-dos',
+      mode: 'business',
+      profile: storeProfile('IA Dos'),
+    });
     database.saveGlobalAILimits({
       dailyRequestLimit: 1,
       monthlyRequestLimit: 10,
@@ -297,6 +388,66 @@ describe('aislamiento multibot', () => {
       url: 'https://graph.facebook.com/v25.0/222222222222222/messages',
       body: { to: '56912345678' },
     });
+    const conversations = database.listConversations({
+      page: 1,
+      pageSize: 10,
+      assistantId: second.id,
+    });
+    expect(conversations).toMatchObject({
+      total: 1,
+      items: [
+        {
+          assistantId: second.id,
+          waId: '56912345678',
+          lastMessage: {
+            direction: 'outbound',
+            messageType: 'interactive',
+            whatsappStatus: 'accepted',
+          },
+        },
+      ],
+    });
+    const conversationId = conversations.items[0]!.id;
+    expect(database.listConversationMessages(conversationId, 1, 10)?.messages.items).toMatchObject([
+      { whatsappMessageId: 'wamid.inbound.second', direction: 'inbound', text: 'Hola' },
+      {
+        whatsappMessageId: `wamid.${second.id}`,
+        direction: 'outbound',
+        whatsappStatus: 'accepted',
+      },
+    ]);
+
+    const statusPayload = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          changes: [
+            {
+              field: 'messages',
+              value: {
+                metadata: { phone_number_id: '222222222222222' },
+                statuses: [
+                  {
+                    id: `wamid.${second.id}`,
+                    recipient_id: '56912345678',
+                    status: 'delivered',
+                    timestamp: '1786550401',
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    await manager.ingestMetaWebhook(
+      '222222222222222',
+      statusPayload,
+      new Set([`status:wamid.${second.id}:delivered:2026-08-12T16:00:01.000Z`]),
+    );
+    expect(
+      database.listConversationMessages(conversationId, 1, 10)?.messages.items[1],
+    ).toMatchObject({ whatsappStatus: 'delivered' });
     await manager.stopAll();
   });
 });

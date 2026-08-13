@@ -1703,7 +1703,7 @@
                 <div>
                   <p class="eyebrow">Operación</p>
                   <h2 id="history-title">Historial</h2>
-                  <p>Actividad segura y anonimizada del asistente.</p>
+                  <p>Conversaciones reales atendidas mediante WhatsApp.</p>
                 </div>
                 <button
                   id="refresh-history"
@@ -1715,29 +1715,24 @@
                 </button>
               </div>
               <p class="privacy-note">
-                Por privacidad, Neurobot no almacena el texto de las preguntas ni de las respuestas.
+                Se muestra solo el contenido necesario para reconstruir la atención. No se guardan
+                archivos, URLs temporales, credenciales ni payloads de Meta.
               </p>
               <form id="history-filters" class="filter-bar">
                 <label
                   >Buscar<input
                     name="search"
                     type="search"
-                    placeholder="Actividad, fuente o usuario"
+                    maxlength="120"
+                    placeholder="Nombre o número de WhatsApp"
                 /></label>
                 <label
-                  >Estado<select name="status">
-                    <option value="all">Todos</option>
-                    <option value="success">Correcto</option>
-                    <option value="warning">Advertencia</option>
-                    <option value="error">Error</option>
+                  >Asistente<select name="assistantId" id="history-assistant-filter">
+                    <option value="">Todos los asistentes</option>
                   </select></label
                 >
-                <label
-                  >Orden<select name="order">
-                    <option value="desc">Más recientes</option>
-                    <option value="asc">Más antiguos</option>
-                  </select></label
-                >
+                <label>Desde<input name="from" type="date" /> </label>
+                <label>Hasta<input name="to" type="date" /> </label>
                 <label
                   >Por página<select name="pageSize">
                     <option value="10">10</option>
@@ -1745,26 +1740,66 @@
                     <option value="50">50</option>
                   </select></label
                 >
+                <button class="secondary" type="submit">Aplicar filtros</button>
+                <button id="history-clear-filters" class="text-button" type="button">
+                  Limpiar
+                </button>
               </form>
-              <div id="history-table-region" class="responsive-table" aria-live="polite">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Fecha</th>
-                      <th>Usuario</th>
-                      <th>Actividad</th>
-                      <th>Fuente</th>
-                      <th>Estado</th>
-                    </tr>
-                  </thead>
-                  <tbody id="history-table-body"></tbody>
-                </table>
-                <div id="history-empty" class="empty-state hidden"></div>
-              </div>
-              <div class="pagination" aria-label="Paginación del historial">
-                <button id="history-previous" class="secondary" type="button">Anterior</button>
-                <span id="history-page-status">Página 1</span>
-                <button id="history-next" class="secondary" type="button">Siguiente</button>
+              <div id="history-error" class="notice error hidden" role="alert"></div>
+              <div id="conversation-explorer" class="conversation-explorer">
+                <aside class="conversation-list-panel" aria-labelledby="conversation-list-title">
+                  <div class="conversation-pane-heading">
+                    <div>
+                      <h3 id="conversation-list-title">Conversaciones</h3>
+                      <p id="conversation-count" class="muted">0 conversaciones</p>
+                    </div>
+                  </div>
+                  <div id="conversation-list" class="conversation-list" aria-live="polite"></div>
+                  <div class="pagination" aria-label="Paginación de conversaciones">
+                    <button id="history-previous" class="secondary" type="button">Anterior</button>
+                    <span id="history-page-status">Página 1</span>
+                    <button id="history-next" class="secondary" type="button">Siguiente</button>
+                  </div>
+                </aside>
+                <article
+                  id="conversation-detail"
+                  class="conversation-detail"
+                  aria-labelledby="history-conversation-title"
+                >
+                  <div id="conversation-placeholder" class="conversation-placeholder">
+                    <h3 id="history-conversation-title" tabindex="-1">
+                      Selecciona una conversación
+                    </h3>
+                    <p>Abre una conversación para revisar sus mensajes en orden cronológico.</p>
+                  </div>
+                  <div id="conversation-content" class="hidden">
+                    <header class="conversation-detail-heading">
+                      <button
+                        id="history-back"
+                        class="secondary conversation-back"
+                        type="button"
+                        aria-label="Volver a la lista de conversaciones"
+                      >
+                        Volver
+                      </button>
+                      <div>
+                        <h3 id="conversation-customer-name" tabindex="-1"></h3>
+                        <p id="conversation-customer-meta" class="muted"></p>
+                      </div>
+                    </header>
+                    <div class="older-messages">
+                      <button id="history-load-older" class="text-button hidden" type="button">
+                        Cargar mensajes anteriores
+                      </button>
+                    </div>
+                    <div
+                      id="conversation-messages"
+                      class="conversation-messages"
+                      aria-live="polite"
+                      aria-label="Mensajes de la conversación"
+                    ></div>
+                  </div>
+                </article>
               </div>
             </section>
 

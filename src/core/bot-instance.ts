@@ -3,7 +3,9 @@ import type { AIProvider } from '../ai/ai-provider.js';
 import { AssistantQueryService } from '../ai/assistant-query-service.js';
 import { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
 import type { BotRecord, ConnectionSnapshot, GroupJoinEvent } from '../domain/types.js';
+import { serializeError } from '../infrastructure/safe-error.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
+import { canonicalPhoneIdentity } from '../messaging/identifiers.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import type { SecretVault } from '../security/secret-vault.js';
@@ -83,9 +85,18 @@ export class BotInstance {
       : null;
     const query = new AssistantQueryService(database, provider, logger, bot.id, this.aiQueue);
     if (bot.capabilities.communitySingleTurnMode) database.clearConversationStates(bot.id);
-    const flow = bot.capabilities.conversationContinuationEnabled || bot.capabilities.interactiveMenusEnabled
-      ? new ConversationFlowService(database, client, logger, bot.id, options.mediaRoot, query, this.outboundQueue)
-      : undefined;
+    const flow =
+      bot.capabilities.conversationContinuationEnabled || bot.capabilities.interactiveMenusEnabled
+        ? new ConversationFlowService(
+            database,
+            client,
+            logger,
+            bot.id,
+            options.mediaRoot,
+            query,
+            this.outboundQueue,
+          )
+        : undefined;
     this.automaticMessages = new AutomaticMessageService(database, client, logger, anonymizer, {
       botId: bot.id,
       ...(options.isPaused === undefined ? {} : { isPaused: options.isPaused }),
@@ -123,14 +134,54 @@ export class BotInstance {
     );
     client.setEvents({
       onMessage: async (message) => {
+        if (!message.isGroup && message.recipientId !== undefined) {
+          const waId = waIdFromIdentity(message.participantId);
+          if (waId !== null) {
+            try {
+              database.recordConversationMessage({
+                assistantId: bot.id,
+                phoneNumberId: message.recipientId,
+                waId,
+                contactName: message.contactName ?? null,
+                whatsappMessageId: message.id,
+                direction: 'inbound',
+                senderType: 'customer',
+                messageType: message.messageType ?? 'unknown',
+                text: message.visibleText ?? message.body,
+                caption: message.caption ?? null,
+                messageTimestamp: message.receivedAt ?? new Date().toISOString(),
+                whatsappStatus: 'received',
+              });
+            } catch (error) {
+              this.logger.error(
+                {
+                  ...serializeError(error, 'CONVERSATION_INBOUND_PERSIST_FAILED', false),
+                  operation: 'CONVERSATION_INBOUND_PERSIST_FAILED',
+                  botId: bot.id,
+                },
+                'No fue posible registrar el mensaje entrante; el procesamiento continuará',
+              );
+            }
+          }
+        }
         await this.processor.process(message);
       },
       onStateChange: (state, reason) => {
         this.connection.updateState(state, reason);
-        database.updateBotWhatsAppStatus(bot.id, state, null, state === 'connected' ? new Date().toISOString() : null);
+        database.updateBotWhatsAppStatus(
+          bot.id,
+          state,
+          null,
+          state === 'connected' ? new Date().toISOString() : null,
+        );
         database.recordTechnicalEvent({
           botId: bot.id,
-          eventType: state === 'connected' ? 'BOT_CONNECTED' : state === 'disconnected' ? 'BOT_DISCONNECTED' : 'BOT_STATE_CHANGED',
+          eventType:
+            state === 'connected'
+              ? 'BOT_CONNECTED'
+              : state === 'disconnected'
+                ? 'BOT_DISCONNECTED'
+                : 'BOT_STATE_CHANGED',
           result: state,
           ...(reason === undefined ? {} : { errorCode: reason }),
         });
@@ -148,12 +199,47 @@ export class BotInstance {
       },
       onDeliveryStatus: (status) => {
         database.recordMetaMessageStatus({ ...status, botId: bot.id });
+        if (['sent', 'delivered', 'read', 'failed'].includes(status.status)) {
+          database.updateConversationMessageStatus({
+            whatsappMessageId: status.messageId,
+            status: status.status as 'sent' | 'delivered' | 'read' | 'failed',
+            occurredAt: status.occurredAt,
+            errorCode: status.errorCode,
+            errorMessage: status.errorMessage,
+          });
+        }
         database.recordTechnicalEvent({
           botId: bot.id,
           eventType: 'META_MESSAGE_STATUS_RECEIVED',
           result: status.status,
           ...(status.errorCode === null ? {} : { errorCode: status.errorCode }),
         });
+      },
+      onOutboundMessage: (message) => {
+        try {
+          database.recordConversationMessage({
+            assistantId: bot.id,
+            phoneNumberId: message.phoneNumberId,
+            waId: message.recipientId,
+            whatsappMessageId: message.messageId,
+            direction: 'outbound',
+            senderType: 'assistant',
+            messageType: message.messageType,
+            text: message.text,
+            caption: message.caption,
+            messageTimestamp: message.acceptedAt,
+            whatsappStatus: 'accepted',
+          });
+        } catch (error) {
+          this.logger.error(
+            {
+              ...serializeError(error, 'CONVERSATION_OUTBOUND_PERSIST_FAILED', false),
+              operation: 'CONVERSATION_OUTBOUND_PERSIST_FAILED',
+              botId: bot.id,
+            },
+            'No fue posible registrar el mensaje saliente aceptado por Meta',
+          );
+        }
       },
       onGroupJoin: async (event) => {
         if (this.communityServicesEnabled) await this.automaticMessages.handleGroupJoin(event);
@@ -166,7 +252,10 @@ export class BotInstance {
   }
 
   public async start(): Promise<void> {
-    this.logger.info({ operation: 'BOT_STARTED', botId: this.bot.id }, 'Se inició una instancia aislada');
+    this.logger.info(
+      { operation: 'BOT_STARTED', botId: this.bot.id },
+      'Se inició una instancia aislada',
+    );
     if (this.communityServicesEnabled) this.discovery.startPeriodic();
     if (this.communityServicesEnabled) {
       this.automaticMessages.start();
@@ -201,7 +290,10 @@ export class BotInstance {
       this.pollScheduler.stop();
     }
     await this.connection.stop();
-    this.logger.info({ operation: 'BOT_STOPPED', botId: this.bot.id }, 'Se detuvo una instancia aislada');
+    this.logger.info(
+      { operation: 'BOT_STOPPED', botId: this.bot.id },
+      'Se detuvo una instancia aislada',
+    );
   }
 
   public async restart(): Promise<void> {
@@ -244,8 +336,15 @@ export class BotInstance {
     return this.aiQueue;
   }
 
-  public snapshot(): { connection: ConnectionSnapshot; discovery: ReturnType<GroupDiscoveryService['snapshot']> } {
+  public snapshot(): {
+    connection: ConnectionSnapshot;
+    discovery: ReturnType<GroupDiscoveryService['snapshot']>;
+  } {
     return { connection: this.connection.snapshot(), discovery: this.discovery.snapshot() };
   }
+}
 
+function waIdFromIdentity(identifier: string): string | null {
+  const canonical = canonicalPhoneIdentity(identifier);
+  return canonical === null ? null : canonical.slice(0, -'@c.us'.length);
 }

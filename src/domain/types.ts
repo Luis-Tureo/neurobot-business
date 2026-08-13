@@ -20,6 +20,9 @@ export type IncomingMessage = {
   administratorId?: string | null;
   participantIdentityStatus?: 'phone' | 'lid_resolved' | 'lid_unresolved' | 'missing';
   messageType?: string;
+  visibleText?: string;
+  caption?: string;
+  contactName?: string;
   groupIdSource?: 'from' | 'to';
   body: string;
   isGroup: boolean;
@@ -42,6 +45,17 @@ export type MetaMessageStatus = {
   occurredAt: string;
   conversationId: string | null;
   errorCode: string | null;
+  errorMessage: string | null;
+};
+
+export type OutboundMessageAccepted = {
+  messageId: string | null;
+  phoneNumberId: string;
+  recipientId: string;
+  messageType: string;
+  text: string | null;
+  caption: string | null;
+  acceptedAt: string;
 };
 
 export type DetectedGroup = {
@@ -349,11 +363,7 @@ export type KnowledgeFragment = {
 };
 
 export type CachedAnswerStatus =
-  | 'AUTO_VERIFIED'
-  | 'ADMIN_APPROVED'
-  | 'ADMIN_EDITED'
-  | 'DISABLED'
-  | 'INVALIDATED';
+  'AUTO_VERIFIED' | 'ADMIN_APPROVED' | 'ADMIN_EDITED' | 'DISABLED' | 'INVALIDATED';
 
 export type CachedAnswerSourceType = 'AI_GENERATED' | 'ADMIN_FAQ' | 'MANUAL';
 
@@ -454,7 +464,8 @@ export type AIQueueMetrics = {
   maximumWaitMs: number;
 };
 
-export type AIProviderHealthState = 'AVAILABLE' | 'BUSY' | 'RATE_LIMITED' | 'DEGRADED' | 'UNAVAILABLE' | 'NOT_CONFIGURED';
+export type AIProviderHealthState =
+  'AVAILABLE' | 'BUSY' | 'RATE_LIMITED' | 'DEGRADED' | 'UNAVAILABLE' | 'NOT_CONFIGURED';
 
 export type ModerationSeverity = 'INFORMATIVA' | 'LEVE' | 'MEDIA' | 'ALTA' | 'CRITICA';
 export type ModerationAction = 'NO_ACTION' | 'ADMIN_REVIEW' | 'WARNING' | 'WARNING_AND_NOTIFY';
@@ -520,7 +531,13 @@ export type ModerationRule = {
 
 export type ModerationResult = {
   allowed: boolean;
-  matchedRules: Array<{ id: number; name: string; category: string; severity: ModerationSeverity; score: number }>;
+  matchedRules: Array<{
+    id: number;
+    name: string;
+    category: string;
+    severity: ModerationSeverity;
+    score: number;
+  }>;
   categories: string[];
   totalScore: number;
   severity: ModerationSeverity;
@@ -558,8 +575,7 @@ export type AILimitCode =
   | 'AI_LIMIT_MONTHLY_TOKENS_REACHED';
 
 export type AIReservationDecision =
-  | { allowed: true; reservation: AIReservation }
-  | { allowed: false; code: AILimitCode };
+  { allowed: true; reservation: AIReservation } | { allowed: false; code: AILimitCode };
 
 export type LinkedGroupRecord = {
   groupHash: string;

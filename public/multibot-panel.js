@@ -38,8 +38,15 @@ const state = {
   requests: [],
   requestFilter: 'pending',
   ai: null,
-  history: [],
-  historyPage: 1,
+  activityHistory: [],
+  conversations: [],
+  conversationPage: 1,
+  conversationPagination: null,
+  selectedConversationId: null,
+  selectedConversation: null,
+  conversationMessages: [],
+  conversationMessagePage: 1,
+  conversationMessagePagination: null,
   refreshTimer: null,
 };
 
@@ -524,7 +531,7 @@ function renderOverview(detail) {
     { label: 'Conversaciones activas', value: detail.activeConversations },
     { label: 'Preguntas hoy', value: detail.usage.requests },
     { label: 'Solicitudes pendientes', value: detail.pendingRequests },
-    { label: 'Actividad registrada', value: state.history.length },
+    { label: 'Actividad registrada', value: state.activityHistory.length },
   ]);
 }
 
@@ -551,7 +558,7 @@ async function selectBot(botId, section = 'status') {
   state.selectedBotId = botId;
   navigation.setContext('assistant');
   await loadBotSummary();
-  await loadHistory({ background: true });
+  await loadActivityHistory({ background: true });
   const requested = document.querySelector(`button[data-section="${section}"]`);
   const resolved =
     requested && !requested.disabled && !requested.classList.contains('hidden')
@@ -1565,13 +1572,13 @@ function renderStatisticsCards(ai = state.ai) {
     { label: 'Respuestas con IA', value: ai.operationalMetrics.aiSuccesses },
     { label: 'Respuestas guardadas', value: ai.operationalMetrics.cacheHits },
     { label: 'Solicitudes humanas', value: pending },
-    { label: 'Actividad registrada', value: state.history.length },
+    { label: 'Actividad registrada', value: state.activityHistory.length },
   ]);
 }
 
 async function loadStatistics() {
   if (!state.selectedBotId) return;
-  const loaders = [loadHistory({ background: true })];
+  const loaders = [loadActivityHistory({ background: true })];
   if (state.visibleModules.includes('requests')) loaders.push(loadRequests());
   else state.requests = [];
   await Promise.all(loaders);
@@ -1599,28 +1606,9 @@ function historySource(item) {
   return 'Asistente';
 }
 
-function filteredHistory() {
-  const form = document.querySelector('#history-filters');
-  const search = form.elements.search.value.trim().toLocaleLowerCase('es');
-  const status = form.elements.status.value;
-  const order = form.elements.order.value;
-  const items = state.history.filter((item) => {
-    const tone = historyTone(item);
-    const haystack =
-      `${historyLabel(item)} ${historySource(item)} ${item.userHash || ''} ${item.groupHash || ''}`.toLocaleLowerCase(
-        'es',
-      );
-    return (status === 'all' || tone === status) && (!search || haystack.includes(search));
-  });
-  return items.sort((left, right) => {
-    const comparison = new Date(left.occurredAt).getTime() - new Date(right.occurredAt).getTime();
-    return order === 'asc' ? comparison : -comparison;
-  });
-}
-
 function renderOverviewActivity() {
   const target = document.querySelector('#overview-activity');
-  const items = state.history.slice(0, 5);
+  const items = state.activityHistory.slice(0, 5);
   if (items.length === 0) {
     renderEmpty(
       target,
@@ -1652,69 +1640,306 @@ function renderOverviewActivity() {
   }
 }
 
-function renderHistory() {
-  const body = document.querySelector('#history-table-body');
-  const empty = document.querySelector('#history-empty');
-  const items = filteredHistory();
-  const pageSize = Number(document.querySelector('#history-filters').elements.pageSize.value);
-  const pages = Math.max(1, Math.ceil(items.length / pageSize));
-  state.historyPage = Math.min(state.historyPage, pages);
-  const start = (state.historyPage - 1) * pageSize;
-  const visible = items.slice(start, start + pageSize);
-  body.replaceChildren();
-  empty.classList.toggle('hidden', visible.length > 0);
-  if (visible.length === 0) {
-    empty.replaceChildren(
-      element('h3', { text: 'No hay actividad para estos filtros' }),
-      element('p', { text: 'Cambia la búsqueda o el estado seleccionado.' }),
-    );
-  }
-  for (const item of visible) {
-    const tone = historyTone(item);
-    const row = document.createElement('tr');
-    const values = [
-      ['Fecha', formatDate(item.occurredAt)],
-      ['Usuario', safeHash(item.userHash || item.groupHash)],
-      ['Actividad', historyLabel(item)],
-      ['Fuente', historySource(item)],
-    ];
-    for (const [label, value] of values) {
-      const cell = element('td', { text: value, attributes: { 'data-label': label } });
-      row.append(cell);
-    }
-    const statusCell = element('td', { attributes: { 'data-label': 'Estado' } });
-    statusCell.append(
-      statusBadge(
-        tone === 'success' ? 'Correcto' : tone === 'warning' ? 'Advertencia' : 'Error',
-        tone,
-      ),
-    );
-    row.append(statusCell);
-    body.append(row);
-  }
-  document.querySelector('#history-page-status').textContent =
-    `Página ${state.historyPage} de ${pages}`;
-  document.querySelector('#history-previous').disabled = state.historyPage <= 1;
-  document.querySelector('#history-next').disabled = state.historyPage >= pages;
-}
-
-async function loadHistory({ background = false } = {}) {
+async function loadActivityHistory({ background = false } = {}) {
   if (!state.selectedBotId) return;
-  if (!background) {
-    const body = document.querySelector('#history-table-body');
-    body.replaceChildren();
-    document.querySelector('#history-empty').classList.remove('hidden');
-    document
-      .querySelector('#history-empty')
-      .replaceChildren(element('div', { className: 'loading-state', text: 'Cargando historial…' }));
-  }
   const result = await api(
     `/api/bots/${encodeURIComponent(state.selectedBotId)}/history?limit=200`,
   );
-  state.history = result.items;
-  state.historyPage = 1;
-  renderHistory();
+  state.activityHistory = result.items;
   renderOverviewActivity();
+  if (!background) renderStatisticsCards();
+}
+
+function populateHistoryAssistantFilter() {
+  const filter = document.querySelector('#history-assistant-filter');
+  const previous = filter.dataset.initialized === 'true' ? filter.value : state.selectedBotId || '';
+  filter.replaceChildren(
+    element('option', { text: 'Todos los asistentes', attributes: { value: '' } }),
+  );
+  for (const bot of state.bots) {
+    filter.append(
+      element('option', {
+        text: bot.organizationName || bot.botName,
+        attributes: { value: bot.id },
+      }),
+    );
+  }
+  filter.value = state.bots.some((bot) => bot.id === previous) ? previous : '';
+  filter.dataset.initialized = 'true';
+}
+
+function conversationCustomerLabel(conversation) {
+  return conversation.customerName || formatWhatsAppId(conversation.waId);
+}
+
+function formatWhatsAppId(value) {
+  return value ? `+${String(value).replace(/\D/gu, '')}` : 'Número no disponible';
+}
+
+function messageTypeLabel(type) {
+  return (
+    {
+      text: 'Texto',
+      image: 'Imagen',
+      video: 'Video',
+      document: 'Documento',
+      audio: 'Audio',
+      interactive: 'Interactivo',
+      button: 'Botón',
+      template: 'Plantilla',
+    }[type] || 'Mensaje'
+  );
+}
+
+function whatsappStatusLabel(status) {
+  return (
+    {
+      received: 'Recibido',
+      accepted: 'En proceso',
+      sent: 'Enviado',
+      delivered: 'Entregado',
+      read: 'Leído',
+      failed: 'Fallido',
+      deleted: 'Eliminado',
+      unknown: 'Sin confirmar',
+    }[status] || 'Sin confirmar'
+  );
+}
+
+function conversationPreview(conversation) {
+  const last = conversation.lastMessage;
+  if (!last) return 'Sin mensajes';
+  const text = last.text || last.caption || `[${messageTypeLabel(last.messageType)}]`;
+  return ['image', 'video', 'document', 'audio'].includes(last.messageType)
+    ? `${messageTypeLabel(last.messageType)} · ${text}`
+    : text;
+}
+
+function renderConversationList() {
+  const target = document.querySelector('#conversation-list');
+  const pagination = state.conversationPagination || {
+    page: state.conversationPage,
+    total: 0,
+    totalPages: 1,
+  };
+  document.querySelector('#conversation-count').textContent =
+    `${pagination.total} ${pagination.total === 1 ? 'conversación' : 'conversaciones'}`;
+  document.querySelector('#history-page-status').textContent =
+    `Página ${pagination.page} de ${pagination.totalPages}`;
+  document.querySelector('#history-previous').disabled = pagination.page <= 1;
+  document.querySelector('#history-next').disabled = pagination.page >= pagination.totalPages;
+  if (state.conversations.length === 0) {
+    renderEmpty(
+      target,
+      'No hay conversaciones',
+      'Las conversaciones nuevas aparecerán aquí. También puedes cambiar los filtros.',
+    );
+    return;
+  }
+  target.replaceChildren();
+  for (const conversation of state.conversations) {
+    const button = element('button', {
+      className: 'conversation-item',
+      attributes: {
+        type: 'button',
+        'aria-pressed': String(state.selectedConversationId === conversation.id),
+        'aria-label': `Abrir conversación con ${conversationCustomerLabel(conversation)}`,
+      },
+    });
+    const top = element('span', { className: 'conversation-item__top' });
+    top.append(
+      element('strong', { text: conversationCustomerLabel(conversation) }),
+      element('span', {
+        className: 'conversation-item__time',
+        text: formatDate(conversation.lastMessageAt),
+      }),
+    );
+    const meta = element('span', { className: 'conversation-item__meta' });
+    meta.append(
+      element('span', {
+        className: 'conversation-item__assistant',
+        text: conversation.assistantName,
+      }),
+      element('span', {
+        className: 'conversation-item__state',
+        text:
+          conversation.lastMessage?.direction === 'outbound'
+            ? whatsappStatusLabel(conversation.lastMessage.status)
+            : 'Cliente',
+      }),
+    );
+    button.append(
+      top,
+      element('span', {
+        className: 'conversation-item__preview',
+        text: conversationPreview(conversation),
+      }),
+      meta,
+    );
+    button.addEventListener('click', () => void selectConversation(conversation, button));
+    target.append(button);
+  }
+}
+
+function renderConversationMessage(message) {
+  const article = element('article', {
+    className: `conversation-message conversation-message--${message.direction}`,
+  });
+  article.append(
+    element('p', {
+      className: 'conversation-message__sender',
+      text: message.direction === 'inbound' ? 'Cliente' : 'Asistente',
+    }),
+    element('p', {
+      className: 'conversation-message__text',
+      text: message.text || message.caption || `[${messageTypeLabel(message.messageType)}]`,
+    }),
+  );
+  const meta = element('div', { className: 'conversation-message__meta' });
+  meta.append(
+    element('span', { text: messageTypeLabel(message.messageType) }),
+    element('span', { text: formatDate(message.timestamp) }),
+  );
+  if (message.direction === 'outbound') {
+    meta.append(
+      element('span', {
+        className: 'conversation-message__status',
+        text: whatsappStatusLabel(message.status),
+        attributes: { 'aria-label': `Estado: ${whatsappStatusLabel(message.status)}` },
+      }),
+    );
+  }
+  article.append(meta);
+  if (message.status === 'failed') {
+    article.append(
+      element('p', {
+        className: 'conversation-message__error',
+        text: message.error?.message || message.error?.code || 'Meta informó que el envío falló.',
+      }),
+    );
+  }
+  return article;
+}
+
+function renderConversationMessages({ prepend = false } = {}) {
+  const target = document.querySelector('#conversation-messages');
+  const nodes = state.conversationMessages.map(renderConversationMessage);
+  if (prepend) target.prepend(...nodes);
+  else target.replaceChildren(...nodes);
+  const pagination = state.conversationMessagePagination;
+  const older = document.querySelector('#history-load-older');
+  older.classList.toggle('hidden', !pagination || pagination.page >= pagination.totalPages);
+}
+
+function showConversationDetail(conversation) {
+  state.selectedConversation = conversation;
+  document.querySelector('#conversation-placeholder').classList.add('hidden');
+  document.querySelector('#conversation-content').classList.remove('hidden');
+  document.querySelector('#conversation-customer-name').textContent =
+    conversationCustomerLabel(conversation);
+  document.querySelector('#conversation-customer-meta').textContent =
+    `${formatWhatsAppId(conversation.waId)} · ${conversation.assistantName}`;
+  document.querySelector('#conversation-explorer').classList.add('is-detail-open');
+}
+
+async function selectConversation(conversation, trigger) {
+  state.selectedConversationId = conversation.id;
+  state.conversationMessagePage = 1;
+  state.conversationMessages = [];
+  showConversationDetail(conversation);
+  renderConversationList();
+  setLoading(document.querySelector('#conversation-messages'), 'Cargando mensajes…');
+  const selectedId = conversation.id;
+  try {
+    const result = await api(
+      `/api/conversations/${encodeURIComponent(selectedId)}/messages?page=1&pageSize=50`,
+    );
+    if (state.selectedConversationId !== selectedId) return;
+    state.selectedConversation = result.conversation;
+    state.conversationMessages = result.items;
+    state.conversationMessagePagination = result.pagination;
+    showConversationDetail(result.conversation);
+    renderConversationMessages();
+    const messages = document.querySelector('#conversation-messages');
+    messages.scrollTop = messages.scrollHeight;
+    if (window.matchMedia('(max-width: 820px)').matches) {
+      document.querySelector('#conversation-customer-name').focus();
+    }
+  } catch (error) {
+    if (state.selectedConversationId !== selectedId) return;
+    renderEmpty(
+      document.querySelector('#conversation-messages'),
+      'No se pudieron cargar los mensajes',
+      error instanceof Error ? error.message : 'Intenta nuevamente.',
+      actionButton('Reintentar', 'secondary', () => selectConversation(conversation, trigger)),
+    );
+  }
+}
+
+async function loadOlderConversationMessages() {
+  if (!state.selectedConversationId || !state.conversationMessagePagination) return;
+  if (state.conversationMessagePage >= state.conversationMessagePagination.totalPages) return;
+  const nextPage = state.conversationMessagePage + 1;
+  const target = document.querySelector('#conversation-messages');
+  const previousHeight = target.scrollHeight;
+  const result = await api(
+    `/api/conversations/${encodeURIComponent(state.selectedConversationId)}/messages?page=${nextPage}&pageSize=50`,
+  );
+  state.conversationMessagePage = nextPage;
+  state.conversationMessagePagination = result.pagination;
+  state.conversationMessages = result.items;
+  renderConversationMessages({ prepend: true });
+  target.scrollTop += target.scrollHeight - previousHeight;
+}
+
+function conversationQuery() {
+  const form = document.querySelector('#history-filters');
+  const parameters = new window.URLSearchParams({
+    page: String(state.conversationPage),
+    pageSize: String(form.elements.pageSize.value),
+  });
+  for (const name of ['search', 'assistantId', 'from', 'to']) {
+    const value = form.elements[name].value.trim();
+    if (value) parameters.set(name, value);
+  }
+  return parameters.toString();
+}
+
+function resetConversationSelection() {
+  state.selectedConversationId = null;
+  state.selectedConversation = null;
+  state.conversationMessages = [];
+  state.conversationMessagePagination = null;
+  document.querySelector('#conversation-explorer').classList.remove('is-detail-open');
+  document.querySelector('#conversation-content').classList.add('hidden');
+  document.querySelector('#conversation-placeholder').classList.remove('hidden');
+}
+
+async function loadConversationHistory({ preserveSelection = false } = {}) {
+  populateHistoryAssistantFilter();
+  const target = document.querySelector('#conversation-list');
+  const errorRegion = document.querySelector('#history-error');
+  errorRegion.classList.add('hidden');
+  if (!preserveSelection) resetConversationSelection();
+  setLoading(target, 'Cargando conversaciones…');
+  try {
+    const result = await api(`/api/conversations?${conversationQuery()}`);
+    state.conversations = result.items;
+    state.conversationPagination = result.pagination;
+    state.conversationPage = result.pagination.page;
+    renderConversationList();
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'No fue posible consultar el historial.';
+    errorRegion.textContent = message;
+    errorRegion.classList.remove('hidden');
+    renderEmpty(
+      target,
+      'No se pudo cargar el historial',
+      message,
+      actionButton('Reintentar', 'secondary', () => loadConversationHistory()),
+    );
+  }
 }
 
 async function testWhatsApp() {
@@ -2311,25 +2536,47 @@ function configureForms() {
   });
 
   const historyFilters = document.querySelector('#history-filters');
-  historyFilters.addEventListener('submit', (event) => event.preventDefault());
-  historyFilters.addEventListener('input', () => {
-    state.historyPage = 1;
-    renderHistory();
+  historyFilters.addEventListener('submit', (event) => {
+    event.preventDefault();
+    state.conversationPage = 1;
+    const submitter = event.submitter || historyFilters.querySelector('button[type="submit"]');
+    void withBusy(submitter, () => loadConversationHistory());
   });
   historyFilters.addEventListener('change', () => {
-    state.historyPage = 1;
-    renderHistory();
+    state.conversationPage = 1;
+    void loadConversationHistory();
   });
   document.querySelector('#history-previous').addEventListener('click', () => {
-    state.historyPage = Math.max(1, state.historyPage - 1);
-    renderHistory();
+    state.conversationPage = Math.max(1, state.conversationPage - 1);
+    void withBusy(
+      document.querySelector('#history-previous'),
+      () => loadConversationHistory(),
+    ).finally(() => renderConversationList());
   });
   document.querySelector('#history-next').addEventListener('click', () => {
-    state.historyPage += 1;
-    renderHistory();
+    state.conversationPage += 1;
+    void withBusy(document.querySelector('#history-next'), () => loadConversationHistory()).finally(
+      () => renderConversationList(),
+    );
+  });
+  document.querySelector('#history-clear-filters').addEventListener('click', () => {
+    historyFilters.reset();
+    populateHistoryAssistantFilter();
+    document.querySelector('#history-assistant-filter').value = state.selectedBotId || '';
+    state.conversationPage = 1;
+    void withBusy(document.querySelector('#history-clear-filters'), () =>
+      loadConversationHistory(),
+    );
+  });
+  document.querySelector('#history-back').addEventListener('click', () => {
+    document.querySelector('#conversation-explorer').classList.remove('is-detail-open');
+    document.querySelector('.conversation-item[aria-pressed="true"]')?.focus();
+  });
+  document.querySelector('#history-load-older').addEventListener('click', () => {
+    void withBusy(document.querySelector('#history-load-older'), loadOlderConversationMessages);
   });
   document.querySelector('#refresh-history').addEventListener('click', () => {
-    void withBusy(document.querySelector('#refresh-history'), () => loadHistory());
+    void withBusy(document.querySelector('#refresh-history'), () => loadConversationHistory());
   });
 }
 
@@ -2358,7 +2605,7 @@ async function enterSection(section, options = {}) {
     status: async () => {
       await Promise.all([
         loadBotSummary({ refreshForms: false }),
-        loadHistory({ background: true }),
+        loadActivityHistory({ background: true }),
       ]);
     },
     whatsapp: loadWhatsApp,
@@ -2381,7 +2628,7 @@ async function enterSection(section, options = {}) {
       setStatus('#test-ai-status', 'Sin probar', 'neutral');
       setStatus('#test-menu-status', 'Sin probar', 'neutral');
     },
-    history: () => loadHistory(),
+    history: () => loadConversationHistory(),
     statistics: loadStatistics,
   };
   const loader = loaders[section];
@@ -2403,7 +2650,13 @@ function reset() {
   state.profile = null;
   state.bots = [];
   state.visibleModules = [];
-  state.history = [];
+  state.activityHistory = [];
+  state.conversations = [];
+  state.conversationPagination = null;
+  state.selectedConversationId = null;
+  state.selectedConversation = null;
+  state.conversationMessages = [];
+  state.conversationMessagePagination = null;
   initializationPromise = null;
   if (state.refreshTimer !== null) {
     window.clearInterval(state.refreshTimer);

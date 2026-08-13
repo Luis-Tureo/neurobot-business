@@ -397,6 +397,29 @@ const loginSchema = z.object({
   password: z.string().min(1).max(128),
 });
 
+const calendarDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/u)
+  .refine((value) => utcDateBoundary(value) !== null, 'La fecha no es válida.');
+
+const conversationListQuerySchema = z
+  .object({
+    page: z.coerce.number().int().min(1).max(1_000_000).default(1),
+    pageSize: z.coerce.number().int().min(10).max(100).default(20),
+    search: z.string().trim().max(120).optional(),
+    assistantId: z.string().trim().min(1).max(120).optional(),
+    from: calendarDateSchema.optional(),
+    to: calendarDateSchema.optional(),
+  })
+  .strict();
+
+const conversationMessagesQuerySchema = z
+  .object({
+    page: z.coerce.number().int().min(1).max(1_000_000).default(1),
+    pageSize: z.coerce.number().int().min(10).max(100).default(50),
+  })
+  .strict();
+
 const commandSchema = z.object({
   name: z
     .string()
@@ -1396,6 +1419,79 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         .filter((item) => item.status === 'pending').length,
     };
   });
+
+  app.get(
+    '/api/conversations',
+    { preHandler: requireSession(sessions) },
+    async (request, reply) => {
+      const query = conversationListQuerySchema.parse(request.query ?? {});
+      if (query.from !== undefined && query.to !== undefined && query.from > query.to) {
+        return reply.code(400).send({
+          error: 'La fecha inicial no puede ser posterior a la fecha final.',
+          code: 'INVALID_CONVERSATION_DATE_RANGE',
+        });
+      }
+      const from = query.from === undefined ? null : utcDateBoundary(query.from);
+      const toExclusive = query.to === undefined ? null : utcDateBoundary(query.to, 1);
+      const result = context.database.listConversations({
+        page: query.page,
+        pageSize: query.pageSize,
+        ...(query.search === undefined ? {} : { search: query.search }),
+        ...(query.assistantId === undefined ? {} : { assistantId: query.assistantId }),
+        ...(from === null ? {} : { from }),
+        ...(toExclusive === null ? {} : { toExclusive }),
+      });
+      return {
+        items: result.items.map(adminConversationResponse),
+        pagination: {
+          page: result.page,
+          pageSize: result.pageSize,
+          total: result.total,
+          totalPages: result.totalPages,
+        },
+      };
+    },
+  );
+
+  app.get(
+    '/api/conversations/:conversationId/messages',
+    { preHandler: requireSession(sessions) },
+    async (request, reply) => {
+      const conversationId = z
+        .object({ conversationId: z.string().uuid() })
+        .parse(request.params).conversationId;
+      const query = conversationMessagesQuerySchema.parse(request.query ?? {});
+      const result = context.database.listConversationMessages(
+        conversationId,
+        query.page,
+        query.pageSize,
+      );
+      if (result === null) return reply.code(404).send({ error: 'Conversación no encontrada.' });
+      return {
+        conversation: adminConversationResponse(result.conversation),
+        items: result.messages.items.map((message) => ({
+          id: message.id,
+          direction: message.direction,
+          senderType: message.senderType,
+          messageType: message.messageType,
+          text: message.text,
+          caption: message.caption,
+          timestamp: message.messageTimestamp,
+          status: message.whatsappStatus,
+          error:
+            message.whatsappStatus === 'failed'
+              ? { code: message.errorCode, message: message.errorMessage }
+              : null,
+        })),
+        pagination: {
+          page: result.messages.page,
+          pageSize: result.messages.pageSize,
+          total: result.messages.total,
+          totalPages: result.messages.totalPages,
+        },
+      };
+    },
+  );
 
   app.get(
     '/api/bots/:botId/history',
@@ -4350,6 +4446,50 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
   );
 
   return app;
+}
+
+function adminConversationResponse(
+  conversation: ReturnType<AppDatabase['listConversations']>['items'][number],
+) {
+  return {
+    id: conversation.id,
+    customerName: conversation.contactName,
+    waId: conversation.waId,
+    assistantId: conversation.assistantId,
+    assistantName: conversation.assistantName,
+    status: conversation.status,
+    createdAt: conversation.createdAt,
+    lastMessageAt: conversation.lastMessageAt,
+    lastMessage:
+      conversation.lastMessage === null
+        ? null
+        : {
+            direction: conversation.lastMessage.direction,
+            messageType: conversation.lastMessage.messageType,
+            text: conversation.lastMessage.text,
+            caption: conversation.lastMessage.caption,
+            status: conversation.lastMessage.whatsappStatus,
+            timestamp: conversation.lastMessage.timestamp,
+          },
+  };
+}
+
+function utcDateBoundary(value: string, addDays = 0): string | null {
+  const matched = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (matched === null) return null;
+  const year = Number(matched[1]);
+  const month = Number(matched[2]);
+  const day = Number(matched[3]);
+  const date = new Date(Date.UTC(year, month - 1, day + addDays));
+  if (
+    addDays === 0 &&
+    (date.getUTCFullYear() !== year ||
+      date.getUTCMonth() !== month - 1 ||
+      date.getUTCDate() !== day)
+  ) {
+    return null;
+  }
+  return date.toISOString();
 }
 
 function groupMatchesFilter(
