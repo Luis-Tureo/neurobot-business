@@ -7,8 +7,6 @@ const sensitivePaths = [
   '*.token',
   'secret',
   '*.secret',
-  'qr',
-  '*.qr',
   'body',
   '*.body',
   'participantId',

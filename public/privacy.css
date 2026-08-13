@@ -1,0 +1,289 @@
+:root {
+  color-scheme: light;
+  --background: #f5f8f8;
+  --surface: #ffffff;
+  --text: #172527;
+  --muted: #566669;
+  --line: #d9e4e4;
+  --brand: #0f766e;
+  --brand-dark: #0b5d57;
+  --brand-soft: #e6f5f2;
+  --focus: #9b5c00;
+  --shadow: 0 18px 50px rgb(20 57 59 / 8%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-width: 18rem;
+  margin: 0;
+  color: var(--text);
+  background: var(--background);
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  font-size: 1rem;
+  line-height: 1.68;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--brand-dark);
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.16em;
+}
+
+a:hover {
+  color: var(--brand);
+}
+
+a:focus-visible {
+  border-radius: 0.2rem;
+  outline: 0.2rem solid var(--focus);
+  outline-offset: 0.2rem;
+}
+
+.site-header {
+  border-bottom: 1px solid var(--line);
+  background: rgb(255 255 255 / 92%);
+}
+
+.header-content,
+.policy,
+footer p {
+  width: min(100% - 2rem, 52rem);
+  margin-inline: auto;
+}
+
+.header-content {
+  display: flex;
+  min-height: 4.5rem;
+  align-items: center;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--text);
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.brand-mark {
+  display: grid;
+  width: 2.35rem;
+  height: 2.35rem;
+  place-items: center;
+  border-radius: 0.7rem;
+  color: white;
+  background: var(--brand);
+  font-weight: 800;
+}
+
+main {
+  padding: clamp(2rem, 6vw, 4.5rem) 0;
+}
+
+.policy {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 1.25rem;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.policy-heading,
+.policy section,
+.contents {
+  padding-inline: clamp(1.25rem, 5vw, 4.5rem);
+}
+
+.policy-heading {
+  padding-top: clamp(2.25rem, 7vw, 4.75rem);
+  padding-bottom: clamp(2rem, 5vw, 3.25rem);
+  background: linear-gradient(145deg, var(--brand-soft), #fff 66%);
+}
+
+.eyebrow {
+  margin: 0 0 0.6rem;
+  color: var(--brand-dark);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+h1 {
+  max-width: 13ch;
+  margin: 0;
+  font-size: clamp(2.25rem, 8vw, 4.25rem);
+  letter-spacing: -0.045em;
+}
+
+.summary {
+  max-width: 42rem;
+  margin: 1.4rem 0 0;
+  color: #334548;
+  font-size: clamp(1.05rem, 2.5vw, 1.2rem);
+}
+
+.updated {
+  margin: 1.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.contents {
+  margin: 0;
+  padding-top: 1.75rem;
+  padding-bottom: 1.75rem;
+  border-block: 1px solid var(--line);
+  background: #fbfdfd;
+}
+
+.contents p {
+  margin: 0 0 0.75rem;
+  font-weight: 750;
+}
+
+.contents ol {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem 2rem;
+  margin: 0;
+  padding-left: 1.4rem;
+}
+
+.policy section {
+  padding-top: 2.2rem;
+  scroll-margin-top: 1rem;
+}
+
+.policy section:last-child {
+  padding-bottom: clamp(2.5rem, 7vw, 4.75rem);
+}
+
+h2 {
+  margin: 0 0 1rem;
+  font-size: clamp(1.35rem, 3vw, 1.7rem);
+  letter-spacing: -0.025em;
+}
+
+h3 {
+  margin: 1.5rem 0 0.5rem;
+  color: #263a3c;
+  font-size: 1.08rem;
+}
+
+p,
+ul {
+  margin-top: 0;
+}
+
+.policy section p,
+.policy section li {
+  color: #334548;
+}
+
+.policy section p:last-child,
+.policy section ul:last-child {
+  margin-bottom: 0;
+}
+
+li + li {
+  margin-top: 0.45rem;
+}
+
+footer {
+  padding: 0 0 2.5rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+  text-align: center;
+}
+
+footer p {
+  margin-block: 0;
+}
+
+@media (max-width: 38rem) {
+  .header-content,
+  .policy,
+  footer p {
+    width: min(100% - 1.25rem, 52rem);
+  }
+
+  .header-content {
+    min-height: 4rem;
+  }
+
+  .policy {
+    border-radius: 0.9rem;
+  }
+
+  .contents ol {
+    grid-template-columns: 1fr;
+  }
+
+  .policy section {
+    padding-top: 1.85rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+@media print {
+  body {
+    background: white;
+    font-size: 10.5pt;
+  }
+
+  .site-header,
+  .contents,
+  footer {
+    display: none;
+  }
+
+  main {
+    padding: 0;
+  }
+
+  .policy {
+    width: 100%;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .policy-heading,
+  .policy section {
+    padding-inline: 0;
+  }
+
+  .policy-heading {
+    padding-top: 0;
+    background: white;
+  }
+}

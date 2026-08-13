@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import BetterSqlite3 from 'better-sqlite3';
@@ -802,10 +802,8 @@ export class AppDatabase {
             updated_at TEXT NOT NULL
           );
 
-          CREATE TABLE whatsapp_sessions (
+          CREATE TABLE messaging_runtime (
             bot_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
-            client_id TEXT NOT NULL UNIQUE,
-            session_path TEXT NOT NULL UNIQUE,
             status TEXT NOT NULL DEFAULT 'disconnected',
             masked_number TEXT,
             last_connected_at TEXT,
@@ -1147,15 +1145,15 @@ export class AppDatabase {
       {
         version: 10,
         sql: `
-          ALTER TABLE bots ADD COLUMN connector_type TEXT NOT NULL DEFAULT 'WHATSAPP_WEB'
-            CHECK (connector_type IN ('WHATSAPP_WEB', 'WHATSAPP_CLOUD_API'));
+          ALTER TABLE bots ADD COLUMN connector_type TEXT NOT NULL DEFAULT 'WHATSAPP_CLOUD_API'
+            CHECK (connector_type IN ('WHATSAPP_CLOUD_API'));
           ALTER TABLE bots ADD COLUMN operating_mode TEXT NOT NULL DEFAULT 'COMMUNITY_GROUPS'
             CHECK (operating_mode IN ('COMMUNITY_GROUPS', 'BUSINESS_PRIVATE', 'BUSINESS_MIXED'));
           ALTER TABLE bots ADD COLUMN connector_migration_locked INTEGER NOT NULL DEFAULT 0
             CHECK (connector_migration_locked IN (0, 1));
 
           UPDATE bots SET
-            connector_type = CASE WHEN mode = 'community' THEN 'WHATSAPP_WEB' ELSE 'WHATSAPP_CLOUD_API' END,
+            connector_type = 'WHATSAPP_CLOUD_API',
             operating_mode = CASE
               WHEN mode = 'community' THEN 'COMMUNITY_GROUPS'
               WHEN mode = 'business' THEN 'BUSINESS_PRIVATE'
@@ -1208,7 +1206,7 @@ export class AppDatabase {
           FROM bot_profiles mapping
           JOIN assistant_profiles profiles ON profiles.id = mapping.profile_id;
 
-          UPDATE bots SET connector_type = 'WHATSAPP_WEB', operating_mode = 'COMMUNITY_GROUPS',
+          UPDATE bots SET connector_type = 'WHATSAPP_CLOUD_API', operating_mode = 'COMMUNITY_GROUPS',
             connector_migration_locked = 1, mode = 'community', updated_at = datetime('now')
           WHERE id = 'neurobot';
           UPDATE bot_channel_settings SET groups_enabled = 1, private_messages_enabled = 0,
@@ -1375,15 +1373,9 @@ export class AppDatabase {
           CREATE TABLE assistant_connectors (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            connector_type TEXT NOT NULL CHECK (connector_type IN ('WHATSAPP_WEB','WHATSAPP_CLOUD_API')),
-            normalized_phone_hash TEXT,
-            whatsapp_identity_hash TEXT,
-            whatsapp_web_client_id TEXT,
-            local_auth_session_key TEXT,
-            local_auth_session_path TEXT,
+            connector_type TEXT NOT NULL CHECK (connector_type IN ('WHATSAPP_CLOUD_API')),
             meta_phone_number_id TEXT,
             public_webhook_identifier TEXT,
-            session_ownership_verified INTEGER NOT NULL DEFAULT 0 CHECK (session_ownership_verified IN (0,1)),
             connector_status TEXT NOT NULL DEFAULT 'UNLINKED'
               CHECK (connector_status IN ('DRAFT','UNLINKED','LINKING','CONNECTED','CONFLICT','DISABLED','ARCHIVED')),
             conflict_reason TEXT,
@@ -1393,21 +1385,6 @@ export class AppDatabase {
           );
           CREATE UNIQUE INDEX idx_active_connector_per_assistant
             ON assistant_connectors(assistant_id) WHERE connector_status NOT IN ('ARCHIVED','DISABLED');
-          CREATE UNIQUE INDEX idx_connector_phone_unique
-            ON assistant_connectors(normalized_phone_hash)
-            WHERE normalized_phone_hash IS NOT NULL AND connector_status NOT IN ('ARCHIVED','DISABLED');
-          CREATE UNIQUE INDEX idx_connector_identity_unique
-            ON assistant_connectors(whatsapp_identity_hash)
-            WHERE whatsapp_identity_hash IS NOT NULL AND connector_status NOT IN ('ARCHIVED','DISABLED');
-          CREATE UNIQUE INDEX idx_connector_client_unique
-            ON assistant_connectors(whatsapp_web_client_id)
-            WHERE whatsapp_web_client_id IS NOT NULL AND connector_status NOT IN ('ARCHIVED','DISABLED');
-          CREATE UNIQUE INDEX idx_connector_session_key_unique
-            ON assistant_connectors(local_auth_session_key)
-            WHERE local_auth_session_key IS NOT NULL AND connector_status NOT IN ('ARCHIVED','DISABLED');
-          CREATE UNIQUE INDEX idx_connector_session_path_unique
-            ON assistant_connectors(local_auth_session_path)
-            WHERE local_auth_session_path IS NOT NULL AND connector_status NOT IN ('ARCHIVED','DISABLED');
           CREATE UNIQUE INDEX idx_connector_meta_phone_unique
             ON assistant_connectors(meta_phone_number_id)
             WHERE meta_phone_number_id IS NOT NULL AND connector_status NOT IN ('ARCHIVED','DISABLED');
@@ -1457,14 +1434,11 @@ export class AppDatabase {
             private_business_mode_enabled = CASE WHEN operating_mode = 'BUSINESS_MIXED' THEN 1 ELSE 0 END;
 
           INSERT INTO assistant_connectors(
-            assistant_id,connector_type,whatsapp_web_client_id,local_auth_session_key,
-            local_auth_session_path,session_ownership_verified,connector_status,created_at,updated_at
-          ) SELECT bots.id,bots.connector_type,whatsapp_sessions.client_id,whatsapp_sessions.client_id,
-              whatsapp_sessions.session_path,
-              CASE WHEN whatsapp_sessions.status = 'connected' THEN 1 ELSE 0 END,
-              CASE WHEN whatsapp_sessions.status = 'connected' THEN 'CONNECTED' ELSE 'UNLINKED' END,
+            assistant_id,connector_type,connector_status,created_at,updated_at
+          ) SELECT bots.id,bots.connector_type,
+              CASE WHEN runtime.status = 'connected' THEN 'CONNECTED' ELSE 'UNLINKED' END,
               datetime('now'),datetime('now')
-            FROM bots JOIN whatsapp_sessions ON whatsapp_sessions.bot_id = bots.id;
+            FROM bots JOIN messaging_runtime runtime ON runtime.bot_id = bots.id;
           UPDATE bots SET active_connector_id = (
             SELECT id FROM assistant_connectors WHERE assistant_id = bots.id
           );
@@ -1841,6 +1815,47 @@ export class AppDatabase {
           DROP TABLE IF EXISTS assistant_profile_backups;
         `,
       },
+      {
+        version: 22,
+        sql: `
+          CREATE TABLE meta_webhook_events (
+            event_hash TEXT PRIMARY KEY,
+            phone_number_id TEXT NOT NULL,
+            event_type TEXT NOT NULL CHECK (event_type IN ('message','status')),
+            processing_status TEXT NOT NULL DEFAULT 'ACCEPTED'
+              CHECK (processing_status IN ('ACCEPTED','PROCESSED','FAILED')),
+            delivery_count INTEGER NOT NULL DEFAULT 1 CHECK (delivery_count >= 1),
+            error_code TEXT,
+            first_received_at TEXT NOT NULL,
+            last_received_at TEXT NOT NULL,
+            processed_at TEXT
+          );
+          CREATE INDEX idx_meta_webhook_events_received
+            ON meta_webhook_events(last_received_at, processing_status);
+
+          CREATE TABLE meta_message_statuses (
+            event_hash TEXT PRIMARY KEY,
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            message_hash TEXT NOT NULL,
+            phone_number_id TEXT NOT NULL,
+            recipient_hash TEXT,
+            status TEXT NOT NULL CHECK (status IN ('sent','delivered','read','failed','deleted','unknown')),
+            occurred_at TEXT NOT NULL,
+            conversation_hash TEXT,
+            error_code TEXT,
+            created_at TEXT NOT NULL
+          );
+          CREATE INDEX idx_meta_message_statuses_message
+            ON meta_message_statuses(bot_id, message_hash, occurred_at);
+
+          UPDATE bots SET connector_type='WHATSAPP_CLOUD_API';
+          UPDATE assistant_connectors SET connector_type='WHATSAPP_CLOUD_API',
+            connector_status=CASE WHEN connector_status='CONNECTED' THEN 'UNLINKED' ELSE connector_status END,
+            updated_at=datetime('now');
+          UPDATE messaging_runtime SET status='disconnected', masked_number=NULL,
+            last_connected_at=NULL, updated_at=datetime('now');
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -2157,18 +2172,16 @@ export class AppDatabase {
       .run(profile.id, now, now);
     this.db
       .prepare(
-        `INSERT OR IGNORE INTO whatsapp_sessions(
-           bot_id, client_id, session_path, status, masked_number, last_connected_at, updated_at
-         ) VALUES ('neurobot', 'comunidad', './data/whatsapp-session', 'disconnected', NULL, NULL, ?)`,
+        `INSERT OR IGNORE INTO messaging_runtime(
+           bot_id, status, masked_number, last_connected_at, updated_at
+         ) VALUES ('neurobot', 'disconnected', NULL, NULL, ?)`,
       )
       .run(now);
     this.db
       .prepare(
         `INSERT OR IGNORE INTO assistant_connectors(
-           assistant_id, connector_type, whatsapp_web_client_id, local_auth_session_key,
-           local_auth_session_path, session_ownership_verified, connector_status, created_at, updated_at
-         ) VALUES ('neurobot', 'WHATSAPP_WEB', 'comunidad', 'comunidad',
-           './data/whatsapp-session', 0, 'UNLINKED', ?, ?)`,
+           assistant_id, connector_type, connector_status, created_at, updated_at
+         ) VALUES ('neurobot', 'WHATSAPP_CLOUD_API', 'UNLINKED', ?, ?)`,
       )
       .run(now, now);
     const connector = this.db
@@ -2179,7 +2192,7 @@ export class AppDatabase {
     this.db
       .prepare(
         `UPDATE bots SET assistant_type='COMMUNITY_GROUPS',
-           lifecycle_status=CASE WHEN active_connector_id IS NULL THEN 'CONNECTED' ELSE lifecycle_status END,
+           lifecycle_status=CASE WHEN active_connector_id IS NULL THEN 'UNLINKED' ELSE lifecycle_status END,
            deletion_locked=1, group_channel_enabled=1, private_channel_enabled=0,
            private_business_mode_enabled=0, active_connector_id=? WHERE id='neurobot'`,
       )
@@ -3631,8 +3644,8 @@ export class AppDatabase {
         .prepare(
           `SELECT bots.*, profiles.id AS profile_id, profiles.organization_name,
              profiles.bot_name, profiles.organization_type, profiles.timezone,
-             sessions.session_path, sessions.status AS whatsapp_status,
-             sessions.masked_number, sessions.last_connected_at,
+             runtime.status AS whatsapp_status,
+             runtime.masked_number, runtime.last_connected_at,
              channels.groups_enabled, channels.private_messages_enabled,
              channels.real_mention_required, channels.continued_conversations_enabled,
              channels.menu_type, credentials.credential_mode,
@@ -3646,7 +3659,7 @@ export class AppDatabase {
            FROM bots
            JOIN bot_profiles mapping ON mapping.bot_id = bots.id
            JOIN assistant_profiles profiles ON profiles.id = mapping.profile_id
-           JOIN whatsapp_sessions sessions ON sessions.bot_id = bots.id
+           JOIN messaging_runtime runtime ON runtime.bot_id = bots.id
            JOIN bot_channel_settings channels ON channels.bot_id = bots.id
            JOIN bot_ai_credentials credentials ON credentials.bot_id = bots.id
            JOIN bot_capabilities capabilities ON capabilities.bot_id = bots.id
@@ -3674,7 +3687,6 @@ export class AppDatabase {
         bot_name: string;
         organization_type: OrganizationType;
         timezone: string;
-        session_path: string;
         whatsapp_status: string;
         masked_number: string | null;
         last_connected_at: string | null;
@@ -3730,7 +3742,6 @@ export class AppDatabase {
       botName: row.bot_name,
       organizationType: row.organization_type,
       timezone: row.timezone,
-      sessionPath: row.session_path,
       whatsappStatus: row.whatsapp_status,
       maskedNumber: row.masked_number,
       lastConnectedAt: row.last_connected_at,
@@ -3750,84 +3761,194 @@ export class AppDatabase {
     return this.listBots().find((bot) => bot.id === botId) ?? null;
   }
 
-  public claimWhatsAppIdentity(input: {
-    botId: string;
-    normalizedPhoneHash: string;
-    whatsappIdentityHash: string;
-    maskedNumber: string;
-  }): { accepted: true } | { accepted: false; existingBot: BotRecord } {
+  public configureMetaConnector(botId: string, phoneNumberId: string): void {
+    const bot = this.getBot(botId);
+    if (bot === null) throw new Error(`El asistente configurado para Meta no existe: ${botId}.`);
+    if (!/^\d{6,30}$/u.test(phoneNumberId)) throw new Error('META_PHONE_NUMBER_ID no es válido.');
     const connector = this.db
       .prepare(
-        'SELECT id FROM assistant_connectors WHERE assistant_id = ? AND id = (SELECT active_connector_id FROM bots WHERE id = ?)',
+        `SELECT id FROM assistant_connectors
+         WHERE assistant_id=? AND id=(SELECT active_connector_id FROM bots WHERE id=?)`,
       )
-      .get(input.botId, input.botId) as { id: number } | undefined;
+      .get(botId, botId) as { id: number } | undefined;
     if (connector === undefined) throw new Error('CONNECTOR_NOT_FOUND');
-    const duplicate = this.db
-      .prepare(
-        `SELECT assistant_id FROM assistant_connectors
-         WHERE assistant_id <> ? AND connector_status NOT IN ('ARCHIVED','DISABLED')
-           AND (normalized_phone_hash = ? OR whatsapp_identity_hash = ?)
-         LIMIT 1`,
-      )
-      .get(input.botId, input.normalizedPhoneHash, input.whatsappIdentityHash) as
-      { assistant_id: string } | undefined;
-    if (duplicate !== undefined) {
-      const now = new Date().toISOString();
-      this.db
-        .prepare(
-          `UPDATE assistant_connectors SET connector_status='CONFLICT', conflict_reason='DUPLICATE_PHONE',
-           linked_assistant_id=?, updated_at=? WHERE id=?`,
-        )
-        .run(duplicate.assistant_id, now, connector.id);
-      this.db
-        .prepare(
-          `UPDATE bots SET lifecycle_status='DUPLICATE_CONFIGURATION', enabled=0, updated_at=? WHERE id=?`,
-        )
-        .run(now, input.botId);
-      this.db
-        .prepare(
-          `UPDATE whatsapp_sessions SET status='disconnected', masked_number=NULL, updated_at=? WHERE bot_id=?`,
-        )
-        .run(now, input.botId);
-      const existingBot = this.getBot(duplicate.assistant_id);
-      if (existingBot === null) throw new Error('DUPLICATE_CONNECTOR_OWNER_NOT_FOUND');
-      return { accepted: false, existingBot };
-    }
     const now = new Date().toISOString();
-    const update = this.db.transaction(() => {
+    const configure = this.db.transaction(() => {
       this.db
         .prepare(
-          `UPDATE assistant_connectors SET normalized_phone_hash=?, whatsapp_identity_hash=?,
-           session_ownership_verified=1, connector_status='CONNECTED', conflict_reason=NULL,
-           linked_assistant_id=?, updated_at=? WHERE id=?`,
+          `UPDATE assistant_connectors SET connector_type='WHATSAPP_CLOUD_API',
+             meta_phone_number_id=?, connector_status='UNLINKED', conflict_reason=NULL,
+             linked_assistant_id=NULL, updated_at=? WHERE id=?`,
         )
-        .run(input.normalizedPhoneHash, input.whatsappIdentityHash, input.botId, now, connector.id);
-      this.db
-        .prepare(`UPDATE bots SET lifecycle_status='CONNECTED', enabled=1, updated_at=? WHERE id=?`)
-        .run(now, input.botId);
+        .run(phoneNumberId, now, connector.id);
       this.db
         .prepare(
-          `UPDATE whatsapp_sessions SET masked_number=?, status='connected', last_connected_at=?, updated_at=?
-         WHERE bot_id=?`,
+          `UPDATE bots SET connector_type='WHATSAPP_CLOUD_API', mode='business',
+             operating_mode='BUSINESS_PRIVATE', assistant_type='BUSINESS_PRIVATE',
+             group_channel_enabled=0, private_channel_enabled=1,
+             private_business_mode_enabled=0, updated_at=? WHERE id=?`,
         )
-        .run(input.maskedNumber, now, now, input.botId);
+        .run(now, botId);
     });
     try {
-      update();
-      return { accepted: true };
+      configure();
     } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes('UNIQUE')) throw error;
-      const owner = this.db
-        .prepare(
-          `SELECT assistant_id FROM assistant_connectors WHERE assistant_id <> ?
-          AND (normalized_phone_hash=? OR whatsapp_identity_hash=?) LIMIT 1`,
-        )
-        .get(input.botId, input.normalizedPhoneHash, input.whatsappIdentityHash) as
-        { assistant_id: string } | undefined;
-      const existingBot = owner === undefined ? null : this.getBot(owner.assistant_id);
-      if (existingBot === null) throw error;
-      return { accepted: false, existingBot };
+      if (error instanceof Error && error.message.includes('UNIQUE')) {
+        throw new Error('META_PHONE_NUMBER_ID ya está asignado a otro asistente.', {
+          cause: error,
+        });
+      }
+      throw error;
     }
+  }
+
+  public getBotIdByMetaPhoneNumberId(phoneNumberId: string): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT assistant_id FROM assistant_connectors
+         WHERE meta_phone_number_id=? AND connector_type='WHATSAPP_CLOUD_API'
+           AND connector_status NOT IN ('ARCHIVED','DISABLED') LIMIT 1`,
+      )
+      .get(phoneNumberId) as { assistant_id: string } | undefined;
+    return row?.assistant_id ?? null;
+  }
+
+  public markMetaConnectorConnected(botId: string): void {
+    const now = new Date().toISOString();
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          `UPDATE assistant_connectors SET connector_status='CONNECTED',updated_at=?
+           WHERE assistant_id=? AND connector_type='WHATSAPP_CLOUD_API'
+             AND id=(SELECT active_connector_id FROM bots WHERE id=?)`,
+        )
+        .run(now, botId, botId);
+      this.db
+        .prepare(
+          `UPDATE bots SET lifecycle_status='CONNECTED',updated_at=? WHERE id=?`,
+        )
+        .run(now, botId);
+      this.db
+        .prepare(
+          `UPDATE messaging_runtime SET status='connected',masked_number=NULL,
+             last_connected_at=?,updated_at=? WHERE bot_id=?`,
+        )
+        .run(now, now, botId);
+    })();
+  }
+
+  public claimMetaWebhookEvent(input: {
+    eventId: string;
+    phoneNumberId: string;
+    eventType: 'message' | 'status';
+  }): boolean {
+    const now = new Date().toISOString();
+    const eventHash = metaIdentifierHash(input.eventId);
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO meta_webhook_events(
+           event_hash,phone_number_id,event_type,processing_status,delivery_count,
+           error_code,first_received_at,last_received_at,processed_at
+         ) VALUES (?, ?, ?, 'ACCEPTED', 1, NULL, ?, ?, NULL)`,
+      )
+      .run(eventHash, input.phoneNumberId, input.eventType, now, now);
+    if (result.changes === 1) return true;
+    this.db
+      .prepare(
+        `UPDATE meta_webhook_events SET delivery_count=delivery_count+1,last_received_at=?
+         WHERE event_hash=?`,
+      )
+      .run(now, eventHash);
+    return false;
+  }
+
+  public finishMetaWebhookEvents(
+    eventIds: readonly string[],
+    result: { status: 'PROCESSED' | 'FAILED'; errorCode?: string },
+  ): void {
+    if (eventIds.length === 0) return;
+    const update = this.db.prepare(
+      `UPDATE meta_webhook_events SET processing_status=?,error_code=?,processed_at=?
+       WHERE event_hash=?`,
+    );
+    const now = new Date().toISOString();
+    this.db.transaction(() => {
+      for (const eventId of eventIds) {
+        update.run(
+          result.status,
+          result.errorCode?.replace(/[^A-Z0-9_-]/giu, '_').slice(0, 80) ?? null,
+          now,
+          metaIdentifierHash(eventId),
+        );
+      }
+    })();
+  }
+
+  public recordMetaMessageStatus(input: {
+    eventId: string;
+    botId: string;
+    messageId: string;
+    phoneNumberId: string;
+    recipientId: string | null;
+    status: 'sent' | 'delivered' | 'read' | 'failed' | 'deleted' | 'unknown';
+    occurredAt: string;
+    conversationId: string | null;
+    errorCode: string | null;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO meta_message_statuses(
+           event_hash,bot_id,message_hash,phone_number_id,recipient_hash,status,
+           occurred_at,conversation_hash,error_code,created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        metaIdentifierHash(input.eventId),
+        input.botId,
+        metaIdentifierHash(input.messageId),
+        input.phoneNumberId,
+        input.recipientId === null ? null : metaIdentifierHash(input.recipientId),
+        input.status,
+        input.occurredAt,
+        input.conversationId === null ? null : metaIdentifierHash(input.conversationId),
+        input.errorCode,
+        new Date().toISOString(),
+      );
+  }
+
+  public getMetaWebhookEvent(eventId: string): {
+    status: 'ACCEPTED' | 'PROCESSED' | 'FAILED';
+    deliveryCount: number;
+    errorCode: string | null;
+  } | null {
+    const row = this.db
+      .prepare(
+        `SELECT processing_status,delivery_count,error_code FROM meta_webhook_events
+         WHERE event_hash=?`,
+      )
+      .get(metaIdentifierHash(eventId)) as
+      | { processing_status: 'ACCEPTED' | 'PROCESSED' | 'FAILED'; delivery_count: number; error_code: string | null }
+      | undefined;
+    return row === undefined
+      ? null
+      : { status: row.processing_status, deliveryCount: row.delivery_count, errorCode: row.error_code };
+  }
+
+  public listMetaMessageStatuses(botId: string): Array<{
+    status: string;
+    occurredAt: string;
+    errorCode: string | null;
+  }> {
+    return this.db
+      .prepare(
+        `SELECT status,occurred_at,error_code FROM meta_message_statuses
+         WHERE bot_id=? ORDER BY occurred_at`,
+      )
+      .all(botId)
+      .map((row) => {
+        const value = row as { status: string; occurred_at: string; error_code: string | null };
+        return { status: value.status, occurredAt: value.occurred_at, errorCode: value.error_code };
+      });
   }
 
   public getConnectorConflict(botId: string): {
@@ -3881,25 +4002,19 @@ export class AppDatabase {
       throw new Error('ASSISTANT_NOT_ARCHIVED');
     const connector = this.db
       .prepare(
-        `SELECT normalized_phone_hash, whatsapp_identity_hash FROM assistant_connectors
+        `SELECT meta_phone_number_id FROM assistant_connectors
        WHERE assistant_id=? ORDER BY id DESC LIMIT 1`,
       )
       .get(botId) as
-      { normalized_phone_hash: string | null; whatsapp_identity_hash: string | null } | undefined;
-    if (connector?.normalized_phone_hash || connector?.whatsapp_identity_hash) {
+      { meta_phone_number_id: string | null } | undefined;
+    if (connector?.meta_phone_number_id) {
       const conflict = this.db
         .prepare(
           `SELECT 1 FROM assistant_connectors WHERE assistant_id<>?
          AND connector_status NOT IN ('ARCHIVED','DISABLED')
-         AND ((? IS NOT NULL AND normalized_phone_hash=?) OR (? IS NOT NULL AND whatsapp_identity_hash=?))`,
+         AND meta_phone_number_id=?`,
         )
-        .get(
-          botId,
-          connector.normalized_phone_hash,
-          connector.normalized_phone_hash,
-          connector.whatsapp_identity_hash,
-          connector.whatsapp_identity_hash,
-        );
+        .get(botId, connector.meta_phone_number_id);
       if (conflict !== undefined) throw new Error('RESTORE_PHONE_CONFLICT');
     }
     const now = new Date().toISOString();
@@ -4159,7 +4274,6 @@ export class AppDatabase {
     id: string;
     mode: BotMode;
     connectorType?: ConnectorType;
-    sessionPath: string;
     profile: Omit<AssistantProfile, 'id' | 'active' | 'createdAt' | 'updatedAt'>;
     menuType?: MenuType;
   }): BotRecord {
@@ -4167,8 +4281,7 @@ export class AppDatabase {
     if (this.getBot(botId) !== null)
       throw new Error('Ya existe un asistente con ese identificador.');
     const now = new Date().toISOString();
-    const connectorType =
-      input.connectorType ?? (input.mode === 'community' ? 'WHATSAPP_WEB' : 'WHATSAPP_CLOUD_API');
+    const connectorType: ConnectorType = input.connectorType ?? 'WHATSAPP_CLOUD_API';
     const operatingMode = operatingModeFor(input.mode);
     const capabilities = capabilitiesFor(input.mode);
     const create = this.db.transaction(() => {
@@ -4189,7 +4302,7 @@ export class AppDatabase {
           connectorType,
           operatingMode,
           operatingMode,
-          connectorType === 'WHATSAPP_WEB' ? 'LINKING' : 'DRAFT',
+          'DRAFT',
           input.mode === 'business' ? 0 : 1,
           input.mode === 'community' ? 0 : 1,
           input.mode === 'mixed' ? 1 : 0,
@@ -4200,28 +4313,18 @@ export class AppDatabase {
       this.activateAssistantProfile(profile.id);
       this.db
         .prepare(
-          `INSERT INTO whatsapp_sessions(
-             bot_id, client_id, session_path, status, masked_number, last_connected_at, updated_at
-           ) VALUES (?, ?, ?, 'disconnected', NULL, NULL, ?)`,
+          `INSERT INTO messaging_runtime(
+             bot_id, status, masked_number, last_connected_at, updated_at
+           ) VALUES (?, 'disconnected', NULL, NULL, ?)`,
         )
-        .run(botId, botId, validateSessionPath(input.sessionPath), now);
+        .run(botId, now);
       const connector = this.db
         .prepare(
           `INSERT INTO assistant_connectors(
-             assistant_id,connector_type,whatsapp_web_client_id,local_auth_session_key,
-             local_auth_session_path,connector_status,created_at,updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+             assistant_id,connector_type,connector_status,created_at,updated_at
+           ) VALUES (?, ?, 'UNLINKED', ?, ?)`,
         )
-        .run(
-          botId,
-          connectorType,
-          botId,
-          botId,
-          validateSessionPath(input.sessionPath),
-          connectorType === 'WHATSAPP_WEB' ? 'LINKING' : 'UNLINKED',
-          now,
-          now,
-        );
+        .run(botId, connectorType, now, now);
       this.db
         .prepare('UPDATE bots SET active_connector_id = ? WHERE id = ?')
         .run(Number(connector.lastInsertRowid), botId);
@@ -4525,13 +4628,6 @@ export class AppDatabase {
     return this.getBot(input.botId) as BotRecord;
   }
 
-  public setBotSessionPath(botId: string, sessionPath: string): void {
-    const result = this.db
-      .prepare('UPDATE whatsapp_sessions SET session_path = ?, updated_at = ? WHERE bot_id = ?')
-      .run(validateSessionPath(sessionPath), new Date().toISOString(), botId);
-    if (result.changes !== 1) throw new Error('La sesión del asistente no existe.');
-  }
-
   public updateBotWhatsAppStatus(
     botId: string,
     status: string,
@@ -4540,7 +4636,7 @@ export class AppDatabase {
   ): void {
     this.db
       .prepare(
-        `UPDATE whatsapp_sessions SET status = ?,
+        `UPDATE messaging_runtime SET status = ?,
            masked_number = COALESCE(?, masked_number),
            last_connected_at = COALESCE(?, last_connected_at), updated_at = ? WHERE bot_id = ?`,
       )
@@ -9176,12 +9272,8 @@ function validateBotIdentifier(value: string): string {
   return normalized;
 }
 
-function validateSessionPath(value: string): string {
-  const normalized = value.trim();
-  if (normalized.length === 0 || normalized.length > 500 || normalized.includes('\u0000')) {
-    throw new Error('La ruta de sesión no es válida.');
-  }
-  return normalized;
+function metaIdentifierHash(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
 function normalizeMenuAlias(value: string): string {

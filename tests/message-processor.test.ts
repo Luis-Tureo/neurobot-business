@@ -221,7 +221,7 @@ describe('procesamiento por mención real y por modo', () => {
       timezone: 'America/Santiago',
       preset: 'store',
     });
-    database.createBot({ id: 'tienda-prueba', mode: 'business', sessionPath: 'data/test-session', profile });
+    database.createBot({ id: 'tienda-prueba', mode: 'business', profile });
     const commercialClient = new SimulatedMessagingClient();
     const flow = new ConversationFlowService(database, commercialClient, createLogger('silent'), 'tienda-prueba', 'data/media');
     const commercial = createProcessor({ database, client: commercialClient, provider, botId: 'tienda-prueba', flow });

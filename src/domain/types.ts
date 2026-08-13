@@ -1,7 +1,6 @@
 export type ConnectionState =
   | 'disconnected'
   | 'initializing'
-  | 'waiting_qr'
   | 'authenticated'
   | 'loading_chats'
   | 'connected'
@@ -14,6 +13,8 @@ export type ActivationType = 'command' | 'mention' | 'reply';
 export type IncomingMessage = {
   id: string;
   replyToMessageId?: string;
+  recipientId?: string;
+  receivedAt?: string;
   chatId: string;
   participantId: string;
   administratorId?: string | null;
@@ -30,6 +31,17 @@ export type IncomingMessage = {
   mentionsBot: boolean;
   botMentionToken?: string;
   isReplyToBot: boolean;
+};
+
+export type MetaMessageStatus = {
+  eventId: string;
+  messageId: string;
+  phoneNumberId: string;
+  recipientId: string | null;
+  status: 'sent' | 'delivered' | 'read' | 'failed' | 'deleted' | 'unknown';
+  occurredAt: string;
+  conversationId: string | null;
+  errorCode: string | null;
 };
 
 export type DetectedGroup = {
@@ -561,7 +573,7 @@ export type LinkedGroupRecord = {
 
 export type BotMode = 'community' | 'business' | 'mixed';
 export type MenuType = 'automatic' | 'native_buttons' | 'native_list' | 'numbered';
-export type ConnectorType = 'WHATSAPP_WEB' | 'WHATSAPP_CLOUD_API';
+export type ConnectorType = 'WHATSAPP_CLOUD_API';
 export type BotOperatingMode = 'COMMUNITY_GROUPS' | 'BUSINESS_PRIVATE' | 'BUSINESS_MIXED';
 export type AssistantLifecycleStatus =
   | 'DRAFT'
@@ -609,7 +621,6 @@ export type BotRecord = {
   botName: string;
   organizationType: OrganizationType;
   timezone: string;
-  sessionPath: string;
   whatsappStatus: string;
   maskedNumber: string | null;
   lastConnectedAt: string | null;

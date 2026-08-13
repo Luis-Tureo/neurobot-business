@@ -81,6 +81,21 @@ describe('API administrativa', () => {
     expect(status.json()).toMatchObject({ botEnabled: true, version: '0.1.0-test' });
   });
 
+  it('marca la cookie como Secure cuando el proxy HTTPS local lo indica', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'x-forwarded-proto': 'https' },
+      payload: { username: 'admin', password: 'contraseña-de-prueba' },
+    });
+    expect(response.statusCode).toBe(200);
+    const setCookie = response.headers['set-cookie'];
+    const cookieValue = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    expect(cookieValue).toContain('HttpOnly');
+    expect(cookieValue).toContain('Secure');
+    expect(cookieValue).toContain('SameSite=Strict');
+  });
+
   it('exige CSRF en operaciones de cambio y permite logout', async () => {
     const auth = await login(app);
     const denied = await app.inject({
@@ -507,7 +522,6 @@ describe('API administrativa', () => {
       id: 'negocio-aislado',
       mode: 'business',
       connectorType: 'WHATSAPP_CLOUD_API',
-      sessionPath: 'data/sessions/negocio-aislado',
       profile: createProfileFromPreset({
         organizationName: 'Negocio aislado',
         botName: 'Bot negocio',
@@ -597,8 +611,8 @@ describe('API administrativa', () => {
     expect(JSON.stringify(exported.json())).not.toContain('participantHash');
     expect(JSON.stringify(exported.json())).not.toContain('messageHash');
 
-    const privateBot = database.createBot({id:'solo-privado',mode:'business',sessionPath:'data/test-private',profile:createProfileFromPreset({organizationName:'Privado',botName:'Privado',organizationType:'Tienda',timezone:'America/Santiago',preset:'store'})});
-    const mixedBot = database.createBot({id:'canal-mixto',mode:'mixed',sessionPath:'data/test-mixed',profile:createProfileFromPreset({organizationName:'Mixto',botName:'Mixto',organizationType:'Tienda',timezone:'America/Santiago',preset:'store'})});
+    const privateBot = database.createBot({id:'solo-privado',mode:'business',profile:createProfileFromPreset({organizationName:'Privado',botName:'Privado',organizationType:'Tienda',timezone:'America/Santiago',preset:'store'})});
+    const mixedBot = database.createBot({id:'canal-mixto',mode:'mixed',profile:createProfileFromPreset({organizationName:'Mixto',botName:'Mixto',organizationType:'Tienda',timezone:'America/Santiago',preset:'store'})});
     expect((await app.inject({method:'GET',url:`/api/bots/${privateBot.id}/moderation`,headers:{cookie:auth.cookie}})).statusCode).toBe(404);
     expect((await app.inject({method:'GET',url:`/api/bots/${mixedBot.id}/moderation`,headers:{cookie:auth.cookie}})).statusCode).toBe(200);
   });

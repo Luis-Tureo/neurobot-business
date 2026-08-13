@@ -39,9 +39,52 @@ describe('configuración de entorno', () => {
     const environment = loadEnvironment({
       ...valid,
       PANEL_INITIAL_PASSWORD: '',
-      CHROME_EXECUTABLE_PATH: '',
+      META_ACCESS_TOKEN: '',
     });
     expect(environment.panelInitialPassword).toBeUndefined();
-    expect(environment.chromeExecutablePath).toBeUndefined();
+    expect(environment.metaWhatsApp.accounts).toHaveLength(0);
+  });
+
+  it('exige todas las credenciales de Meta en producción', () => {
+    expect(() => loadEnvironment({ ...valid, NODE_ENV: 'production' })).toThrow(
+      'faltan credenciales obligatorias de Meta',
+    );
+    const environment = loadEnvironment({
+      ...valid,
+      NODE_ENV: 'production',
+      META_ACCESS_TOKEN: 'token-ficticio-de-prueba-1234567890',
+      META_PHONE_NUMBER_ID: '123456789012345',
+      META_WABA_ID: '987654321098765',
+      META_APP_SECRET: 'app-secret-ficticio-largo',
+      META_WEBHOOK_VERIFY_TOKEN: 'verify-token-ficticio-largo',
+    });
+    expect(environment.metaWhatsApp.accounts).toEqual([
+      {
+        botId: 'neurobot',
+        accessToken: 'token-ficticio-de-prueba-1234567890',
+        phoneNumberId: '123456789012345',
+        wabaId: '987654321098765',
+      },
+    ]);
+  });
+
+  it('valida y deduplica cuentas multibot de Meta', () => {
+    const duplicate = JSON.stringify([
+      {
+        botId: 'negocio-uno',
+        accessToken: 'token-ficticio-negocio-uno-123456',
+        phoneNumberId: '123456789012345',
+        wabaId: '987654321098761',
+      },
+      {
+        botId: 'negocio-dos',
+        accessToken: 'token-ficticio-negocio-dos-123456',
+        phoneNumberId: '123456789012345',
+        wabaId: '987654321098762',
+      },
+    ]);
+    expect(() => loadEnvironment({ ...valid, META_WHATSAPP_ACCOUNTS_JSON: duplicate })).toThrow(
+      'META_PHONE_NUMBER_ID está asignado a dos asistentes',
+    );
   });
 });

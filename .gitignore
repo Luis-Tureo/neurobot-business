@@ -11,9 +11,6 @@ data/
 *.sqlite-*
 logs/
 *.log
-.wwebjs_auth/
-.wwebjs_cache/
-sessions/
 tmp/
 temp/
 *.local

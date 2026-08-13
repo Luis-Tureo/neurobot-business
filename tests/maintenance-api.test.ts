@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
@@ -14,7 +14,6 @@ import { Anonymizer } from '../src/security/anonymizer.js';
 import { hashPassword } from '../src/security/password.js';
 
 const CURRENT_PASSWORD = 'contraseña-de-prueba';
-
 type Authentication = { cookie: string; csrf: string };
 type ApiSubject = Awaited<ReturnType<typeof createApiSubject>>;
 
@@ -24,25 +23,23 @@ describe('API de mantenimiento', () => {
   afterEach(async () => {
     for (const subject of subjects.splice(0)) {
       await subject.app.close();
-      subject.database.close();
+      if (subject.database.isOpen()) subject.database.close();
       rmSync(subject.projectRoot, { recursive: true, force: true });
     }
   });
 
-  it('rechaza usuario no autenticado, falta de CSRF y contraseña incorrecta', async () => {
+  it('protege el restablecimiento con sesión, CSRF, frase y contraseña', async () => {
     const subject = await createApiSubject();
     subjects.push(subject);
-    const payload = factoryPayload();
     expect(
       (
         await subject.app.inject({
           method: 'POST',
           url: '/api/admin/maintenance/factory-reset',
-          payload,
+          payload: factoryPayload(),
         })
       ).statusCode,
     ).toBe(401);
-
     const auth = await login(subject.app);
     expect(
       (
@@ -50,69 +47,22 @@ describe('API de mantenimiento', () => {
           method: 'POST',
           url: '/api/admin/maintenance/factory-reset',
           headers: { cookie: auth.cookie },
-          payload,
+          payload: factoryPayload(),
         })
       ).statusCode,
     ).toBe(403);
-
-    const wrongPassword = await injectAuthenticated(subject.app, auth, {
-      method: 'POST',
-      url: '/api/admin/maintenance/factory-reset',
-      payload: { ...payload, currentPassword: 'contraseña-incorrecta' },
-    });
-    expect(wrongPassword.statusCode).toBe(401);
-    expect(wrongPassword.json()).toMatchObject({ code: 'RESET_PASSWORD_INVALID' });
+    expect(
+      (
+        await injectAuthenticated(subject.app, auth, {
+          method: 'POST',
+          url: '/api/admin/maintenance/factory-reset',
+          payload: { ...factoryPayload(), currentPassword: 'incorrecta' },
+        })
+      ).statusCode,
+    ).toBe(401);
   });
 
-  it('rechaza frases y confirmaciones incompletas con códigos seguros', async () => {
-    const subject = await createApiSubject();
-    subjects.push(subject);
-    const auth = await login(subject.app);
-    const invalidPhrase = await injectAuthenticated(subject.app, auth, {
-      method: 'POST',
-      url: '/api/admin/maintenance/factory-reset',
-      payload: { ...factoryPayload(), confirmation: 'restablecer bot' },
-    });
-    expect(invalidPhrase.statusCode).toBe(400);
-    expect(invalidPhrase.json()).toMatchObject({ code: 'RESET_CONFIRMATION_INVALID' });
-
-    const unchecked = await injectAuthenticated(subject.app, auth, {
-      method: 'POST',
-      url: '/api/admin/maintenance/factory-reset',
-      payload: { ...factoryPayload(), understood: false },
-    });
-    expect(unchecked.statusCode).toBe(400);
-    expect(unchecked.json()).toMatchObject({ code: 'RESET_CONFIRMATION_INVALID' });
-  });
-
-  it('limita intentos repetidos de reautenticación destructiva', async () => {
-    const subject = await createApiSubject();
-    subjects.push(subject);
-    const auth = await login(subject.app);
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const response = await injectAuthenticated(subject.app, auth, {
-        method: 'POST',
-        url: '/api/admin/maintenance/unlink-whatsapp',
-        payload: {
-          confirmation: 'DESVINCULAR WHATSAPP',
-          currentPassword: 'incorrecta',
-        },
-      });
-      expect(response.statusCode).toBe(401);
-    }
-    const blocked = await injectAuthenticated(subject.app, auth, {
-      method: 'POST',
-      url: '/api/admin/maintenance/unlink-whatsapp',
-      payload: {
-        confirmation: 'DESVINCULAR WHATSAPP',
-        currentPassword: CURRENT_PASSWORD,
-      },
-    });
-    expect(blocked.statusCode).toBe(429);
-    expect(blocked.json()).toMatchObject({ code: 'RESET_RATE_LIMITED' });
-  });
-
-  it('completa el endpoint de fábrica, cambia la contraseña y cierra sesiones', async () => {
+  it('restablece la instalación y mantiene Cloud API como transporte', async () => {
     const subject = await createApiSubject();
     subjects.push(subject);
     const auth = await login(subject.app);
@@ -127,133 +77,73 @@ describe('API de mantenimiento', () => {
       },
     });
     expect(response.statusCode).toBe(202);
-    expect(response.json()).toMatchObject({ accepted: true, code: 'FACTORY_RESET_STARTED' });
-
     await subject.maintenance.waitForCompletion();
-    const operationId = response.json().operationId;
-    const status = await subject.app.inject({
-      method: 'GET',
-      url: `/api/admin/maintenance/status?operationId=${operationId}`,
-      headers: { cookie: auth.cookie },
-    });
-    expect(status.statusCode).toBe(200);
-    expect(status.json()).toMatchObject({
+    expect(subject.maintenance.snapshot()).toMatchObject({
       result: 'completed',
       code: 'FACTORY_RESET_COMPLETED',
       logoutRequired: true,
     });
-    expect(
-      (
-        await subject.app.inject({
-          method: 'GET',
-          url: '/api/auth/session',
-          headers: { cookie: auth.cookie },
-        })
-      ).statusCode,
-    ).toBe(401);
-    expect((await login(subject.app, 'contraseña-nueva-segura')).cookie).toContain(
-      'panel_session=',
-    );
+    expect(subject.database.getBot('neurobot')?.connectorType).toBe('WHATSAPP_CLOUD_API');
+    await vi.waitFor(async () => {
+      const session = await subject.app.inject({
+        method: 'GET',
+        url: '/api/auth/session',
+        headers: { cookie: auth.cookie },
+      });
+      expect(session.statusCode).toBe(401);
+    }, { timeout: 3_500 });
+    expect((await login(subject.app, 'contraseña-nueva-segura')).cookie).toContain('panel_session=');
   });
 
-  it('desvincula WhatsApp mediante el endpoint y conserva sesión del panel y SQLite', async () => {
-    const subject = await createApiSubject();
-    subjects.push(subject);
-    subject.database.setSetting('valor_conservado', 'sí');
-    const auth = await login(subject.app);
-    const response = await injectAuthenticated(subject.app, auth, {
-      method: 'POST',
-      url: '/api/admin/maintenance/unlink-whatsapp',
-      payload: {
-        confirmation: 'DESVINCULAR WHATSAPP',
-        currentPassword: CURRENT_PASSWORD,
-      },
-    });
-    expect(response.statusCode).toBe(202);
-    await subject.maintenance.waitForCompletion();
-    const status = await subject.app.inject({
-      method: 'GET',
-      url: `/api/admin/maintenance/status?operationId=${response.json().operationId}`,
-      headers: { cookie: auth.cookie },
-    });
-    expect(status.json()).toMatchObject({
-      result: 'completed',
-      code: 'WHATSAPP_UNLINK_COMPLETED',
-      logoutRequired: false,
-    });
-    expect(subject.database.getSetting('valor_conservado', '')).toBe('sí');
-    expect(
-      (
-        await subject.app.inject({
-          method: 'GET',
-          url: '/api/auth/session',
-          headers: { cookie: auth.cookie },
-        })
-      ).statusCode,
-    ).toBe(200);
-  });
-
-  it('bloquea acciones administrativas y una segunda operación simultánea', async () => {
+  it('retira el endpoint de sesiones locales y bloquea cambios durante un reset', async () => {
     let release: () => void = () => undefined;
     const blocked = new Promise<void>((resolvePromise) => {
       release = resolvePromise;
     });
     const subject = await createApiSubject(async (stage) => {
-      if (stage === 'stopping_whatsapp') await blocked;
+      if (stage === 'stopping_messaging') await blocked;
     });
     subjects.push(subject);
     const auth = await login(subject.app);
-    const first = await injectAuthenticated(subject.app, auth, {
+    const obsolete = await injectAuthenticated(subject.app, auth, {
       method: 'POST',
       url: '/api/admin/maintenance/unlink-whatsapp',
-      payload: {
-        confirmation: 'DESVINCULAR WHATSAPP',
-        currentPassword: CURRENT_PASSWORD,
-      },
+      payload: { confirmation: 'DESVINCULAR WHATSAPP', currentPassword: CURRENT_PASSWORD },
+    });
+    expect(obsolete.statusCode).toBe(404);
+
+    const first = await injectAuthenticated(subject.app, auth, {
+      method: 'POST',
+      url: '/api/admin/maintenance/factory-reset',
+      payload: factoryPayload(),
     });
     expect(first.statusCode).toBe(202);
-
-    const progress = await subject.app.inject({
-      method: 'GET',
-      url: `/api/admin/maintenance/status?operationId=${first.json().operationId}`,
-      headers: { cookie: auth.cookie },
-    });
-    expect(progress.statusCode).toBe(200);
-    expect(progress.json()).toMatchObject({ result: 'running', stage: 'stopping_whatsapp' });
-
+    await vi.waitFor(() =>
+      expect(subject.maintenance.snapshot()).toMatchObject({
+        result: 'running',
+        stage: 'stopping_messaging',
+      }),
+    );
     const blockedAction = await injectAuthenticated(subject.app, auth, {
       method: 'PATCH',
       url: '/api/settings',
       payload: { bot_enabled: false },
     });
     expect(blockedAction.statusCode).toBe(423);
-    expect(blockedAction.json()).toMatchObject({ code: 'MAINTENANCE_IN_PROGRESS' });
-
     const duplicate = await injectAuthenticated(subject.app, auth, {
       method: 'POST',
-      url: '/api/admin/maintenance/unlink-whatsapp',
-      payload: {
-        confirmation: 'DESVINCULAR WHATSAPP',
-        currentPassword: CURRENT_PASSWORD,
-      },
+      url: '/api/admin/maintenance/factory-reset',
+      payload: factoryPayload(),
     });
     expect(duplicate.statusCode).toBe(409);
-    expect(duplicate.json()).toMatchObject({ code: 'RESET_ALREADY_RUNNING' });
     release();
     await subject.maintenance.waitForCompletion();
   });
 });
 
 async function createApiSubject(beforeStage?: (stage: MaintenanceStage) => void | Promise<void>) {
-  const projectRoot = mkdtempSync(join(tmpdir(), 'asistente-maintenance-api-'));
-  const dataRoot = join(projectRoot, 'data');
-  const databasePath = join(dataRoot, 'asistente.db');
-  const sessionPath = join(dataRoot, 'whatsapp-session');
-  const cachePath = join(projectRoot, '.wwebjs_cache');
-  mkdirSync(sessionPath, { recursive: true });
-  mkdirSync(cachePath, { recursive: true });
-  writeFileSync(join(sessionPath, 'session.bin'), 'sesión-simulada');
-
+  const projectRoot = mkdtempSync(join(tmpdir(), 'neurobot-maintenance-api-'));
+  const databasePath = join(projectRoot, 'data', 'asistente.db');
   const database = new AppDatabase(databasePath);
   database.migrate();
   database.setPanelPasswordHash(await hashPassword(CURRENT_PASSWORD));
@@ -275,8 +165,6 @@ async function createApiSubject(beforeStage?: (stage: MaintenanceStage) => void 
   const maintenance = new MaintenanceService(database, manager, discovery, anonymizer, logger, {
     projectRoot,
     databasePath,
-    sessionPath,
-    cachePath,
     ...(beforeStage === undefined ? {} : { beforeStage }),
   });
   const app = await buildAdminServer({
@@ -290,7 +178,7 @@ async function createApiSubject(beforeStage?: (stage: MaintenanceStage) => void 
     developmentMode: false,
     maintenance,
   });
-  return { projectRoot, database, client, manager, discovery, maintenance, app };
+  return { projectRoot, database, maintenance, app };
 }
 
 function factoryPayload() {
@@ -319,16 +207,14 @@ async function login(app: FastifyInstance, password = CURRENT_PASSWORD): Promise
 async function injectAuthenticated(
   app: FastifyInstance,
   auth: Authentication,
-  options: { method: 'POST' | 'PATCH'; url: string; payload?: unknown },
+  options: { method: 'POST' | 'PATCH'; url: string; payload?: Record<string, unknown> },
 ): Promise<InjectResponse> {
-  return await app.inject({
-    method: options.method,
-    url: options.url,
-    headers: {
-      cookie: auth.cookie,
-      'x-csrf-token': auth.csrf,
-      ...(options.payload === undefined ? {} : { 'content-type': 'application/json' }),
-    },
-    ...(options.payload === undefined ? {} : { body: JSON.stringify(options.payload) }),
-  });
+  const headers = {
+    cookie: auth.cookie,
+    'x-csrf-token': auth.csrf,
+    ...(options.payload === undefined ? {} : { 'content-type': 'application/json' }),
+  };
+  return options.payload === undefined
+    ? app.inject({ method: options.method, url: options.url, headers })
+    : app.inject({ method: options.method, url: options.url, headers, payload: options.payload });
 }

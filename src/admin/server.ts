@@ -7,7 +7,6 @@ import helmet from '@fastify/helmet';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
-import QRCode from 'qrcode';
 import { z } from 'zod';
 import type { AIProvider } from '../ai/ai-provider.js';
 import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
@@ -39,13 +38,18 @@ import {
   createProfileFromPreset,
   PROFILE_PRESETS,
 } from '../core/profile-presets.js';
-import type { WhatsAppSessionManager } from '../core/whatsapp-session-manager.js';
 import { toLocalDateTime } from '../core/automatic-message-service.js';
 import {
   sanitizeWhatsAppDisplayName,
   validateWelcomeTemplate,
 } from '../core/welcome-personalization.js';
 import { serializeError } from '../infrastructure/safe-error.js';
+import {
+  isValidMetaWebhookPayload,
+  parseMetaWebhookEvents,
+  secureTokenMatches,
+  verifyMetaWebhookSignature,
+} from '../messaging/whatsapp-cloud-api-adapter.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import type { SecretVault } from '../security/secret-vault.js';
@@ -252,7 +256,7 @@ const botCreateSchema = z
     organizationType: organizationTypeSchema,
     timezone: z.string().trim().min(1).max(80),
     mode: z.enum(['community', 'business', 'mixed']),
-    connectorType: z.enum(['WHATSAPP_WEB', 'WHATSAPP_CLOUD_API']),
+    connectorType: z.literal('WHATSAPP_CLOUD_API'),
     provider: z.enum(['groq', 'disabled']),
     preset: z.enum(['community', 'store', 'restaurant', 'distributor', 'service', 'empty']),
     menuType: z
@@ -754,13 +758,6 @@ const moderationImportSchema = z
   })
   .strict();
 
-const maintenanceBaseSchema = z
-  .object({
-    confirmation: z.string().max(40),
-    currentPassword: z.string().min(1).max(128),
-  })
-  .strict();
-
 const factoryResetSchema = z
   .object({
     confirmation: z.string().max(40),
@@ -803,12 +800,24 @@ export type AdminServerContext = {
   multiBotManager?: MultiBotManager;
   aiProviderFactory?: AIProviderFactory;
   secretVault?: SecretVault;
-  sessionManager?: WhatsAppSessionManager;
   mediaDirectory?: string;
+  metaWebhook?: {
+    appSecret?: string;
+    verifyToken?: string;
+  };
+  metaWebhookProcessor?: {
+    ingestMetaWebhook(
+      phoneNumberId: string,
+      payload: unknown,
+      acceptedEventIds: ReadonlySet<string>,
+    ): Promise<{ messages: number; statuses: number; unsupportedMessages: number }>;
+  };
 };
 
 export async function buildAdminServer(context: AdminServerContext): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false, bodyLimit: 600 * 1024, trustProxy: false });
+  const app = Fastify({ logger: false, bodyLimit: 600 * 1024, trustProxy: '127.0.0.1' });
+  const rawJsonBodies = new WeakMap<object, Buffer>();
+  const webhookTasks = new Set<Promise<void>>();
   const sessions = new SessionStore(context.sessionSecret);
   const loginGate = new LoginAttemptGate();
   const maintenanceGate = new LoginAttemptGate(3, 15 * 60 * 1000, 15 * 60 * 1000);
@@ -816,6 +825,21 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
   const manualPollSendGate = new Map<string, number>();
   const moduleVisibility = new AssistantModuleVisibilityService();
   const groupModeration = new GroupModerationService(context.database);
+
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (request, body, done) => {
+    const rawBody = Buffer.isBuffer(body) ? body : Buffer.from(body);
+    rawJsonBodies.set(request, rawBody);
+    try {
+      done(null, JSON.parse(rawBody.toString('utf8')) as unknown);
+    } catch (error) {
+      done(error instanceof Error ? error : new Error('El cuerpo JSON no es válido.'), undefined);
+    }
+  });
+
+  app.addHook('onClose', async () => {
+    await Promise.allSettled([...webhookTasks]);
+  });
 
   await app.register(cookie);
   await app.register(formbody);
@@ -844,14 +868,126 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     },
   });
 
+  app.get('/privacy', async (_request, reply) =>
+    reply
+      .header('Cache-Control', 'public, max-age=300')
+      .type('text/html; charset=utf-8')
+      .sendFile('privacy.html'),
+  );
+
+  app.get('/terms', async (_request, reply) =>
+    reply
+      .header('Cache-Control', 'public, max-age=300')
+      .type('text/html; charset=utf-8')
+      .sendFile('terms.html'),
+  );
+
+  app.get('/data-deletion', async (_request, reply) =>
+    reply
+      .header('Cache-Control', 'public, max-age=300')
+      .type('text/html; charset=utf-8')
+      .sendFile('data-deletion.html'),
+  );
+
+  app.get('/api/webhooks/meta/whatsapp', async (request, reply) => {
+    const query = z
+      .object({
+        'hub.mode': z.string(),
+        'hub.verify_token': z.string(),
+        'hub.challenge': z.string(),
+      })
+      .passthrough()
+      .safeParse(request.query);
+    if (
+      !query.success ||
+      query.data['hub.mode'] !== 'subscribe' ||
+      !secureTokenMatches(context.metaWebhook?.verifyToken, query.data['hub.verify_token'])
+    ) {
+      return reply.code(403).type('text/plain').send('Forbidden');
+    }
+    return reply.code(200).type('text/plain').send(query.data['hub.challenge']);
+  });
+
+  app.post('/api/webhooks/meta/whatsapp', async (request, reply) => {
+    const webhookProcessor = context.metaWebhookProcessor ?? context.multiBotManager;
+    if (context.metaWebhook?.appSecret === undefined || webhookProcessor === undefined) {
+      return reply.code(503).send({
+        error: 'El webhook de Meta no está configurado.',
+        code: 'META_WEBHOOK_NOT_CONFIGURED',
+      });
+    }
+    const rawBody = rawJsonBodies.get(request);
+    const signatureHeader = request.headers['x-hub-signature-256'];
+    const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
+    if (
+      rawBody === undefined ||
+      !verifyMetaWebhookSignature(rawBody, signature, context.metaWebhook.appSecret)
+    ) {
+      context.logger.warn(
+        { operation: 'META_WEBHOOK_SIGNATURE_REJECTED' },
+        'Se rechazó un webhook de Meta con firma inválida',
+      );
+      return reply.code(401).send({ error: 'Firma inválida.', code: 'INVALID_META_SIGNATURE' });
+    }
+    if (!isValidMetaWebhookPayload(request.body)) {
+      return reply
+        .code(400)
+        .send({ error: 'Payload de Meta inválido.', code: 'INVALID_META_WEBHOOK_PAYLOAD' });
+    }
+
+    const events = parseMetaWebhookEvents(request.body);
+    const acceptedByPhone = new Map<string, Set<string>>();
+    for (const event of events) {
+      const accepted = context.database.claimMetaWebhookEvent(event);
+      if (!accepted) continue;
+      const eventIds = acceptedByPhone.get(event.phoneNumberId) ?? new Set<string>();
+      eventIds.add(event.eventId);
+      acceptedByPhone.set(event.phoneNumberId, eventIds);
+    }
+
+    if (acceptedByPhone.size > 0) {
+      const payload = request.body;
+      const manager = webhookProcessor;
+      const task = new Promise<void>((resolveTask) => {
+        setImmediate(() => {
+          void (async () => {
+            for (const [phoneNumberId, eventIds] of acceptedByPhone) {
+              try {
+                await manager.ingestMetaWebhook(phoneNumberId, payload, eventIds);
+                context.database.finishMetaWebhookEvents([...eventIds], { status: 'PROCESSED' });
+              } catch (error) {
+                const details = serializeError(error, 'META_WEBHOOK_PROCESSING_FAILED', false);
+                context.database.finishMetaWebhookEvents([...eventIds], {
+                  status: 'FAILED',
+                  errorCode: details.errorCode,
+                });
+                context.logger.error(
+                  {
+                    operation: 'META_WEBHOOK_PROCESSING_FAILED',
+                    errorCode: details.errorCode,
+                    eventCount: eventIds.size,
+                  },
+                  'Falló el procesamiento asíncrono de un webhook de Meta',
+                );
+              }
+            }
+          })().finally(resolveTask);
+        });
+      });
+      webhookTasks.add(task);
+      void task.finally(() => webhookTasks.delete(task));
+    }
+
+    return reply.code(200).send({ received: true });
+  });
+
   app.addHook('preHandler', async (request, reply) => {
     if (context.maintenance?.isRunning() !== true || !request.url.startsWith('/api/')) return;
     const route = request.routeOptions.url;
     if (
       route === '/api/health' ||
       route === '/api/admin/maintenance/status' ||
-      route === '/api/admin/maintenance/factory-reset' ||
-      route === '/api/admin/maintenance/unlink-whatsapp'
+      route === '/api/admin/maintenance/factory-reset'
     ) {
       return;
     }
@@ -1007,7 +1143,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           requestsToday: usage.requests,
           tokensToday: usage.totalTokens,
           lastConnectedAt: runtime?.connection.lastConnectedAt ?? bot.lastConnectedAt,
-          qrAvailable: runtime?.qrAvailable ?? false,
+          meta: metaConfigurationFor(context, bot.id),
           lifecycleStatus: bot.lifecycleStatus,
           deletionLocked: bot.deletionLocked,
           groupChannelEnabled: bot.groupChannelEnabled,
@@ -1148,11 +1284,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           .send({ error: 'La contraseña actual no es válida.', code: 'INVALID_PASSWORD' });
       }
       await context.multiBotManager?.stop(botId);
-      if (context.sessionManager !== undefined) {
-        await context.sessionManager.clear(bot);
-      }
       context.database.permanentlyDeleteBot(botId, context.anonymizer.identifier(session.username));
-      context.multiBotManager?.forgetAdminPhoneNumber(botId);
       audit(context, 'assistant_permanently_deleted', botId, 'ok', botId);
       return { deleted: true };
     },
@@ -1209,15 +1341,10 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           ? {
               ...parsedInput,
               mode: 'business' as const,
-              connectorType: 'WHATSAPP_WEB' as const,
+              connectorType: 'WHATSAPP_CLOUD_API' as const,
               preset: parsedInput.preset === 'community' ? ('empty' as const) : parsedInput.preset,
             }
           : parsedInput;
-      if (input.mode === 'community' && input.connectorType !== 'WHATSAPP_WEB') {
-        return reply
-          .code(400)
-          .send({ error: 'Los asistentes comunitarios utilizan WhatsApp Web.' });
-      }
       const profile = createProfileFromPreset(input);
       const bot = await context.multiBotManager.create({
         id: input.id,
@@ -1231,7 +1358,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       audit(context, 'bot_create', bot.id, 'ok', bot.id);
       return reply.code(201).send({
         bot: adminBotResponse(context, bot),
-        qrAvailable: context.multiBotManager.snapshot(bot.id)?.qrAvailable ?? false,
+        meta: context.multiBotManager.metaConfiguration(bot.id),
       });
     },
   );
@@ -1303,7 +1430,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           : parsedInput;
       const previous = context.database.getBot(botId);
       const bot = context.database.updateBotConfiguration({ botId, ...input });
-      if (context.multiBotManager !== undefined && bot.connectorType === 'WHATSAPP_WEB') {
+      if (context.multiBotManager !== undefined) {
         const connectionSettingsChanged =
           previous !== null &&
           (previous.privateMessagesEnabled !== bot.privateMessagesEnabled ||
@@ -2401,46 +2528,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       await context.multiBotManager.restart(botId);
       audit(context, 'bot_restart', botId, 'ok', botId);
       return { restarted: true };
-    },
-  );
-
-  app.get(
-    '/api/bots/:botId/qr',
-    { preHandler: requireSession(sessions) },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      if (context.database.getBot(botId) === null)
-        return reply.code(404).send({ error: 'Asistente no encontrado.' });
-      const qr = context.multiBotManager?.qr(botId) ?? null;
-      return {
-        available: qr !== null,
-        image:
-          qr === null
-            ? null
-            : await QRCode.toDataURL(qr, { errorCorrectionLevel: 'M', margin: 2, width: 320 }),
-      };
-    },
-  );
-
-  app.post(
-    '/api/bots/:botId/unlink',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      if (context.multiBotManager === undefined || context.sessionManager === undefined) {
-        return reply.code(503).send({ error: 'La administración de sesiones no está disponible.' });
-      }
-      const botId = parseBotId(request.params);
-      z.object({ confirmed: z.literal(true) })
-        .strict()
-        .parse(request.body);
-      const bot = context.database.getBot(botId);
-      if (bot === null) return reply.code(404).send({ error: 'Asistente no encontrado.' });
-      await context.multiBotManager.stop(botId);
-      await context.sessionManager.clear(bot);
-      context.database.updateBotWhatsAppStatus(botId, 'disconnected');
-      await context.multiBotManager.start(botId);
-      audit(context, 'bot_unlink', botId, 'ok', botId);
-      return { unlinked: true };
     },
   );
 
@@ -4245,57 +4332,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     },
   );
 
-  app.post(
-    '/api/admin/maintenance/unlink-whatsapp',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      if (context.maintenance === undefined) return maintenanceUnavailable(reply);
-      if (context.maintenance.isRunning()) return maintenanceAlreadyRunning(reply);
-      const input = maintenanceBaseSchema.parse(request.body);
-      if (!maintenanceGate.canAttempt(request.ip)) {
-        return maintenanceRejection(
-          reply,
-          429,
-          'RESET_RATE_LIMITED',
-          'Se alcanzó temporalmente el límite de intentos de mantenimiento.',
-        );
-      }
-      if (input.confirmation !== 'DESVINCULAR WHATSAPP') {
-        maintenanceGate.failure(request.ip);
-        return maintenanceRejection(
-          reply,
-          400,
-          'RESET_CONFIRMATION_INVALID',
-          'La frase de confirmación no es válida.',
-        );
-      }
-      const session = getSession(request, sessions) as PanelSession;
-      const currentHash = context.database.getPanelPasswordHash(session.username);
-      if (currentHash === null || !(await verifyPassword(input.currentPassword, currentHash))) {
-        maintenanceGate.failure(request.ip);
-        return maintenanceRejection(
-          reply,
-          401,
-          'RESET_PASSWORD_INVALID',
-          'La contraseña actual no es válida.',
-        );
-      }
-      maintenanceGate.success(request.ip);
-      try {
-        const operationId = context.maintenance.startWhatsAppUnlink({
-          administratorHash: context.anonymizer.identifier(`panel:${session.username}`),
-        });
-        return reply.code(202).send({
-          accepted: true,
-          operationId,
-          code: 'WHATSAPP_UNLINK_STARTED',
-        });
-      } catch (error) {
-        return maintenanceStartFailure(error, reply);
-      }
-    },
-  );
-
   return app;
 }
 
@@ -4526,14 +4562,40 @@ function safeBotResponse(bot: NonNullable<ReturnType<AppDatabase['getBot']>>) {
 }
 
 function adminPhoneNumberFor(context: AdminServerContext, botId: string): string | null {
-  return context.multiBotManager?.adminPhoneNumber(botId) ?? null;
+  void context;
+  void botId;
+  return null;
 }
 
 function adminBotResponse(
   context: AdminServerContext,
   bot: NonNullable<ReturnType<AppDatabase['getBot']>>,
 ) {
-  return { ...safeBotResponse(bot), phoneNumber: adminPhoneNumberFor(context, bot.id) };
+  return {
+    ...safeBotResponse(bot),
+    phoneNumber: adminPhoneNumberFor(context, bot.id),
+    meta: metaConfigurationFor(context, bot.id),
+  };
+}
+
+function metaConfigurationFor(context: AdminServerContext, botId: string) {
+  const account = context.multiBotManager?.metaConfiguration(botId) ?? {
+    configured: false,
+    credentialsMissing: ['META_ACCESS_TOKEN', 'META_PHONE_NUMBER_ID', 'META_WABA_ID'],
+    phoneNumberIdConfigured: false,
+    lastErrorCode: null,
+  };
+  const webhookCredentialsMissing = [
+    ...(context.metaWebhook?.appSecret === undefined ? ['META_APP_SECRET'] : []),
+    ...(context.metaWebhook?.verifyToken === undefined ? ['META_WEBHOOK_VERIFY_TOKEN'] : []),
+  ];
+  const webhookAvailable = webhookCredentialsMissing.length === 0;
+  return {
+    ...account,
+    configured: account.configured && webhookAvailable,
+    credentialsMissing: [...account.credentialsMissing, ...webhookCredentialsMissing],
+    webhookAvailable,
+  };
 }
 
 function safeConnectorConflict(

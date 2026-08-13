@@ -5,6 +5,7 @@ import type {
   GroupJoinEvent,
   GroupListSource,
   IncomingMessage,
+  MetaMessageStatus,
   NativePoll,
   WelcomeParticipant,
 } from '../domain/types.js';
@@ -13,7 +14,7 @@ export type MessagingClientEvents = {
   onMessage: (message: IncomingMessage) => Promise<void>;
   onStateChange: (state: ConnectionState, reason?: string) => void;
   onReady: () => void | Promise<void>;
-  onQr: (qr: string) => void;
+  onDeliveryStatus?: (status: MetaMessageStatus) => void | Promise<void>;
   onGroupJoin?: (event: GroupJoinEvent) => Promise<void>;
   onGroupChanged?: (event: GroupChangeEvent) => Promise<void>;
 };
@@ -45,5 +46,4 @@ export interface MessagingClient {
   getState(): Promise<string | null>;
   isReady(): boolean;
   isOwnIdentifier(identifier: string): boolean;
-  getOwnIdentifier?(): string | null;
 }

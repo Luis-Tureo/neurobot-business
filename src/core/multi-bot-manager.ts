@@ -7,57 +7,67 @@ import type {
   ConnectorType,
   MenuType,
 } from '../domain/types.js';
+import { serializeError } from '../infrastructure/safe-error.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
-import { WhatsAppWebAdapter } from '../messaging/whatsapp-adapter.js';
+import { WhatsAppCloudApiAdapter } from '../messaging/whatsapp-cloud-api-adapter.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
-import { serializeError } from '../infrastructure/safe-error.js';
-import { BotInstance, type BotInstanceOptions } from './bot-instance.js';
-import type { WhatsAppSessionManager } from './whatsapp-session-manager.js';
+import type { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
+import type { ModerationService } from '../moderation/moderation-service.js';
 import type { AutomaticMessageService } from './automatic-message-service.js';
+import { BotInstance, type BotInstanceOptions } from './bot-instance.js';
 import type { PollRepository } from './poll-repository.js';
 import type { PollScheduler } from './poll-scheduler.js';
 import type { PollService } from './poll-service.js';
-import type { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
-import type { ModerationService } from '../moderation/moderation-service.js';
 
-type ClientFactory = (bot: BotRecord) => MessagingClient;
+export type MetaBotAccount = {
+  botId: string;
+  accessToken?: string;
+  phoneNumberId?: string;
+  wabaId?: string;
+};
+
+export type MetaCloudRuntimeConfiguration = {
+  apiVersion: string;
+  requestTimeoutMs: number;
+  accounts: MetaBotAccount[];
+};
+
+type ClientFactory = (bot: BotRecord, account: MetaBotAccount | undefined) => MessagingClient;
 
 export class MultiBotManager {
   private readonly instances = new Map<string, BotInstance>();
   private readonly started = new Set<string>();
-  private readonly adminPhoneNumbers = new Map<string, string>();
+  private readonly accountsByBot = new Map<string, MetaBotAccount>();
 
   public constructor(
     private readonly database: AppDatabase,
     private readonly providers: AIProviderFactory,
-    private readonly sessions: WhatsAppSessionManager,
     private readonly anonymizer: Anonymizer,
     private readonly logger: Logger,
-    private readonly options: BotInstanceOptions & { chromeExecutablePath?: string },
-    private readonly clientFactory: ClientFactory = (bot) => {
-      if (bot.connectorType !== 'WHATSAPP_WEB') {
-        throw new Error(
-          'El conector WHATSAPP_CLOUD_API requiere credenciales y webhooks oficiales antes de iniciar.',
-        );
-      }
-      return new WhatsAppWebAdapter(
+    private readonly options: BotInstanceOptions,
+    private readonly meta: MetaCloudRuntimeConfiguration,
+    private readonly clientFactory: ClientFactory = (_bot, account) =>
+      new WhatsAppCloudApiAdapter(
         {
-          sessionPath: bot.sessionPath,
-          clientId: bot.clientId,
-          acceptPrivateMessages: bot.privateMessagesEnabled,
-          maxMessageLength: options.maxMessageLength,
-          developmentMode: options.developmentMode,
-          communityPollVotesNoAction: bot.capabilities.communitySingleTurnMode,
-          ...(options.chromeExecutablePath === undefined
+          ...(account?.accessToken === undefined ? {} : { accessToken: account.accessToken }),
+          ...(account?.phoneNumberId === undefined
             ? {}
-            : { chromeExecutablePath: options.chromeExecutablePath }),
+            : { phoneNumberId: account.phoneNumberId }),
+          ...(account?.wabaId === undefined ? {} : { wabaId: account.wabaId }),
+          apiVersion: meta.apiVersion,
+          requestTimeoutMs: meta.requestTimeoutMs,
         },
         logger,
-        anonymizer,
-      );
-    },
-  ) {}
+      ),
+  ) {
+    for (const account of meta.accounts) {
+      this.accountsByBot.set(account.botId, account);
+      if (account.phoneNumberId !== undefined) {
+        this.database.configureMetaConnector(account.botId, account.phoneNumberId);
+      }
+    }
+  }
 
   public async startAll(): Promise<void> {
     for (const bot of this.database.listBots().filter((candidate) => this.canStart(candidate))) {
@@ -82,7 +92,7 @@ export class MultiBotManager {
   }
 
   public async prepareAll(): Promise<void> {
-    for (const bot of this.database.listBots().filter((candidate) => this.canStart(candidate))) {
+    for (const bot of this.database.listBots().filter((candidate) => this.canPrepare(candidate))) {
       try {
         await this.prepare(bot.id);
       } catch (error) {
@@ -94,43 +104,18 @@ export class MultiBotManager {
   public async prepare(botId: string): Promise<BotInstance> {
     const existing = this.instances.get(botId);
     if (existing !== undefined) return existing;
-    let bot = this.database.getBot(botId);
+    const bot = this.database.getBot(botId);
     if (bot === null) throw new Error('El asistente no existe.');
-    if (!this.canStart(bot)) {
-      throw new Error(
-        bot.connectorType === 'WHATSAPP_CLOUD_API'
-          ? 'El conector Cloud API queda pendiente hasta completar sus credenciales y webhook.'
-          : 'El asistente no puede iniciarse en su estado actual.',
-      );
-    }
-    await this.sessions.pathFor(bot);
-    bot = this.database.getBot(botId) as BotRecord;
+    if (!this.canPrepare(bot)) throw new Error('El asistente no puede prepararse en su estado actual.');
+    const account = this.accountsByBot.get(botId);
     const instance = new BotInstance(
       bot,
-      this.clientFactory(bot),
+      this.clientFactory(bot, account),
       this.database,
       this.providers.forBot(bot.id),
       this.anonymizer,
       this.logger,
-      {
-        ...this.options,
-        onDuplicateIdentity: async (duplicateBotId) => {
-          const duplicateBot = this.database.getBot(duplicateBotId);
-          if (duplicateBot === null) return;
-          await this.sessions.clear(duplicateBot);
-          this.instances.delete(duplicateBotId);
-          this.started.delete(duplicateBotId);
-          this.database.recordTechnicalEvent({
-            botId: duplicateBotId,
-            eventType: 'TEMPORARY_SESSION_CLEANED',
-            result: 'cleared',
-          });
-          this.logger.warn(
-            { operation: 'TEMPORARY_SESSION_CLEANED', botId: duplicateBotId },
-            'La sesión temporal duplicada fue eliminada sin afectar al asistente existente',
-          );
-        },
-      },
+      this.options,
     );
     this.instances.set(botId, instance);
     return instance;
@@ -143,34 +128,48 @@ export class MultiBotManager {
     menuType: MenuType;
     profile: Omit<AssistantProfile, 'id' | 'active' | 'createdAt' | 'updatedAt'>;
   }): Promise<BotRecord> {
-    const bot = this.database.createBot({
-      ...input,
-      sessionPath: this.sessions.newBotPath(input.id),
-    });
+    const bot = this.database.createBot({ ...input });
     this.database.recordTechnicalEvent({
       botId: bot.id,
       eventType: 'ASSISTANT_DRAFT_CREATED',
-      result: bot.connectorType === 'WHATSAPP_WEB' ? 'linking' : 'draft',
+      result: 'awaiting_meta_configuration',
     });
-    if (this.canStart(bot)) {
-      this.database.recordTechnicalEvent({
-        botId: bot.id,
-        eventType: 'ASSISTANT_LINKING_STARTED',
-        result: 'started',
-      });
-      try {
-        await this.start(bot.id);
-      } catch (error) {
-        this.recordInstanceFailure('BOT_START_FAILED', bot.id, error);
-      }
-    } else {
-      this.database.recordTechnicalEvent({
-        botId: bot.id,
-        eventType: 'OPTIONAL_SERVICE_DISABLED',
-        result: 'connector_pending_configuration',
-      });
-    }
     return bot;
+  }
+
+  public async ingestMetaWebhook(
+    phoneNumberId: string,
+    payload: unknown,
+    acceptedEventIds: ReadonlySet<string>,
+  ): Promise<{ messages: number; statuses: number; unsupportedMessages: number }> {
+    const botId = this.database.getBotIdByMetaPhoneNumberId(phoneNumberId);
+    if (botId === null) throw new Error('META_PHONE_NUMBER_NOT_CONFIGURED');
+    if (!this.started.has(botId)) await this.start(botId);
+    const client = this.client(botId);
+    if (!(client instanceof WhatsAppCloudApiAdapter)) throw new Error('META_ADAPTER_NOT_AVAILABLE');
+    return client.ingestWebhook(payload, acceptedEventIds);
+  }
+
+  public metaConfiguration(botId: string): {
+    configured: boolean;
+    credentialsMissing: string[];
+    phoneNumberIdConfigured: boolean;
+    lastErrorCode: string | null;
+  } {
+    const account = this.accountsByBot.get(botId);
+    const client = this.client(botId);
+    const credentialsMissing = [
+      ...(account?.accessToken === undefined ? ['META_ACCESS_TOKEN'] : []),
+      ...(account?.phoneNumberId === undefined ? ['META_PHONE_NUMBER_ID'] : []),
+      ...(account?.wabaId === undefined ? ['META_WABA_ID'] : []),
+    ];
+    return {
+      configured: credentialsMissing.length === 0,
+      credentialsMissing,
+      phoneNumberIdConfigured: account?.phoneNumberId !== undefined,
+      lastErrorCode:
+        client instanceof WhatsAppCloudApiAdapter ? client.status().lastErrorCode : null,
+    };
   }
 
   public moderationService(botId: string): ModerationService | null {
@@ -186,8 +185,6 @@ export class MultiBotManager {
   public async stop(botId: string): Promise<void> {
     const instance = this.instances.get(botId);
     if (instance === undefined) return;
-    const phoneNumber = instance.adminPhoneNumber();
-    if (phoneNumber !== null) this.adminPhoneNumbers.set(botId, phoneNumber);
     await instance.stop();
     this.instances.delete(botId);
     this.started.delete(botId);
@@ -199,10 +196,7 @@ export class MultiBotManager {
     this.started.clear();
   }
 
-  public snapshots(): Array<{
-    bot: BotRecord;
-    runtime: ReturnType<BotInstance['snapshot']> | null;
-  }> {
+  public snapshots(): Array<{ bot: BotRecord; runtime: ReturnType<BotInstance['snapshot']> | null }> {
     return this.database
       .listBots()
       .map((bot) => ({ bot, runtime: this.instances.get(bot.id)?.snapshot() ?? null }));
@@ -210,20 +204,6 @@ export class MultiBotManager {
 
   public snapshot(botId: string): ReturnType<BotInstance['snapshot']> | null {
     return this.instances.get(botId)?.snapshot() ?? null;
-  }
-
-  public adminPhoneNumber(botId: string): string | null {
-    const current = this.instances.get(botId)?.adminPhoneNumber() ?? null;
-    if (current !== null) this.adminPhoneNumbers.set(botId, current);
-    return current ?? this.adminPhoneNumbers.get(botId) ?? null;
-  }
-
-  public forgetAdminPhoneNumber(botId: string): void {
-    this.adminPhoneNumbers.delete(botId);
-  }
-
-  public qr(botId: string): string | null {
-    return this.instances.get(botId)?.qr() ?? null;
   }
 
   public client(botId: string): MessagingClient | null {
@@ -276,17 +256,17 @@ export class MultiBotManager {
     });
   }
 
-  private canStart(bot: BotRecord): boolean {
+  private canPrepare(bot: BotRecord): boolean {
     return (
       bot.enabled &&
-      bot.connectorType === 'WHATSAPP_WEB' &&
-      ![
-        'ARCHIVED',
-        'PENDING_DELETION',
-        'DELETED',
-        'DUPLICATE_CONFIGURATION',
-        'DISABLED',
-      ].includes(bot.lifecycleStatus)
+      bot.connectorType === 'WHATSAPP_CLOUD_API' &&
+      !['ARCHIVED', 'PENDING_DELETION', 'DELETED', 'DUPLICATE_CONFIGURATION', 'DISABLED'].includes(
+        bot.lifecycleStatus,
+      )
     );
+  }
+
+  private canStart(bot: BotRecord): boolean {
+    return this.canPrepare(bot) && this.metaConfiguration(bot.id).configured;
   }
 }

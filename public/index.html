@@ -184,7 +184,7 @@
                 </div>
                 <div class="form-row">
                   <input name="mode" type="hidden" value="business" />
-                  <input name="connectorType" type="hidden" value="WHATSAPP_WEB" />
+                  <input name="connectorType" type="hidden" value="WHATSAPP_CLOUD_API" />
                   <label
                     >Zona horaria<input name="timezone" value="America/Santiago" required
                   /></label>
@@ -336,22 +336,22 @@
             <section id="section-whatsapp" class="panel-section hidden">
               <div class="section-heading">
                 <div>
-                  <p class="eyebrow">Sesión aislada</p>
-                  <h2>WhatsApp</h2>
+                  <p class="eyebrow">API oficial de Meta</p>
+                  <h2>WhatsApp Cloud API</h2>
                 </div>
                 <div class="actions">
                   <button id="bot-restart" class="secondary" type="button">
-                    Reiniciar conexión</button
-                  ><button id="bot-unlink" class="danger" type="button">Desvincular</button>
+                    Revalidar configuración</button
+                  >
                 </div>
               </div>
               <div id="whatsapp-cards" class="status-grid"></div>
-              <article id="qr-card" class="card inset hidden">
-                <h3>Vincular número</h3>
+              <article class="card inset">
+                <h3>Configuración administrada por entorno</h3>
                 <p class="muted">
-                  Escanea el código desde WhatsApp. El código no se guarda ni se registra.
+                  El número, las credenciales y el webhook se configuran en el servidor. El panel
+                  solo muestra su estado y nunca expone secretos.
                 </p>
-                <div id="bot-qr" class="qr-box"></div>
               </article>
               <article
                 class="card inset manual-tests-card hidden"
@@ -1675,28 +1675,16 @@
                 <p class="eyebrow danger-eyebrow">Operaciones destructivas</p>
                 <h2>Zona de peligro</h2>
                 <p class="muted">
-                  Estas opciones desconectan WhatsApp o eliminan la configuración local del chatbot.
-                  Requieren confirmar nuevamente la identidad administradora.
+                  Estas opciones eliminan la configuración local del chatbot. Las credenciales de
+                  Meta se administran en el entorno y nunca se guardan en el panel.
                 </p>
                 <div class="danger-zone">
-                  <article class="danger-option">
-                    <div>
-                      <h3>Desvincular solamente WhatsApp</h3>
-                      <p>
-                        Desconecta el número actual y elimina la caché de WhatsApp Web, pero
-                        conserva la base de datos, administradores, grupos, comandos y respuestas.
-                      </p>
-                    </div>
-                    <button id="open-unlink-whatsapp" class="danger" type="button">
-                      Desvincular solamente WhatsApp
-                    </button>
-                  </article>
                   <article class="danger-option critical">
                     <div>
                       <h3>Restablecimiento completo del bot</h3>
                       <p>
                         Esta acción elimina la vinculación y todas las configuraciones del chatbot.
-                        Se creará una copia de seguridad antes de continuar.
+                        No modifica las credenciales de Meta guardadas en el entorno.
                       </p>
                     </div>
                     <button id="open-factory-reset" class="danger-primary" type="button">
@@ -1720,7 +1708,7 @@
           <div id="factory-reset-details" class="warning-details hidden">
             <p><strong>Se eliminarán:</strong></p>
             <ul>
-              <li>Sesión y caché local de WhatsApp.</li>
+              <li>Estado local del conector y del chatbot.</li>
               <li>Estados temporales y solicitudes pendientes del asistente.</li>
               <li>Datos temporales de administración local.</li>
               <li>Comandos, respuestas, silencios, configuración y registros locales.</li>
@@ -1728,7 +1716,7 @@
             <p><strong>Se conservarán:</strong></p>
             <ul>
               <li>.env, código fuente, dependencias, archivos de npm y repositorio Git.</li>
-              <li>Copias de seguridad automáticas guardadas en la carpeta backups.</li>
+              <li>Credenciales de Meta administradas mediante variables de entorno.</li>
             </ul>
           </div>
           <form id="maintenance-form" autocomplete="off">
@@ -1800,13 +1788,13 @@
           <p id="maintenance-progress-message">Preparando la operación segura.</p>
           <ol id="maintenance-progress" class="progress-list">
             <li data-stage="verifying_authorization">Verificando autorización.</li>
-            <li data-stage="stopping_whatsapp">Deteniendo WhatsApp.</li>
+            <li data-stage="stopping_messaging">Deteniendo mensajería.</li>
             <li data-stage="closing_database">Cerrando base de datos.</li>
             <li data-stage="deleting_previous_state">Eliminando estado anterior.</li>
             <li data-stage="creating_database">Creando base de datos nueva.</li>
             <li data-stage="restoring_defaults">Restaurando comandos predeterminados.</li>
             <li data-stage="restarting_services">Reiniciando servicios.</li>
-            <li data-stage="waiting_qr">Esperando nuevo código QR.</li>
+            <li data-stage="ready">Verificando servicios.</li>
             <li data-stage="finished">Operación terminada.</li>
           </ol>
           <p id="maintenance-result-code" class="technical-code"></p>

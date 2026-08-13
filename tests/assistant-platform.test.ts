@@ -10,8 +10,7 @@ describe('Neurobot Business', () => {
     const business = database.createBot({
       id: 'negocio-prueba',
       mode: 'business',
-      connectorType: 'WHATSAPP_WEB',
-      sessionPath: 'data/sessions/negocio-prueba',
+      connectorType: 'WHATSAPP_CLOUD_API',
       profile: createProfileFromPreset({
         organizationName: 'Negocio de prueba',
         botName: 'Asistente comercial',

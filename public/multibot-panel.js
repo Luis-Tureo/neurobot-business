@@ -14,15 +14,13 @@ const panelState = {
   catalogCategories: [],
   catalogItems: [],
   mediaAssets: [],
-  qrTimer: null,
   botRefreshTimer: null,
 };
 
 const botConnectionLabels = {
   disconnected: 'Desconectado',
   initializing: 'Inicializando',
-  waiting_qr: 'Esperando código QR',
-  authenticated: 'Sesión autenticada',
+  authenticated: 'Configuración cargada',
   loading_chats: 'Sincronizando',
   connected: 'Conectado',
   auth_failure: 'Fallo de autenticación',
@@ -405,12 +403,16 @@ async function loadBotSummary(refreshForms = true) {
         async () => toggleBot(result.bot),
       ),
     );
-    if (result.bot.connectorType === 'WHATSAPP_WEB') {
+    quickActionsContainer.append(
+      actionButton('Ver estado de Meta', 'secondary', async () =>
+        selectBot(result.bot.id, 'whatsapp'),
+      ),
+    );
+    if (result.bot.meta?.configured) {
       quickActionsContainer.append(
-        actionButton('Vincular número', 'secondary', async () =>
-          selectBot(result.bot.id, 'whatsapp'),
+        actionButton('Revalidar configuración', 'secondary', async () =>
+          restartBot(result.bot.id),
         ),
-        actionButton('Reiniciar conexión', 'secondary', async () => restartBot(result.bot.id)),
       );
     }
     if (!result.bot.deletionLocked) {
@@ -493,9 +495,8 @@ function fillProfile(profile) {
 async function loadWhatsApp() {
   if (!panelState.selectedBotId) return;
   const visible = new Set(panelState.visibleModules);
-  const [detail, qr, groups, polls] = await Promise.all([
+  const [detail, groups, polls] = await Promise.all([
     panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}`),
-    panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/qr`),
     visible.has('automatic-messages')
       ? panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/groups`)
       : Promise.resolve({ groups: [] }),
@@ -507,22 +508,32 @@ async function loadWhatsApp() {
     state: detail.bot.whatsappStatus,
     lastConnectedAt: detail.bot.lastConnectedAt,
   };
+  const meta = detail.bot.meta || {
+    configured: false,
+    credentialsMissing: [
+      'META_ACCESS_TOKEN',
+      'META_PHONE_NUMBER_ID',
+      'META_WABA_ID',
+      'META_APP_SECRET',
+      'META_WEBHOOK_VERIFY_TOKEN',
+    ],
+    webhookAvailable: false,
+    lastErrorCode: null,
+  };
   setCardGrid('#whatsapp-cards', [
     ['Estado', botConnectionLabels[connection.state] || connection.state],
-    ['Número', detail.bot.phoneNumber || 'Sin vincular'],
-    ['Última conexión', safeDate(connection.lastConnectedAt)],
-    ['Sesión', detail.runtime ? 'Instancia preparada' : 'Detenida'],
+    ['Configuración', meta.configured ? 'Configurado' : 'No configurado'],
+    ['Webhook', meta.webhookAvailable ? 'Disponible' : 'No configurado'],
+    [
+      'Credenciales',
+      meta.credentialsMissing?.length
+        ? `Faltan: ${meta.credentialsMissing.join(', ')}`
+        : 'Completas',
+    ],
+    ['Runtime', detail.runtime ? 'Instancia preparada' : 'Pendiente'],
+    ...(meta.lastErrorCode ? [['Último error de Meta', meta.lastErrorCode]] : []),
+    ...(connection.lastErrorCode ? [['Último error', connection.lastErrorCode]] : []),
   ]);
-  const qrCard = document.querySelector('#qr-card');
-  const qrTarget = document.querySelector('#bot-qr');
-  qrTarget.replaceChildren();
-  qrCard.classList.toggle('hidden', !qr.available);
-  if (qr.available && qr.image) {
-    const image = document.createElement('img');
-    image.src = qr.image;
-    image.alt = 'Código QR temporal para vincular WhatsApp';
-    qrTarget.append(image);
-  }
   renderBotGroups(groups.groups);
   const availableGroups = groups.groups.filter(
     (group) => group.active && !group.blocked && group.botIsMember === true,
@@ -539,16 +550,6 @@ async function loadWhatsApp() {
     'id',
     'question',
   );
-  scheduleQrRefresh(connection.state);
-}
-
-function scheduleQrRefresh(connectionState) {
-  if (panelState.qrTimer !== null) window.clearTimeout(panelState.qrTimer);
-  panelState.qrTimer = null;
-  if (!['waiting_qr', 'initializing', 'authenticated'].includes(connectionState)) return;
-  panelState.qrTimer = window.setTimeout(() => {
-    void loadWhatsApp().catch((error) => notify(error.message, true));
-  }, 5000);
 }
 
 function renderBotGroups(groups) {
@@ -843,7 +844,7 @@ async function loadMenus() {
   updateSetupState(
     '#setup-menu-state',
     initialMenu === undefined
-      ? 'Falta el menÃº principal'
+      ? 'Falta el menú principal'
       : `${activeOptions} opci${activeOptions === 1 ? 'ón' : 'ones'} activa${activeOptions === 1 ? '' : 's'}`,
     initialMenu !== undefined && activeOptions > 0,
   );
@@ -1295,24 +1296,7 @@ function replaceSelectOptions(select, items, valueField, labelField, emptyLabel,
 async function restartBot(botId = panelState.selectedBotId) {
   if (!botId) return;
   await panelApi(`/api/bots/${encodeURIComponent(botId)}/restart`, { method: 'POST', body: '{}' });
-  notify('Conexión reiniciada.');
-  await Promise.all([
-    loadBots(),
-    botId === panelState.selectedBotId ? loadWhatsApp() : Promise.resolve(),
-  ]);
-}
-
-async function unlinkBot(botId = panelState.selectedBotId) {
-  if (
-    !botId ||
-    !window.confirm('¿Desvincular este número? La sesión se archivará en una copia recuperable.')
-  )
-    return;
-  await panelApi(`/api/bots/${encodeURIComponent(botId)}/unlink`, {
-    method: 'POST',
-    body: JSON.stringify({ confirmed: true }),
-  });
-  notify('Sesión archivada y asistente listo para una nueva vinculación.');
+  notify('Configuración de Meta revalidada.');
   await Promise.all([
     loadBots(),
     botId === panelState.selectedBotId ? loadWhatsApp() : Promise.resolve(),
@@ -1341,7 +1325,7 @@ async function toggleBot(bot) {
 async function transferCommercialConfiguration(bot) {
   if (
     !window.confirm(
-      'Se copiarán menús, productos, imágenes y horarios a Neurobot. No se copiarán el número, la sesión ni los grupos. El borrador quedará en la papelera. ¿Continuar?',
+      'Se copiarán menús, productos, imágenes y horarios a Neurobot. No se copiarán la configuración de Meta ni los grupos. El borrador quedará en la papelera. ¿Continuar?',
     )
   )
     return;
@@ -1355,7 +1339,7 @@ async function transferCommercialConfiguration(bot) {
   });
   await loadBots();
   await selectBot('neurobot', 'status');
-  notify('Configuración comercial transferida. La sesión y los grupos de Neurobot se conservaron.');
+  notify('Configuración comercial transferida. La configuración de Meta y los grupos de Neurobot se conservaron.');
 }
 
 async function sendBotToTrash(bot) {
@@ -1522,7 +1506,7 @@ function configureForms() {
       delete payload.exclusiveNumberConfirmed;
       payload.id = normalizeBotIdentifier(payload.id);
       payload.mode = 'business';
-      payload.connectorType = 'WHATSAPP_WEB';
+      payload.connectorType = 'WHATSAPP_CLOUD_API';
       if (payload.preset === 'community') payload.preset = 'empty';
       if (payload.id.length < 3) {
         notify('El identificador interno debe tener al menos 3 caracteres.', true);
@@ -1532,7 +1516,7 @@ function configureForms() {
       const result = await panelApi('/api/bots', { method: 'POST', body: JSON.stringify(payload) });
       form.classList.add('hidden');
       form.reset();
-      notify('Asistente creado con datos y sesión independientes.');
+      notify('Asistente creado con datos independientes; falta asignar su cuenta de Meta en el servidor.');
       await loadBots();
       await selectBot(result.bot.id, 'whatsapp');
     } catch (error) {
@@ -2030,7 +2014,7 @@ function configureForms() {
   document.querySelector('#reset-ai-counters').addEventListener('click', async () => {
     if (
       !window.confirm(
-        '¿Restablecer solamente los contadores de prueba de este asistente? No se eliminarán respuestas, conocimiento ni la sesión de WhatsApp.',
+        '¿Restablecer solamente los contadores de prueba de este asistente? No se eliminarán respuestas, conocimiento ni la configuración de Meta.',
       )
     )
       return;
@@ -2061,9 +2045,6 @@ function configureForms() {
   });
   document.querySelector('#bot-restart').addEventListener('click', () => {
     void restartBot();
-  });
-  document.querySelector('#bot-unlink').addEventListener('click', () => {
-    void unlinkBot();
   });
 }
 

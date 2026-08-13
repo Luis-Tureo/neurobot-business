@@ -1,12 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Logger } from 'pino';
@@ -26,7 +18,7 @@ import { hashPassword, verifyPassword } from '../src/security/password.js';
 
 type Subject = ReturnType<typeof createSubject>;
 
-describe('mantenimiento destructivo sin respaldos', () => {
+describe('mantenimiento destructivo sin sesiones de WhatsApp Web', () => {
   const subjects: Subject[] = [];
 
   afterEach(() => {
@@ -36,7 +28,7 @@ describe('mantenimiento destructivo sin respaldos', () => {
     }
   });
 
-  it('restablece SQLite y WhatsApp sin crear carpetas de respaldo', async () => {
+  it('restablece SQLite sin crear respaldos ni tocar configuración del proyecto', async () => {
     const subject = createSubject();
     subjects.push(subject);
     const newHash = await hashPassword('contraseña-nueva-segura');
@@ -56,8 +48,7 @@ describe('mantenimiento destructivo sin respaldos', () => {
     expect(subject.database.listGroups()).toHaveLength(0);
     expect(subject.database.listAdministrators()).toHaveLength(0);
     expect(subject.database.getCommand('personalizado')).toBeNull();
-    expect(subject.database.listCommands().length).toBeGreaterThan(0);
-    expect(subject.database.getSetting('bot_enabled', false)).toBe(true);
+    expect(subject.database.getBot('neurobot')?.connectorType).toBe('WHATSAPP_CLOUD_API');
     expect(
       await verifyPassword(
         'contraseña-nueva-segura',
@@ -66,75 +57,47 @@ describe('mantenimiento destructivo sin respaldos', () => {
     ).toBe(true);
     expect(subject.client.destroyCalls).toBe(1);
     expect(subject.client.initializeCalls).toBe(1);
-    expect(subject.manager.snapshot().state).toBe('waiting_qr');
     expect(subject.transientReset).toHaveBeenCalledOnce();
     expect(existsSync(join(subject.projectRoot, 'backups'))).toBe(false);
     expect(existsSync(subject.legacyDatabasePath)).toBe(false);
-    expect(existsSync(`${subject.legacyDatabasePath}-wal`)).toBe(false);
     expect(readFileSync(join(subject.projectRoot, '.env'), 'utf8')).toBe('SECRETO=conservado');
     expect(readFileSync(join(subject.projectRoot, 'package.json'), 'utf8')).toBe('{}');
-    expect(readFileSync(join(subject.projectRoot, 'src', 'sentinel.ts'), 'utf8')).toBe(
-      'export {};',
-    );
   });
 
-  it('no reconstruye el estado anterior cuando una etapa posterior falla', async () => {
+  it('recupera una base nueva cuando una etapa posterior falla', async () => {
     const subject = createSubject({
       beforeStage: (stage) => {
         if (stage === 'creating_database') throw new Error('fallo de creación simulado');
       },
     });
     subjects.push(subject);
-
     subject.service.startFactoryReset({
       passwordHash: await hashPassword('contraseña-nueva-segura'),
       administratorHash: 'administrador-anónimo',
     });
     const result = await subject.service.waitForCompletion();
-
     expect(result).toMatchObject({ result: 'failed', code: 'RESET_DATABASE_CREATE_FAILED' });
     expect(subject.database.isOpen()).toBe(true);
     expect(subject.database.getCommand('personalizado')).toBeNull();
-    expect(subject.database.isGroupAuthorized('grupo-secreto@g.us')).toBe(false);
-    expect(subject.database.isAdministrator('56912345678@c.us')).toBe(false);
-    expect(existsSync(join(subject.projectRoot, 'backups'))).toBe(false);
   });
 
-  it('desvincula WhatsApp sin modificar SQLite ni otros archivos del proyecto', async () => {
-    const subject = createSubject();
-    subjects.push(subject);
-
-    subject.service.startWhatsAppUnlink({ administratorHash: 'administrador-anónimo' });
-    const result = await subject.service.waitForCompletion();
-
-    expect(result).toMatchObject({
-      result: 'completed',
-      code: 'WHATSAPP_UNLINK_COMPLETED',
-      logoutRequired: false,
-    });
-    expect(subject.database.isGroupAuthorized('grupo-secreto@g.us')).toBe(true);
-    expect(subject.database.isAdministrator('56912345678@c.us')).toBe(true);
-    expect(subject.database.getCommand('personalizado')).not.toBeNull();
-    expect(findFiles(subject.sessionPath)).toHaveLength(0);
-    expect(findFiles(subject.cachePath)).toHaveLength(0);
-    expect(existsSync(join(subject.projectRoot, 'backups'))).toBe(false);
-  });
-
-  it('impide dos operaciones simultáneas', async () => {
+  it('impide dos restablecimientos simultáneos', async () => {
     let releaseStage: () => void = () => undefined;
     const blocked = new Promise<void>((resolvePromise) => {
       releaseStage = resolvePromise;
     });
     const subject = createSubject({
       beforeStage: async (stage) => {
-        if (stage === 'stopping_whatsapp') await blocked;
+        if (stage === 'stopping_messaging') await blocked;
       },
     });
     subjects.push(subject);
-    subject.service.startWhatsAppUnlink({ administratorHash: 'administrador-anónimo' });
-    expect(() =>
-      subject.service.startWhatsAppUnlink({ administratorHash: 'administrador-anónimo' }),
-    ).toThrow(MaintenanceAlreadyRunningError);
+    const input = {
+      passwordHash: await hashPassword('contraseña-nueva-segura'),
+      administratorHash: 'administrador-anónimo',
+    };
+    subject.service.startFactoryReset(input);
+    expect(() => subject.service.startFactoryReset(input)).toThrow(MaintenanceAlreadyRunningError);
     releaseStage();
     await subject.service.waitForCompletion();
   });
@@ -162,32 +125,20 @@ describe('mantenimiento destructivo sin respaldos', () => {
     });
     await subject.service.waitForCompletion();
     expect(JSON.stringify(subject.service.snapshot())).not.toContain('contraseña-nueva-segura');
-    const logs = JSON.stringify(subject.logEntries);
-    expect(logs).not.toContain('56912345678');
-    expect(logs).not.toContain('grupo-secreto@g.us');
-    expect(logs).not.toContain('credencial-de-sesion');
+    expect(JSON.stringify(subject.logEntries)).not.toContain('56912345678');
   });
 });
 
 function createSubject(
-  options: {
-    beforeStage?: (stage: MaintenanceStage) => void | Promise<void>;
-  } = {},
+  options: { beforeStage?: (stage: MaintenanceStage) => void | Promise<void> } = {},
 ) {
   const projectRoot = mkdtempSync(join(tmpdir(), 'neurobot-maintenance-'));
   const dataRoot = join(projectRoot, 'data');
   const databasePath = join(dataRoot, 'asistente.db');
   const legacyDatabasePath = join(dataRoot, 'anterior.sqlite3');
-  const sessionPath = join(dataRoot, 'whatsapp-session');
-  const cachePath = join(projectRoot, '.wwebjs_cache');
-  mkdirSync(sessionPath, { recursive: true });
-  mkdirSync(cachePath, { recursive: true });
   mkdirSync(join(projectRoot, 'src'), { recursive: true });
-  writeFileSync(join(sessionPath, 'session.bin'), 'credencial-de-sesion');
-  writeFileSync(join(cachePath, 'cache.bin'), 'cache');
   writeFileSync(join(projectRoot, '.env'), 'SECRETO=conservado');
   writeFileSync(join(projectRoot, 'package.json'), '{}');
-  writeFileSync(join(projectRoot, 'src', 'sentinel.ts'), 'export {};');
 
   const database = new AppDatabase(databasePath);
   database.migrate();
@@ -204,7 +155,6 @@ function createSubject(
   });
   database.checkpoint();
   writeFileSync(legacyDatabasePath, 'base-anterior');
-  writeFileSync(`${legacyDatabasePath}-wal`, 'wal-anterior');
 
   const { logger, entries: logEntries } = createCapturedLogger();
   const transientReset = vi.fn();
@@ -230,8 +180,6 @@ function createSubject(
     {
       projectRoot,
       databasePath,
-      sessionPath,
-      cachePath,
       now: () => new Date('2026-08-02T03:04:05.000Z'),
       resetTransientState: transientReset,
       ...(options.beforeStage === undefined ? {} : { beforeStage: options.beforeStage }),
@@ -239,14 +187,10 @@ function createSubject(
   );
   return {
     projectRoot,
-    databasePath,
     legacyDatabasePath,
-    sessionPath,
-    cachePath,
     database,
     client,
     manager,
-    discovery,
     service,
     transientReset,
     logEntries,
@@ -269,19 +213,4 @@ function createCapturedLogger(): { logger: Logger; entries: unknown[] } {
     } as unknown as Logger,
     entries,
   };
-}
-
-function findFiles(root: string): string[] {
-  if (!existsSync(root)) return [];
-  const files: string[] = [];
-  const pending = [root];
-  while (pending.length > 0) {
-    const current = pending.pop() as string;
-    for (const entry of readdirSync(current, { withFileTypes: true })) {
-      const path = join(current, entry.name);
-      if (entry.isDirectory()) pending.push(path);
-      else if (entry.isFile()) files.push(path);
-    }
-  }
-  return files;
 }

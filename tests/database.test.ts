@@ -9,7 +9,7 @@ describe('persistencia SQLite', () => {
     database.migrate();
     database.migrate();
     expect(database.getMigrationVersions()).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
     ]);
     expect(database.getBotProfile('neurobot')).toMatchObject({
       botName: 'Neurobot',
@@ -17,10 +17,10 @@ describe('persistencia SQLite', () => {
       communityGreetingMessage: expect.stringContaining('Soy Neurobot'),
     });
     expect(database.getBot('neurobot')).toMatchObject({
-      connectorType: 'WHATSAPP_WEB',
+      connectorType: 'WHATSAPP_CLOUD_API',
       operatingMode: 'COMMUNITY_GROUPS',
       connectorMigrationLocked: true,
-      lifecycleStatus: 'CONNECTED',
+      lifecycleStatus: 'UNLINKED',
       deletionLocked: true,
       capabilities: {
         communitySingleTurnMode: true,

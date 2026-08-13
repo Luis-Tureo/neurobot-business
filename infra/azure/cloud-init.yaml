@@ -1,0 +1,239 @@
+#cloud-config
+package_update: true
+package_upgrade: false
+
+packages:
+  - apt-transport-https
+  - build-essential
+  - ca-certificates
+  - curl
+  - debian-archive-keyring
+  - debian-keyring
+  - gnupg
+  - jq
+  - python3
+  - sqlite3
+  - tar
+  - ufw
+
+users:
+  - default
+  - name: neurobot
+    system: true
+    shell: /usr/sbin/nologin
+    homedir: /var/lib/neurobot
+    no_create_home: true
+
+write_files:
+  - path: /etc/systemd/system/neurobot.service
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Neurobot Business
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=simple
+      User=neurobot
+      Group=neurobot
+      WorkingDirectory=/var/lib/neurobot
+      Environment=NODE_ENV=production
+      Environment=NODE_OPTIONS=--max-old-space-size=512
+      EnvironmentFile=/etc/neurobot/neurobot.env
+      ExecStartPre=/usr/bin/test -f /opt/neurobot/current/dist/index.js
+      ExecStart=/usr/bin/node /opt/neurobot/current/dist/index.js
+      Restart=on-failure
+      RestartSec=5s
+      TimeoutStopSec=30s
+      StateDirectory=neurobot
+      StateDirectoryMode=0700
+      UMask=0077
+      NoNewPrivileges=true
+      PrivateDevices=true
+      PrivateTmp=true
+      ProtectControlGroups=true
+      ProtectHome=true
+      ProtectKernelModules=true
+      ProtectKernelTunables=true
+      ProtectSystem=strict
+      RestrictSUIDSGID=true
+      LockPersonality=true
+      CapabilityBoundingSet=
+      AmbientCapabilities=
+      LimitNOFILE=65536
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/caddy/Caddyfile
+    owner: root:root
+    permissions: '0644'
+    content: |
+      __PUBLIC_HOSTNAME__ {
+        encode zstd gzip
+        reverse_proxy 127.0.0.1:3001
+
+        header {
+          Strict-Transport-Security "max-age=31536000; includeSubDomains"
+          -Server
+        }
+
+        log {
+          output stdout
+          format filter {
+            request>uri query {
+              delete hub.verify_token
+            }
+            request>headers>X-Hub-Signature-256 delete
+            request>remote_ip ip_mask 24 48
+            request>client_ip ip_mask 24 48
+          }
+        }
+      }
+
+  - path: /usr/local/sbin/bootstrap-neurobot-host
+    owner: root:root
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      set -Eeuo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+
+      install -d -m 0755 /etc/apt/keyrings
+
+      if ! swapon --show=NAME --noheadings | grep -q .; then
+        fallocate --length 1G /swapfile
+        chmod 0600 /swapfile
+        mkswap /swapfile
+        swapon /swapfile
+        printf '%s\n' '/swapfile none swap sw 0 0' >> /etc/fstab
+      fi
+
+      curl --fail --silent --show-error --location \
+        https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor --yes --output /etc/apt/keyrings/nodesource.gpg
+      chmod 0644 /etc/apt/keyrings/nodesource.gpg
+      printf '%s\n' \
+        'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main' \
+        > /etc/apt/sources.list.d/nodesource.list
+
+      curl --fail --silent --show-error --location \
+        https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
+        | gpg --dearmor --yes --output /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+      chmod 0644 /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+      curl --fail --silent --show-error --location \
+        https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
+        --output /etc/apt/sources.list.d/caddy-stable.list
+      chmod 0644 /etc/apt/sources.list.d/caddy-stable.list
+
+      apt-get update
+      apt-get install --yes --no-install-recommends \
+        -o Dpkg::Options::="--force-confold" nodejs caddy
+
+      install -d -o neurobot -g neurobot -m 0700 /var/lib/neurobot/data
+      install -d -o neurobot -g neurobot -m 0700 /var/lib/neurobot/.npm
+      install -d -o root -g root -m 0755 /opt/neurobot/releases
+      install -d -o root -g neurobot -m 0750 /etc/neurobot
+
+      caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      systemctl daemon-reload
+      systemctl enable caddy
+      systemctl restart caddy
+      systemctl disable neurobot.service >/dev/null 2>&1 || true
+
+      ufw default deny incoming
+      ufw default allow outgoing
+      ufw allow OpenSSH
+      ufw allow 80/tcp
+      ufw allow 443/tcp
+      ufw --force enable
+      touch /var/lib/neurobot/.host-ready
+
+  - path: /usr/local/sbin/deploy-neurobot-release
+    owner: root:root
+    permissions: '0750'
+    content: |
+      #!/usr/bin/env bash
+      set -Eeuo pipefail
+
+      archive_path="${1:-}"
+      environment_path="${2:-}"
+      if [[ ! -f "$archive_path" || ! -f "$environment_path" ]]; then
+        echo 'Uso: deploy-neurobot-release <archivo.tgz> <entorno.env>' >&2
+        exit 2
+      fi
+
+      temporary_environment="$(mktemp)"
+      release_path=''
+      release_complete=false
+      cleanup() {
+        rm -f "$temporary_environment" "$archive_path" "$environment_path"
+        if [[ "$release_complete" != true && -n "$release_path" && -d "$release_path" ]]; then
+          rm -rf -- "$release_path"
+        fi
+      }
+      trap cleanup EXIT
+      sed 's/\r$//' "$environment_path" > "$temporary_environment"
+
+      required_variables=(
+        META_ACCESS_TOKEN
+        META_PHONE_NUMBER_ID
+        META_WABA_ID
+        META_APP_SECRET
+        META_WEBHOOK_VERIFY_TOKEN
+        APP_ENCRYPTION_KEY
+        PANEL_SESSION_SECRET
+        ANONYMIZATION_SECRET
+        GROQ_API_KEY
+      )
+      missing_variables=()
+      for variable_name in "${required_variables[@]}"; do
+        variable_value="$(sed -n "s/^${variable_name}=//p" "$temporary_environment" | head -n 1)"
+        if [[ -z "$variable_value" || "$variable_value" == reemplace-* ]]; then
+          missing_variables+=("$variable_name")
+        fi
+      done
+      if (( ${#missing_variables[@]} > 0 )); then
+        printf 'Faltan variables obligatorias: %s\n' "${missing_variables[*]}" >&2
+        exit 3
+      fi
+
+      release_name="$(date -u +%Y%m%dT%H%M%SZ)"
+      release_path="/opt/neurobot/releases/$release_name"
+      install -d -o neurobot -g neurobot -m 0750 "$release_path"
+      tar --extract --gzip --file "$archive_path" --directory "$release_path"
+      chown -R neurobot:neurobot "$release_path"
+
+      runuser --user neurobot -- bash -c \
+        "cd '$release_path' && HOME=/var/lib/neurobot npm_config_cache=/var/lib/neurobot/.npm npm ci --omit=dev --no-audit --no-fund"
+      test -f "$release_path/dist/index.js"
+      test -d "$release_path/public"
+
+      install -o root -g neurobot -m 0640 \
+        "$temporary_environment" /etc/neurobot/neurobot.env
+      ln -sfnT "$release_path" /opt/neurobot/current
+      ln -sfnT /opt/neurobot/current/public /var/lib/neurobot/public
+      release_complete=true
+
+      systemctl daemon-reload
+      systemctl enable neurobot.service
+      systemctl restart neurobot.service
+      systemctl reload caddy.service
+
+      for attempt in {1..30}; do
+        if curl --fail --silent --show-error \
+          http://127.0.0.1:3001/api/health | jq -e '.ok == true' >/dev/null; then
+          exit 0
+        fi
+        sleep 2
+      done
+
+      journalctl --unit neurobot.service --no-pager --lines 50 >&2
+      exit 4
+
+runcmd:
+  - /usr/local/sbin/bootstrap-neurobot-host
+
+final_message: 'Neurobot host bootstrap completed.'

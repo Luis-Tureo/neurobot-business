@@ -7,7 +7,6 @@ import { buildAdminServer } from './admin/server.js';
 import { loadEnvironment } from './config/environment.js';
 import { MaintenanceService } from './core/maintenance-service.js';
 import { MultiBotManager } from './core/multi-bot-manager.js';
-import { WhatsAppSessionManager } from './core/whatsapp-session-manager.js';
 import { createLogger } from './infrastructure/logger.js';
 import { serializeError } from './infrastructure/safe-error.js';
 import { AppDatabase } from './persistence/database.js';
@@ -19,7 +18,7 @@ async function main(): Promise<void> {
   const environment = loadEnvironment();
   if (await isApplicationAlreadyRunning(environment.panelHost, environment.panelPort)) {
     process.stdout.write(
-      `El panel ya estÃ¡ funcionando en http://${displayHost(environment.panelHost)}:${environment.panelPort}. No es necesario iniciar otra copia.\n`,
+      `El panel ya está funcionando en http://${displayHost(environment.panelHost)}:${environment.panelPort}. No es necesario iniciar otra copia.\n`,
     );
     return;
   }
@@ -38,7 +37,6 @@ async function main(): Promise<void> {
       menuType: bot.menuType,
     });
   }
-  database.setBotSessionPath('neurobot', environment.sessionPath);
   await ensureInitialAdministrator(database, environment.panelInitialPassword);
 
   const anonymizer = new Anonymizer(environment.anonymizationSecret);
@@ -50,14 +48,10 @@ async function main(): Promise<void> {
     environment.groqModel,
     environment.aiProvider,
   );
-  const sessionManager = new WhatsAppSessionManager(
-    resolve(process.cwd(), 'data', 'whatsapp-sessions'),
-  );
   let maintenance: MaintenanceService | null = null;
   const multiBotManager = new MultiBotManager(
     database,
     aiProviders,
-    sessionManager,
     anonymizer,
     logger,
     {
@@ -70,10 +64,8 @@ async function main(): Promise<void> {
       secretVault: vault,
       mediaRoot: resolve(process.cwd(), 'data', 'media'),
       isPaused: () => maintenance?.isRunning() ?? false,
-      ...(environment.chromeExecutablePath === undefined
-        ? {}
-        : { chromeExecutablePath: environment.chromeExecutablePath }),
     },
+    environment.metaWhatsApp,
   );
   await multiBotManager.prepareAll();
   const client = multiBotManager.client('neurobot');
@@ -91,7 +83,6 @@ async function main(): Promise<void> {
     {
       projectRoot: process.cwd(),
       databasePath: environment.databasePath,
-      sessionPath: environment.sessionPath,
       resetTransientState: () => multiBotManager.resetTransientState(),
     },
   );
@@ -132,7 +123,14 @@ async function main(): Promise<void> {
     multiBotManager,
     aiProviderFactory: aiProviders,
     secretVault: vault,
-    sessionManager,
+    metaWebhook: {
+      ...(environment.metaWhatsApp.appSecret === undefined
+        ? {}
+        : { appSecret: environment.metaWhatsApp.appSecret }),
+      ...(environment.metaWhatsApp.webhookVerifyToken === undefined
+        ? {}
+        : { verifyToken: environment.metaWhatsApp.webhookVerifyToken }),
+    },
   });
 
   await server.listen({ host: environment.panelHost, port: environment.panelPort });

@@ -10,7 +10,7 @@ describe('interfaz de mantenimiento', () => {
     expect(html).toContain('id="section-maintenance"');
     expect(html).toContain('Zona de peligro');
     expect(html).toContain('Restablecer bot de fábrica');
-    expect(html).toContain('Desvincular solamente WhatsApp');
+    expect(html).not.toContain('Desvincular solamente WhatsApp');
   });
 
   it('exige frase, contraseña, casilla y elección de nueva contraseña', () => {
@@ -20,7 +20,7 @@ describe('interfaz de mantenimiento', () => {
     expect(html).toContain('name="passwordChoice"');
     expect(html).toContain('name="newPassword"');
     expect(script).toContain("phrase: 'RESTABLECER BOT'");
-    expect(script).toContain("phrase: 'DESVINCULAR WHATSAPP'");
+    expect(script).not.toContain("phrase: 'DESVINCULAR WHATSAPP'");
     expect(script).toContain('disabled = !operationValid');
   });
 

@@ -71,8 +71,7 @@ describe('banco y selección de encuestas', () => {
     const { database, repository, selector } = createSubject();
     try {
       const other = database.createBot({
-        id: 'comunidad-alternativa', mode: 'mixed', connectorType: 'WHATSAPP_WEB',
-        sessionPath: 'data/sessions/comunidad-alternativa',
+        id: 'comunidad-alternativa', mode: 'mixed', connectorType: 'WHATSAPP_CLOUD_API',
         profile: createProfileFromPreset({ organizationName: 'Comunidad alternativa', botName: 'Bot alternativo',
           organizationType: 'Comunidad', timezone: 'America/Santiago', preset: 'community' }),
       });

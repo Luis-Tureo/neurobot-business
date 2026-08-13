@@ -91,7 +91,7 @@ const SECTION_GUIDES = {
   },
   whatsapp: {
     eyebrow: 'Conexión principal',
-    description: 'Comprueba el número conectado y el estado actual de la sesión.',
+    description: 'Comprueba el número configurado y el estado actual del conector.',
     actions: [{ label: 'Revisar estado', target: '#whatsapp-cards' }],
   },
   profile: {

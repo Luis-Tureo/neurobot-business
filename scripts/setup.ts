@@ -11,19 +11,16 @@ type EnvironmentEntry = {
 };
 
 const destination = resolve(process.cwd(), '.env');
+const deprecatedKeys = new Set(['WHATSAPP_SESSION_PATH', 'CHROME_EXECUTABLE_PATH']);
 
 const entries: EnvironmentEntry[] = [
+  { key: 'NODE_ENV', createValue: () => 'development' },
   { key: 'PANEL_HOST', createValue: () => '127.0.0.1' },
   { key: 'PANEL_PORT', createValue: () => '3001', replaceValues: ['3000'] },
   {
     key: 'DATABASE_PATH',
     createValue: () => './data/asistente-negocio.db',
     replaceValues: ['./data/asistente.db'],
-  },
-  {
-    key: 'WHATSAPP_SESSION_PATH',
-    createValue: () => './data/whatsapp-session-negocio',
-    replaceValues: ['./data/whatsapp-session'],
   },
   { key: 'LOG_LEVEL', createValue: () => 'info' },
   {
@@ -46,7 +43,14 @@ const entries: EnvironmentEntry[] = [
   { key: 'MAX_RECONNECT_ATTEMPTS', createValue: () => '8' },
   { key: 'MAX_RECONNECT_DELAY_SECONDS', createValue: () => '300' },
   { key: 'DEVELOPMENT_MODE', createValue: () => 'false' },
-  { key: 'CHROME_EXECUTABLE_PATH', createValue: () => '' },
+  { key: 'META_ACCESS_TOKEN', createValue: () => '' },
+  { key: 'META_PHONE_NUMBER_ID', createValue: () => '' },
+  { key: 'META_WABA_ID', createValue: () => '' },
+  { key: 'META_APP_SECRET', createValue: () => '' },
+  { key: 'META_WEBHOOK_VERIFY_TOKEN', createValue: () => '' },
+  { key: 'META_GRAPH_API_VERSION', createValue: () => 'v25.0' },
+  { key: 'META_REQUEST_TIMEOUT_MS', createValue: () => '10000' },
+  { key: 'META_WHATSAPP_ACCOUNTS_JSON', createValue: () => '' },
   { key: 'AI_PROVIDER', createValue: () => 'groq' },
   { key: 'GROQ_API_KEY', createValue: () => '' },
   { key: 'GROQ_MODEL', createValue: () => 'llama-3.1-8b-instant' },
@@ -91,8 +95,13 @@ async function main(): Promise<void> {
   }
 
   const current = await readFile(destination, 'utf8');
-  const lines = current.replace(/\r\n/gu, '\n').split('\n');
+  const originalLines = current.replace(/\r\n/gu, '\n').split('\n');
+  const lines = originalLines.filter((line) => {
+    const key = line.slice(0, line.indexOf('=')).trim();
+    return !deprecatedKeys.has(key);
+  });
   const changedKeys: string[] = [];
+  const removedDeprecatedConfiguration = lines.length !== originalLines.length;
 
   for (const entry of entries) {
     const index = findEntryIndex(lines, entry.key);
@@ -108,7 +117,7 @@ async function main(): Promise<void> {
     }
   }
 
-  if (changedKeys.length === 0) {
+  if (changedKeys.length === 0 && !removedDeprecatedConfiguration) {
     process.stdout.write('El archivo .env ya está completo; no se modificó.\n');
     return;
   }
@@ -119,7 +128,9 @@ async function main(): Promise<void> {
     mode: 0o600,
   });
   process.stdout.write(
-    `Se reparó el archivo .env. Variables agregadas o regeneradas: ${changedKeys.join(', ')}.\n`,
+    `Se reparó el archivo .env. Variables agregadas o regeneradas: ${changedKeys.join(', ') || 'ninguna'}${
+      removedDeprecatedConfiguration ? '; configuración obsoleta retirada' : ''
+    }.\n`,
   );
 }
 

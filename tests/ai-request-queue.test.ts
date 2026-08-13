@@ -127,7 +127,7 @@ describe('cola de solicitudes de IA por asistente', () => {
   it('mantiene colas independientes por asistente', async () => {
     const community = new AIRequestQueueService(database, createLogger('silent'), 'neurobot');
     const otherBot = database.createBot({
-      id: 'otro-asistente-cola', mode: 'business', sessionPath: 'data/sessions/otro-asistente-cola',
+      id: 'otro-asistente-cola', mode: 'business',
       profile: database.getBotProfile('neurobot'),
     });
     const business = new AIRequestQueueService(database, createLogger('silent'), otherBot.id);

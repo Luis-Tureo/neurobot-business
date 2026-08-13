@@ -36,7 +36,7 @@ describe('interfaz empresarial simplificada', () => {
     expect(panel).toContain('groupsEnabled: false');
     expect(panel).toContain('privateMessagesEnabled: true');
     expect(panel).toContain('realMentionRequired: false');
-    expect(panel).toContain("payload.connectorType = 'WHATSAPP_WEB'");
+    expect(panel).toContain("payload.connectorType = 'WHATSAPP_CLOUD_API'");
   });
 
   it('carga datos actualizados sin exigir Ctrl más F5', () => {

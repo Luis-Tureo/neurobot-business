@@ -6,6 +6,10 @@ import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { SecretVault } from '../src/security/secret-vault.js';
 import { PollRepository } from '../src/core/poll-repository.js';
+import { AIProviderFactory } from '../src/ai/ai-provider-factory.js';
+import { MultiBotManager } from '../src/core/multi-bot-manager.js';
+import { WhatsAppCloudApiAdapter } from '../src/messaging/whatsapp-cloud-api-adapter.js';
+import { Anonymizer } from '../src/security/anonymizer.js';
 
 function storeProfile(name: string) {
   return createProfileFromPreset({
@@ -28,10 +32,9 @@ describe('aislamiento multibot', () => {
   afterEach(() => database.close());
 
   it('crea dos bots con perfiles, sesiones, menús y datos independientes', () => {
-    const first = database.createBot({ id: 'tienda-uno', mode: 'business', sessionPath: 'data/sessions/uno', profile: storeProfile('Uno') });
-    const second = database.createBot({ id: 'tienda-dos', mode: 'mixed', sessionPath: 'data/sessions/dos', profile: storeProfile('Dos') });
+    const first = database.createBot({ id: 'tienda-uno', mode: 'business', profile: storeProfile('Uno') });
+    const second = database.createBot({ id: 'tienda-dos', mode: 'mixed', profile: storeProfile('Dos') });
 
-    expect(first.sessionPath).not.toBe(second.sessionPath);
     expect(first.clientId).not.toBe(second.clientId);
     expect(first).toMatchObject({
       connectorType: 'WHATSAPP_CLOUD_API',
@@ -48,8 +51,8 @@ describe('aislamiento multibot', () => {
   });
 
   it('no permite leer conocimiento, catálogo ni solicitudes de otro bot', () => {
-    const first = database.createBot({ id: 'tienda-uno', mode: 'business', sessionPath: 'data/sessions/uno', profile: storeProfile('Uno') });
-    const second = database.createBot({ id: 'tienda-dos', mode: 'business', sessionPath: 'data/sessions/dos', profile: storeProfile('Dos') });
+    const first = database.createBot({ id: 'tienda-uno', mode: 'business', profile: storeProfile('Uno') });
+    const second = database.createBot({ id: 'tienda-dos', mode: 'business', profile: storeProfile('Dos') });
     const category = database.saveCatalogCategory({ botId: first.id, name: 'Productos', description: '', enabled: true });
     database.saveCatalogItem({
       id: 0,
@@ -87,7 +90,7 @@ describe('aislamiento multibot', () => {
   });
 
   it('selecciona opciones por número, nombre y alias', () => {
-    const bot = database.createBot({ id: 'tienda-menu', mode: 'business', sessionPath: 'data/sessions/menu', profile: storeProfile('Menú') });
+    const bot = database.createBot({ id: 'tienda-menu', mode: 'business', profile: storeProfile('Menú') });
     const menu = database.listMenus(bot.id)[0];
     const options = database.listMenuOptions(bot.id, menu?.id);
     expect(selectOption(options, '1')?.label).toBe('Productos o servicios');
@@ -96,7 +99,7 @@ describe('aislamiento multibot', () => {
   });
 
   it('usa fallback numerado y mantiene un estado temporal sin conversación completa', async () => {
-    const bot = database.createBot({ id: 'tienda-flujo', mode: 'business', sessionPath: 'data/sessions/flujo', profile: storeProfile('Flujo'), menuType: 'automatic' });
+    const bot = database.createBot({ id: 'tienda-flujo', mode: 'business', profile: storeProfile('Flujo'), menuType: 'automatic' });
     const client = new SimulatedMessagingClient();
     const flow = new ConversationFlowService(database, client, createLogger('silent'), bot.id, 'data/media');
     await flow.start('chat@c.us', 'chat-hash', 'user-hash', new Date('2026-08-02T12:00:00Z'));
@@ -107,7 +110,7 @@ describe('aislamiento multibot', () => {
   });
 
   it('no inventa precios ausentes', () => {
-    const bot = database.createBot({ id: 'tienda-precio', mode: 'business', sessionPath: 'data/sessions/precio', profile: storeProfile('Precio') });
+    const bot = database.createBot({ id: 'tienda-precio', mode: 'business', profile: storeProfile('Precio') });
     const category = database.saveCatalogCategory({ botId: bot.id, name: 'General', description: '', enabled: true });
     const item = database.saveCatalogItem({
       id: 0, botId: bot.id, categoryId: category.id, name: 'Servicio', code: 'SERV-1', description: '',
@@ -118,8 +121,8 @@ describe('aislamiento multibot', () => {
   });
 
   it('mantiene automatizaciones y encuestas separadas por bot', () => {
-    const first = database.createBot({ id: 'tienda-auto-uno', mode: 'business', sessionPath: 'data/sessions/auto-uno', profile: storeProfile('Auto Uno') });
-    const second = database.createBot({ id: 'tienda-auto-dos', mode: 'business', sessionPath: 'data/sessions/auto-dos', profile: storeProfile('Auto Dos') });
+    const first = database.createBot({ id: 'tienda-auto-uno', mode: 'business', profile: storeProfile('Auto Uno') });
+    const second = database.createBot({ id: 'tienda-auto-dos', mode: 'business', profile: storeProfile('Auto Dos') });
     const firstAutomatic = database.getAutomaticMessageConfiguration(first.id);
     firstAutomatic.welcome.template = 'Bienvenida exclusiva del primer asistente.';
     firstAutomatic.welcome.enabled = true;
@@ -146,8 +149,8 @@ describe('aislamiento multibot', () => {
   });
 
   it('aplica el presupuesto global entre bots sin mezclar sus consumos', () => {
-    const first = database.createBot({ id: 'tienda-ia-uno', mode: 'business', sessionPath: 'data/sessions/ia-uno', profile: storeProfile('IA Uno') });
-    const second = database.createBot({ id: 'tienda-ia-dos', mode: 'business', sessionPath: 'data/sessions/ia-dos', profile: storeProfile('IA Dos') });
+    const first = database.createBot({ id: 'tienda-ia-uno', mode: 'business', profile: storeProfile('IA Uno') });
+    const second = database.createBot({ id: 'tienda-ia-dos', mode: 'business', profile: storeProfile('IA Dos') });
     database.saveGlobalAILimits({
       dailyRequestLimit: 1,
       monthlyRequestLimit: 10,
@@ -176,5 +179,124 @@ describe('aislamiento multibot', () => {
     });
     expect(database.getAIUsageSummary(first.profileId, '2026-08-02', '2026-08').requests).toBe(0);
     expect(database.getAIUsageSummary(second.profileId, '2026-08-02', '2026-08').requests).toBe(0);
+  });
+
+  it('enruta un webhook por phone_number_id al asistente correcto y responde por su Graph API', async () => {
+    const second = database.createBot({
+      id: 'tienda-meta-dos',
+      mode: 'business',
+      profile: storeProfile('Meta Dos'),
+    });
+    const requests = new Map<string, Array<{ url: string; body: unknown }>>();
+    const adapters = new Map<string, WhatsAppCloudApiAdapter>();
+    const accounts = [
+      {
+        botId: 'neurobot',
+        accessToken: 'token-neurobot-de-prueba-123456789',
+        phoneNumberId: '111111111111111',
+        wabaId: '999999999999991',
+      },
+      {
+        botId: second.id,
+        accessToken: 'token-segundo-de-prueba-1234567890',
+        phoneNumberId: '222222222222222',
+        wabaId: '999999999999992',
+      },
+    ];
+    const logger = createLogger('silent');
+    const manager = new MultiBotManager(
+      database,
+      new AIProviderFactory(
+        database,
+        new SecretVault(undefined),
+        undefined,
+        'llama-3.1-8b-instant',
+        'disabled',
+      ),
+      new Anonymizer('a'.repeat(32)),
+      logger,
+      {
+        maxMessageLength: 2_000,
+        repeatWindowMs: 120_000,
+        maxReconnectAttempts: 1,
+        maxReconnectDelayMs: 10,
+        developmentMode: false,
+        mediaRoot: 'data/media',
+      },
+      { apiVersion: 'v25.0', requestTimeoutMs: 1_000, accounts },
+      (bot, account) => {
+        if (account?.accessToken === undefined || account.phoneNumberId === undefined) {
+          throw new Error('Cuenta de prueba incompleta.');
+        }
+        const botRequests: Array<{ url: string; body: unknown }> = [];
+        requests.set(bot.id, botRequests);
+        const adapter = new WhatsAppCloudApiAdapter(
+          {
+            accessToken: account.accessToken,
+            phoneNumberId: account.phoneNumberId,
+            ...(account.wabaId === undefined ? {} : { wabaId: account.wabaId }),
+            apiVersion: 'v25.0',
+          },
+          logger,
+          async (input, init) => {
+            botRequests.push({
+              url: String(input),
+              body: JSON.parse(String(init?.body)) as unknown,
+            });
+            return new Response(JSON.stringify({ messages: [{ id: `wamid.${bot.id}` }] }), {
+              status: 200,
+            });
+          },
+        );
+        adapters.set(bot.id, adapter);
+        return adapter;
+      },
+    );
+
+    await manager.prepareAll();
+    await manager.startAll();
+    const firstIngest = vi.spyOn(adapters.get('neurobot')!, 'ingestWebhook');
+    const secondIngest = vi.spyOn(adapters.get(second.id)!, 'ingestWebhook');
+    const payload = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          changes: [
+            {
+              field: 'messages',
+              value: {
+                metadata: { phone_number_id: '222222222222222' },
+                messages: [
+                  {
+                    id: 'wamid.inbound.second',
+                    from: '56912345678',
+                    timestamp: '1786550400',
+                    type: 'text',
+                    text: { body: 'Hola' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    await expect(
+      manager.ingestMetaWebhook(
+        '222222222222222',
+        payload,
+        new Set(['message:wamid.inbound.second']),
+      ),
+    ).resolves.toMatchObject({ messages: 1 });
+    expect(firstIngest).not.toHaveBeenCalled();
+    expect(secondIngest).toHaveBeenCalledTimes(1);
+    expect(requests.get('neurobot')).toHaveLength(0);
+    expect(requests.get(second.id)).toHaveLength(1);
+    expect(requests.get(second.id)?.[0]).toMatchObject({
+      url: 'https://graph.facebook.com/v25.0/222222222222222/messages',
+      body: { to: '56912345678' },
+    });
+    await manager.stopAll();
   });
 });

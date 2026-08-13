@@ -25,8 +25,7 @@ const state = {
 const connectionLabels = {
   disconnected: 'Desconectado',
   initializing: 'Inicializando',
-  waiting_qr: 'Esperando código QR',
-  authenticated: 'Sesión autenticada',
+  authenticated: 'Autenticado con Meta',
   loading_chats: 'Cargando grupos',
   connected: 'Conectado',
   auth_failure: 'Fallo de autenticación',
@@ -369,76 +368,6 @@ function yesNoUnknown(value) {
   return value === null ? 'Pendiente' : yesNo(value);
 }
 
-document.querySelector('#refresh-groups').addEventListener('click', async () => {
-  const button = document.querySelector('#refresh-groups');
-  button.disabled = true;
-  button.textContent = 'Actualizando…';
-  try {
-    const result = await api('/api/groups/refresh', { method: 'POST' });
-    await loadGroups();
-    if (result.discovery.state === 'failed') {
-      showNotice(`No se pudo completar la carga: ${result.discovery.lastErrorCode}.`, true);
-    } else {
-      const summary = result.summary;
-      showNotice(
-        summary
-          ? `${summary.active} activos · ${summary.discovered} nuevos · ${summary.archived} archivados · ${summary.missing} ausentes · ${summary.withoutAuthorizedAdmin} sin administración autorizada · ${summary.temporaryErrors} errores temporales.`
-          : `${result.detected} grupo(s) detectado(s).`,
-      );
-    }
-  } catch (error) {
-    showNotice(error.message, true);
-  } finally {
-    button.disabled = false;
-    button.textContent = 'Actualizar lista';
-  }
-});
-
-document.querySelector('#preview-group-cleanup').addEventListener('click', async () => {
-  try {
-    const preview = await api('/api/groups/cleanup-preview');
-    renderCleanupPreview(preview);
-  } catch (error) {
-    showNotice(error.message, true);
-  }
-});
-
-document.querySelector('#run-group-cleanup').addEventListener('click', async () => {
-  try {
-    const preview = await api('/api/groups/cleanup-preview');
-    renderCleanupPreview(preview);
-    const description = `${preview.archiveCandidates.length} registro(s) se archivarán y ${preview.deleteCandidates.length} podrían eliminarse.`;
-    if (!window.confirm(`${description} ¿Confirmas la limpieza segura?`)) return;
-    const deleteExpired =
-      preview.deleteCandidates.length > 0 &&
-      window.confirm('¿Eliminar también los registros cuya retención ya venció?');
-    const result = await api('/api/groups/cleanup', {
-      method: 'POST',
-      body: JSON.stringify({ confirmed: true, deleteExpired }),
-    });
-    await loadGroups();
-    showNotice(
-      `Limpieza completada: ${result.archived} archivados, ${result.deleted} eliminados y ${result.orphanedSchedules} estados huérfanos retirados.`,
-    );
-  } catch (error) {
-    showNotice(error.message, true);
-  }
-});
-
-function renderCleanupPreview(preview) {
-  const target = document.querySelector('#group-cleanup-preview');
-  target.replaceChildren();
-  const sections = [
-    ['Para archivar', preview.archiveCandidates],
-    ['Para eliminar', preview.deleteCandidates],
-  ];
-  sections.forEach(([label, groups]) => {
-    target.append(listItem(label, `${groups.length} registro(s)`));
-    groups.forEach((group) => {
-      target.append(listItem(group.name, `ID anónimo: ${group.key}`));
-    });
-  });
-}
 async function loadCommands() {
   const result = await api('/api/commands');
   state.commands = result.commands;
@@ -682,7 +611,7 @@ const automaticTemplateDefinitions = [
   { field: 'rules_template', key: 'rules', maxLines: 8 },
 ];
 
-initializeAutomaticTemplateTools();
+if (automaticMessagesForm) initializeAutomaticTemplateTools();
 
 async function loadAutomaticMessages() {
   const result = await api(botScopedPath('/api/automatic-messages'));
@@ -778,10 +707,10 @@ async function loadAutomaticMessages() {
   updateAutomaticTemplateMetrics();
 }
 
-automaticMessagesForm.addEventListener('input', updateAutomaticPreviews);
-automaticMessagesForm.addEventListener('input', updateAutomaticTemplateMetrics);
+automaticMessagesForm?.addEventListener('input', updateAutomaticPreviews);
+automaticMessagesForm?.addEventListener('input', updateAutomaticTemplateMetrics);
 
-automaticMessagesForm.addEventListener('submit', async (event) => {
+automaticMessagesForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const payload = {
@@ -1281,7 +1210,7 @@ function openPollTemplateEditor(template = null) {
   pollTemplateForm.elements.question.focus();
 }
 
-pollConfigurationForm.addEventListener('submit', async (event) => {
+pollConfigurationForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   try {
@@ -1304,13 +1233,13 @@ pollConfigurationForm.addEventListener('submit', async (event) => {
 
 document
   .querySelector('#new-poll-template')
-  .addEventListener('click', () => openPollTemplateEditor());
+  ?.addEventListener('click', () => openPollTemplateEditor());
 document
   .querySelector('#cancel-poll-template')
-  .addEventListener('click', () => pollTemplateForm.classList.add('hidden'));
-pollTemplateForm.addEventListener('input', updatePollTemplatePreview);
+  ?.addEventListener('click', () => pollTemplateForm.classList.add('hidden'));
+pollTemplateForm?.addEventListener('input', updatePollTemplatePreview);
 
-pollTemplateForm.addEventListener('submit', async (event) => {
+pollTemplateForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const id = form.elements.id.value ? Number(form.elements.id.value) : undefined;
@@ -1343,7 +1272,7 @@ pollTemplateForm.addEventListener('submit', async (event) => {
   }
 });
 
-document.querySelector('#restore-poll-defaults').addEventListener('click', async () => {
+document.querySelector('#restore-poll-defaults')?.addEventListener('click', async () => {
   const assistantName =
     state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
   if (
@@ -1367,8 +1296,8 @@ document.querySelector('#restore-poll-defaults').addEventListener('click', async
   }
 });
 
-pollTestForm.addEventListener('input', updatePollTestPreview);
-pollTestForm.addEventListener('submit', async (event) => {
+pollTestForm?.addEventListener('input', updatePollTestPreview);
+pollTestForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const groupName = form.elements.groupKey.selectedOptions[0]?.textContent || 'el grupo';
@@ -1397,7 +1326,7 @@ pollTestForm.addEventListener('submit', async (event) => {
   }
 });
 
-pollOverrideForm.addEventListener('submit', async (event) => {
+pollOverrideForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   try {
@@ -1454,34 +1383,24 @@ const maintenanceConfigurations = {
     endpoint: '/api/admin/maintenance/factory-reset',
     title: 'Restablecer bot de fábrica',
     description:
-      'Se creará una copia de seguridad y luego se eliminarán la vinculación y las configuraciones locales del chatbot.',
-  },
-  unlink: {
-    phrase: 'DESVINCULAR WHATSAPP',
-    endpoint: '/api/admin/maintenance/unlink-whatsapp',
-    title: 'Desvincular solamente WhatsApp',
-    description:
-      'Se eliminarán la sesión y la caché de WhatsApp. La base de datos y sus configuraciones se conservarán.',
+      'Se eliminará la base de datos local y se restaurará la configuración inicial. Las credenciales de Meta permanecen en el entorno.',
   },
 };
 const maintenanceStageOrder = [
   'verifying_authorization',
-  'stopping_whatsapp',
+  'stopping_messaging',
   'closing_database',
   'deleting_previous_state',
   'creating_database',
   'restoring_defaults',
   'restarting_services',
-  'waiting_qr',
+  'ready',
   'finished',
 ];
 
 document
   .querySelector('#open-factory-reset')
   .addEventListener('click', () => openMaintenanceDialog('factory'));
-document
-  .querySelector('#open-unlink-whatsapp')
-  .addEventListener('click', () => openMaintenanceDialog('unlink'));
 
 function openMaintenanceDialog(kind) {
   if (state.maintenanceBusy) return;
@@ -1504,10 +1423,7 @@ function openMaintenanceDialog(kind) {
   document.querySelector('#close-maintenance-result').classList.add('hidden');
   document.querySelectorAll('#maintenance-progress li').forEach((item) => {
     item.classList.remove('active', 'complete', 'failed');
-    const unlinkHidden =
-      kind === 'unlink' &&
-      ['closing_database', 'creating_database', 'restoring_defaults'].includes(item.dataset.stage);
-    item.classList.toggle('hidden', unlinkHidden);
+    item.classList.remove('hidden');
   });
   validateMaintenanceForm();
   maintenanceDialog.showModal();
@@ -1607,12 +1523,9 @@ async function pollMaintenance(operationId) {
       if (snapshot.result === 'running' || snapshot.result === 'idle') continue;
       setMaintenanceBusy(false);
       const successful = snapshot.result === 'completed';
-      const rolledBack = snapshot.result === 'rolled_back';
       document.querySelector('#maintenance-progress-message').textContent = successful
-        ? 'La operación terminó correctamente. Revise la consola para vincular WhatsApp mediante QR.'
-        : rolledBack
-          ? 'La operación falló y el estado anterior fue restaurado automáticamente.'
-          : 'La operación no pudo completarse. El panel permanece disponible para diagnóstico.';
+        ? 'La operación terminó correctamente. La configuración de Meta se conserva en el entorno.'
+        : 'La operación no pudo completarse. El panel permanece disponible para diagnóstico.';
       document.querySelector('#maintenance-result-code').textContent = snapshot.code
         ? `Código técnico: ${snapshot.code}`
         : '';
@@ -1723,8 +1636,10 @@ window.addEventListener('bot-services-load', (event) => {
   state.selectedBotTimezone = event.detail.timezone;
   const visibleModules = new Set(event.detail.visibleModules || []);
   const loaders = [];
-  if (visibleModules.has('automatic-messages')) loaders.push(loadAutomaticMessages());
-  if (visibleModules.has('polls')) loaders.push(loadPolls());
+  if (visibleModules.has('automatic-messages') && automaticMessagesForm) {
+    loaders.push(loadAutomaticMessages());
+  }
+  if (visibleModules.has('polls') && pollConfigurationForm) loaders.push(loadPolls());
   void Promise.all(loaders).catch((error) => {
     showNotice(error.message, true);
   });

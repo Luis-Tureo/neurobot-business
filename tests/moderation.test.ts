@@ -168,7 +168,7 @@ describe('incidentes y advertencias locales', () => {
 });
 
 function createBot(database: AppDatabase,id: string,mode: 'community'|'business'|'mixed') {
-  return database.createBot({id,mode,sessionPath:`data/sessions/${id}`,profile:createProfileFromPreset({organizationName:id,botName:'Bot',organizationType:mode==='community'?'Comunidad':'Tienda',timezone:'America/Santiago',preset:mode==='community'?'community':'store'})});
+  return database.createBot({id,mode,profile:createProfileFromPreset({organizationName:id,botName:'Bot',organizationType:mode==='community'?'Comunidad':'Tienda',timezone:'America/Santiago',preset:mode==='community'?'community':'store'})});
 }
 
 function ruleInput(name: string,conditionType: string,value: string,score: number): Omit<ModerationRule,'id'|'assistantId'|'createdAt'|'updatedAt'> {
