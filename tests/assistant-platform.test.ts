@@ -22,7 +22,7 @@ describe('Neurobot Business', () => {
     const modules = new AssistantModuleVisibilityService().visibleModules(business);
     expect(modules).toEqual(expect.arrayContaining(['menus', 'catalog', 'hours', 'requests']));
     expect(modules).not.toEqual(
-      expect.arrayContaining(['polls', 'moderation', 'automatic-messages']),
+      expect.arrayContaining(['polls', 'moderation', 'automatic-messages', 'maintenance']),
     );
     database.close();
   });
@@ -46,14 +46,17 @@ describe('Neurobot Business', () => {
   it('mantiene el panel orientado al negocio', () => {
     const html = readFileSync('public/index.html', 'utf8');
     const panel = readFileSync('public/multibot-panel.js', 'utf8');
+    const apiClient = readFileSync('public/js/api-client.js', 'utf8');
     expect(html).toContain('<title>Neurobot Business</title>');
-    expect(html).toContain('<summary>Información del negocio</summary>');
-    expect(html).toContain('<summary>Atención automática</summary>');
-    expect(html).toContain('<summary>Atención humana</summary>');
-    expect(html).not.toContain('<option value="polls"');
-    expect(html).not.toContain('<option value="moderation"');
-    expect(panel).toContain("cache: 'no-store'");
+    for (const group of ['Panel general', 'General', 'Negocio', 'Automatización', 'Operación']) {
+      expect(html).toContain(group);
+    }
+    expect(html).toContain('data-section="test-center"');
+    expect(html).toContain('data-section="history"');
+    expect(html).not.toContain('data-section="system"');
+    expect(html).not.toContain('data-section="maintenance"');
+    expect(apiClient).toContain("cache: 'no-store'");
     expect(panel).toContain('groupsEnabled: false');
-    expect(panel).not.toContain("node('p', bot.organizationName || 'Sin organización', 'bot-org')");
+    expect(panel).toContain("connectorType: 'WHATSAPP_CLOUD_API'");
   });
 });

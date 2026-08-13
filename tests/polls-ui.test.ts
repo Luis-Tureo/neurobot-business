@@ -1,19 +1,16 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 
 describe('Neurobot Business sin encuestas comunitarias', () => {
-  const html = readFileSync(resolve('public', 'index.html'), 'utf8');
-  const panel = readFileSync(resolve('public', 'multibot-panel.js'), 'utf8');
-  const friendly = readFileSync(resolve('public', 'friendly-panel.js'), 'utf8');
-  const server = readFileSync(resolve('src', 'admin', 'server.ts'), 'utf8');
-  const index = readFileSync(resolve('src', 'index.ts'), 'utf8');
+  const html = readFileSync('public/index.html', 'utf8');
+  const panel = readFileSync('public/multibot-panel.js', 'utf8');
+  const server = readFileSync('src/admin/server.ts', 'utf8');
+  const index = readFileSync('src/index.ts', 'utf8');
 
   it('no ofrece encuestas en la navegación empresarial', () => {
-    expect(html).not.toContain('<option value="polls"');
-    expect(friendly).not.toContain("label: 'Encuestas'");
-    expect(friendly).not.toContain('Participación de la comunidad');
+    expect(html).not.toContain('data-section="polls"');
+    expect(html).not.toContain('Participación de la comunidad');
     expect(panel).toContain(
-      "!['automatic-messages', 'polls', 'moderation'].includes(module)",
+      "!['automatic-messages', 'polls', 'moderation', 'maintenance'].includes(module)",
     );
   });
 

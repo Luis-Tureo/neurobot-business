@@ -1,35 +1,29 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 
-describe('interfaz de mantenimiento', () => {
-  const html = readFileSync(resolve('public', 'index.html'), 'utf8');
-  const script = readFileSync(resolve('public', 'app.js'), 'utf8');
+describe('panel empresarial sin mantenimiento visible', () => {
+  const html = readFileSync('public/index.html', 'utf8');
+  const app = readFileSync('public/app.js', 'utf8');
+  const panel = readFileSync('public/multibot-panel.js', 'utf8');
+  const visibility = readFileSync('src/core/assistant-module-visibility-service.ts', 'utf8');
+  const server = readFileSync('src/admin/server.ts', 'utf8');
 
-  it('muestra la Zona de peligro fuera de la página principal', () => {
-    expect(html).toContain('data-section="maintenance"');
-    expect(html).toContain('id="section-maintenance"');
-    expect(html).toContain('Zona de peligro');
-    expect(html).toContain('Restablecer bot de fábrica');
-    expect(html).not.toContain('Desvincular solamente WhatsApp');
+  it('elimina por completo la interfaz de mantenimiento', () => {
+    expect(html).not.toContain('data-section="maintenance"');
+    expect(html).not.toContain('id="section-maintenance"');
+    expect(html).not.toContain('Zona de peligro');
+    expect(html).not.toContain('Restablecer bot de fábrica');
+    expect(app).not.toContain('/api/admin/maintenance');
+    expect(panel).not.toContain('/api/admin/maintenance');
   });
 
-  it('exige frase, contraseña, casilla y elección de nueva contraseña', () => {
-    expect(html).toContain('name="currentPassword"');
-    expect(html).toContain('name="confirmation"');
-    expect(html).toContain('name="understood"');
-    expect(html).toContain('name="passwordChoice"');
-    expect(html).toContain('name="newPassword"');
-    expect(script).toContain("phrase: 'RESTABLECER BOT'");
-    expect(script).not.toContain("phrase: 'DESVINCULAR WHATSAPP'");
-    expect(script).toContain('disabled = !operationValid');
+  it('no publica mantenimiento como módulo del asistente', () => {
+    expect(visibility).not.toContain("| 'maintenance'");
+    expect(visibility).not.toContain("'maintenance',");
   });
 
-  it('presenta progreso, bloquea el cierre crítico y redirige al login', () => {
-    expect(html).toContain('id="maintenance-progress"');
-    expect(html).toContain('No cierre esta ventana');
-    expect(script).toContain("maintenanceDialog.addEventListener('cancel'");
-    expect(script).toContain("window.addEventListener('beforeunload'");
-    expect(script).toContain('/api/admin/maintenance/status?operationId=');
-    expect(script).toContain('authenticated(false)');
+  it('conserva el mecanismo interno que protege operaciones del servidor', () => {
+    expect(server).toContain('context.maintenance?.isRunning()');
+    expect(server).toContain("'/api/admin/maintenance/status'");
+    expect(server).toContain("'/api/admin/maintenance/factory-reset'");
   });
 });
