@@ -70,6 +70,15 @@ import type {
   ScheduledDeliveryStatus,
 } from '../domain/types.js';
 import { canonicalPhoneIdentity } from '../messaging/identifiers.js';
+import {
+  ConversationHistoryRepository,
+  type ConversationListQuery,
+  type ConversationMessageRecord,
+  type ConversationMessageStatus,
+  type ConversationRecord,
+  type PaginatedResult,
+  type ConversationListItem,
+} from './conversation-history-repository.js';
 
 type CommandRow = {
   id: number;
@@ -295,6 +304,10 @@ export class AppDatabase {
     database.pragma('foreign_keys = ON');
     database.pragma('busy_timeout = 5000');
     return database;
+  }
+
+  private conversationHistory(): ConversationHistoryRepository {
+    return new ConversationHistoryRepository(this.db);
   }
 
   public getPath(): string {
@@ -1868,6 +1881,56 @@ export class AppDatabase {
             last_connected_at=NULL, updated_at=datetime('now');
         `,
       },
+      {
+        version: 23,
+        sql: `
+          CREATE TABLE conversations (
+            id TEXT PRIMARY KEY,
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            phone_number_id TEXT NOT NULL,
+            wa_id TEXT NOT NULL,
+            contact_name TEXT,
+            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','closed')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_message_at TEXT NOT NULL,
+            UNIQUE(assistant_id, phone_number_id, wa_id)
+          );
+          CREATE INDEX idx_conversations_assistant_activity
+            ON conversations(assistant_id, last_message_at DESC, id DESC);
+          CREATE INDEX idx_conversations_activity
+            ON conversations(last_message_at DESC, id DESC);
+          CREATE INDEX idx_conversations_wa_id
+            ON conversations(wa_id);
+          CREATE INDEX idx_conversations_phone_number
+            ON conversations(phone_number_id);
+          CREATE INDEX idx_conversations_contact_name
+            ON conversations(contact_name COLLATE NOCASE);
+
+          CREATE TABLE conversation_messages (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            whatsapp_message_id TEXT,
+            direction TEXT NOT NULL CHECK (direction IN ('inbound','outbound')),
+            sender_type TEXT NOT NULL CHECK (sender_type IN ('customer','assistant','system')),
+            message_type TEXT NOT NULL,
+            text_content TEXT,
+            caption TEXT,
+            message_timestamp TEXT NOT NULL,
+            whatsapp_status TEXT NOT NULL
+              CHECK (whatsapp_status IN ('received','accepted','sent','delivered','read','failed','deleted','unknown')),
+            error_code TEXT,
+            error_message TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE UNIQUE INDEX idx_conversation_messages_whatsapp_id
+            ON conversation_messages(whatsapp_message_id)
+            WHERE whatsapp_message_id IS NOT NULL;
+          CREATE INDEX idx_conversation_messages_timeline
+            ON conversation_messages(conversation_id, message_timestamp DESC, created_at DESC, id DESC);
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -2552,6 +2615,12 @@ export class AppDatabase {
       .prepare('SELECT version FROM migrations ORDER BY version')
       .all()
       .map((row) => (row as { version: number }).version);
+  }
+
+  public quickCheck(): string[] {
+    return (this.db.pragma('quick_check') as Array<{ quick_check: string }>).map(
+      (row) => row.quick_check,
+    );
   }
 
   public getSetting<T>(key: string, fallback: T): T {
@@ -3924,6 +3993,60 @@ export class AppDatabase {
         input.errorCode,
         new Date().toISOString(),
       );
+  }
+
+  public getOrCreateConversation(input: {
+    assistantId: string;
+    phoneNumberId: string;
+    waId: string;
+    contactName?: string | null;
+    activityAt?: string;
+  }): ConversationRecord {
+    return this.conversationHistory().getOrCreateConversation(input);
+  }
+
+  public recordConversationMessage(input: {
+    assistantId: string;
+    phoneNumberId: string;
+    waId: string;
+    contactName?: string | null;
+    whatsappMessageId?: string | null;
+    direction: 'inbound' | 'outbound';
+    senderType: 'customer' | 'assistant' | 'system';
+    messageType: string;
+    text?: string | null;
+    caption?: string | null;
+    messageTimestamp?: string;
+    whatsappStatus?: ConversationMessageStatus;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+  }): { conversation: ConversationRecord; message: ConversationMessageRecord; inserted: boolean } {
+    return this.conversationHistory().recordMessage(input);
+  }
+
+  public updateConversationMessageStatus(input: {
+    whatsappMessageId: string;
+    status: 'sent' | 'delivered' | 'read' | 'failed';
+    occurredAt: string;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+  }): boolean {
+    return this.conversationHistory().updateMessageStatus(input);
+  }
+
+  public listConversations(query: ConversationListQuery): PaginatedResult<ConversationListItem> {
+    return this.conversationHistory().listConversations(query);
+  }
+
+  public listConversationMessages(
+    conversationId: string,
+    page: number,
+    pageSize: number,
+  ): {
+    conversation: ConversationListItem;
+    messages: PaginatedResult<ConversationMessageRecord>;
+  } | null {
+    return this.conversationHistory().listMessages(conversationId, page, pageSize);
   }
 
   public getMetaWebhookEvent(eventId: string): {

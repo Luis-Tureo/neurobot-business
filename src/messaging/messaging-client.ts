@@ -7,6 +7,7 @@ import type {
   IncomingMessage,
   MetaMessageStatus,
   NativePoll,
+  OutboundMessageAccepted,
   WelcomeParticipant,
 } from '../domain/types.js';
 
@@ -15,6 +16,7 @@ export type MessagingClientEvents = {
   onStateChange: (state: ConnectionState, reason?: string) => void;
   onReady: () => void | Promise<void>;
   onDeliveryStatus?: (status: MetaMessageStatus) => void | Promise<void>;
+  onOutboundMessage?: (message: OutboundMessageAccepted) => void | Promise<void>;
   onGroupJoin?: (event: GroupJoinEvent) => Promise<void>;
   onGroupChanged?: (event: GroupChangeEvent) => Promise<void>;
 };

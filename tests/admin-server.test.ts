@@ -116,6 +116,87 @@ describe('API administrativa', () => {
     expect(response.body).not.toContain('AI_CALL_FAILED');
   });
 
+  it('protege y pagina conversaciones y mensajes sin exponer identificadores técnicos', async () => {
+    const first = database.recordConversationMessage({
+      assistantId: 'neurobot',
+      phoneNumberId: '123456789012345',
+      waId: '56912345678',
+      contactName: 'Cliente Historial',
+      whatsappMessageId: 'wamid.admin.1',
+      direction: 'inbound',
+      senderType: 'customer',
+      messageType: 'text',
+      text: 'Mensaje 1',
+      messageTimestamp: '2026-08-10T10:01:00.000Z',
+    });
+    for (let index = 2; index <= 11; index += 1) {
+      database.recordConversationMessage({
+        assistantId: 'neurobot',
+        phoneNumberId: '123456789012345',
+        waId: '56912345678',
+        whatsappMessageId: `wamid.admin.${index}`,
+        direction: 'outbound',
+        senderType: 'assistant',
+        messageType: 'text',
+        text: `Mensaje ${index}`,
+        messageTimestamp: `2026-08-10T10:${String(index).padStart(2, '0')}:00.000Z`,
+      });
+    }
+
+    expect((await app.inject({ method: 'GET', url: '/api/conversations' })).statusCode).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/api/conversations/${first.conversation.id}/messages`,
+        })
+      ).statusCode,
+    ).toBe(401);
+
+    const auth = await login(app);
+    const conversations = await app.inject({
+      method: 'GET',
+      url: '/api/conversations?page=1&pageSize=10&assistantId=neurobot&search=Cliente&from=2026-08-10&to=2026-08-10',
+      headers: { cookie: auth.cookie },
+    });
+    expect(conversations.statusCode).toBe(200);
+    expect(conversations.json()).toMatchObject({
+      items: [
+        {
+          id: first.conversation.id,
+          customerName: 'Cliente Historial',
+          waId: '56912345678',
+          assistantId: 'neurobot',
+          lastMessage: { text: 'Mensaje 11', status: 'accepted' },
+        },
+      ],
+      pagination: { page: 1, pageSize: 10, total: 1, totalPages: 1 },
+    });
+    expect(conversations.body).not.toContain('phoneNumberId');
+    expect(conversations.body).not.toContain('whatsappMessageId');
+
+    const latest = await app.inject({
+      method: 'GET',
+      url: `/api/conversations/${first.conversation.id}/messages?page=1&pageSize=10`,
+      headers: { cookie: auth.cookie },
+    });
+    expect(latest.statusCode).toBe(200);
+    expect(latest.json().pagination).toEqual({ page: 1, pageSize: 10, total: 11, totalPages: 2 });
+    expect(latest.json().items).toHaveLength(10);
+    expect(latest.json().items[0]).toMatchObject({ text: 'Mensaje 2' });
+    expect(latest.json().items[9]).toMatchObject({ text: 'Mensaje 11' });
+    expect(latest.body).not.toContain('wamid.admin');
+
+    const older = await app.inject({
+      method: 'GET',
+      url: `/api/conversations/${first.conversation.id}/messages?page=2&pageSize=10`,
+      headers: { cookie: auth.cookie },
+    });
+    expect(older.json().items).toEqual([
+      expect.objectContaining({ direction: 'inbound', text: 'Mensaje 1', status: 'received' }),
+    ]);
+  });
+
   it('marca la cookie como Secure cuando el proxy HTTPS local lo indica', async () => {
     const response = await app.inject({
       method: 'POST',

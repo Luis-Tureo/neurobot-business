@@ -93,7 +93,9 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
     if (issues.length > 0) {
       this.lastErrorCode = 'META_CREDENTIALS_MISSING';
       this.events?.onStateChange('auth_failure', 'META_CREDENTIALS_MISSING');
-      throw new Error(`La configuración de WhatsApp Cloud API está incompleta: ${issues.join(', ')}.`);
+      throw new Error(
+        `La configuración de WhatsApp Cloud API está incompleta: ${issues.join(', ')}.`,
+      );
     }
     this.lastErrorCode = null;
     this.ready = true;
@@ -107,11 +109,7 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
     this.events?.onStateChange('disconnected', 'CLIENT_STOPPED');
   }
 
-  public async sendMessage(
-    chatId: string,
-    text: string,
-    replyToMessageId?: string,
-  ): Promise<void> {
+  public async sendMessage(chatId: string, text: string, replyToMessageId?: string): Promise<void> {
     await this.sendTextMessage(chatId, text, replyToMessageId);
   }
 
@@ -251,7 +249,11 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
       for (const rawMessage of change.messages) {
         const descriptor = messageDescriptor(rawMessage, change.phoneNumberId);
         if (descriptor === null || !eventAccepted(descriptor.eventId, acceptedEventIds)) continue;
-        const adapted = adaptCloudMessage(rawMessage, change.phoneNumberId);
+        const adapted = adaptCloudMessage(
+          rawMessage,
+          change.phoneNumberId,
+          contactNameFor(change.contacts, rawMessage),
+        );
         if (adapted === null) {
           result.unsupportedMessages += 1;
           this.logger.info(
@@ -295,10 +297,7 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
     const accessToken = this.options.accessToken;
     if (accessToken === undefined) throw new Error('META_ACCESS_TOKEN no está configurado.');
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.options.requestTimeoutMs ?? 10_000,
-    );
+    const timeout = setTimeout(() => controller.abort(), this.options.requestTimeoutMs ?? 10_000);
     try {
       const response = await this.fetchImplementation(
         `https://graph.facebook.com/${encodeURIComponent(this.options.apiVersion)}/${encodeURIComponent(this.options.phoneNumberId)}/messages`,
@@ -334,17 +333,22 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
         );
         throw error;
       }
+      const messageId = readOutboundMessageId(responsePayload);
       this.logger.debug(
-        { operation: 'META_GRAPH_API_MESSAGE_ACCEPTED', hasMessageId: readOutboundMessageId(responsePayload) !== null },
+        { operation: 'META_GRAPH_API_MESSAGE_ACCEPTED', hasMessageId: messageId !== null },
         'Meta Graph API aceptó un mensaje',
       );
       this.lastErrorCode = null;
+      this.emitOutboundMessage(payload, messageId);
       return responsePayload;
     } catch (error) {
       if (controller.signal.aborted || isAbortError(error)) {
         this.lastErrorCode = 'META_GRAPH_API_TIMEOUT';
         this.logger.error(
-          { operation: 'META_GRAPH_API_TIMEOUT', timeoutMs: this.options.requestTimeoutMs ?? 10_000 },
+          {
+            operation: 'META_GRAPH_API_TIMEOUT',
+            timeoutMs: this.options.requestTimeoutMs ?? 10_000,
+          },
           'Meta Graph API excedió el tiempo de espera',
         );
         throw new MetaCloudApiTimeoutError();
@@ -359,6 +363,38 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
       throw new Error('No fue posible comunicarse con Meta Graph API.', { cause: error });
     } finally {
       clearTimeout(timeout);
+    }
+  }
+
+  private emitOutboundMessage(payload: Record<string, unknown>, messageId: string | null): void {
+    if (this.events?.onOutboundMessage === undefined || this.options.phoneNumberId === undefined)
+      return;
+    const recipientId = typeof payload.to === 'string' ? payload.to : null;
+    if (recipientId === null || !validRecipient(recipientId)) return;
+    const content = outboundPayloadContent(payload);
+    try {
+      const pending = this.events.onOutboundMessage({
+        messageId,
+        phoneNumberId: this.options.phoneNumberId,
+        recipientId: recipientNumber(recipientId),
+        messageType: safeMessageType(payload),
+        text: content.text,
+        caption: content.caption,
+        acceptedAt: new Date().toISOString(),
+      });
+      if (pending instanceof Promise) {
+        void pending.catch(() => {
+          this.logger.error(
+            { operation: 'CONVERSATION_OUTBOUND_PERSIST_FAILED' },
+            'No fue posible registrar un mensaje saliente ya aceptado por Meta',
+          );
+        });
+      }
+    } catch {
+      this.logger.error(
+        { operation: 'CONVERSATION_OUTBOUND_PERSIST_FAILED' },
+        'No fue posible registrar un mensaje saliente ya aceptado por Meta',
+      );
     }
   }
 }
@@ -414,7 +450,8 @@ export function secureTokenMatches(expected: string | undefined, supplied: unkno
   const expectedBuffer = Buffer.from(expected, 'utf8');
   const suppliedBuffer = Buffer.from(supplied, 'utf8');
   return (
-    expectedBuffer.length === suppliedBuffer.length && timingSafeEqual(expectedBuffer, suppliedBuffer)
+    expectedBuffer.length === suppliedBuffer.length &&
+    timingSafeEqual(expectedBuffer, suppliedBuffer)
   );
 }
 
@@ -422,6 +459,7 @@ type WebhookChange = {
   phoneNumberId: string;
   messages: unknown[];
   statuses: unknown[];
+  contacts: unknown[];
 };
 
 function webhookChanges(payload: unknown): WebhookChange[] {
@@ -437,6 +475,7 @@ function webhookChanges(payload: unknown): WebhookChange[] {
         phoneNumberId: metadata.phone_number_id,
         messages: Array.isArray(change.value.messages) ? change.value.messages : [],
         statuses: Array.isArray(change.value.statuses) ? change.value.statuses : [],
+        contacts: Array.isArray(change.value.contacts) ? change.value.contacts : [],
       });
     }
   }
@@ -451,24 +490,22 @@ function messageDescriptor(
   return { eventId: `message:${value.id}`, phoneNumberId, eventType: 'message' };
 }
 
-function adaptCloudMessage(value: unknown, phoneNumberId: string): IncomingMessage | null {
-  if (
-    !isRecord(value) ||
-    typeof value.id !== 'string' ||
-    !validRecipient(value.from)
-  ) {
+function adaptCloudMessage(
+  value: unknown,
+  phoneNumberId: string,
+  contactName: string | null,
+): IncomingMessage | null {
+  if (!isRecord(value) || typeof value.id !== 'string' || !validRecipient(value.from)) {
     return null;
   }
-  const body = cloudMessageBody(value);
-  if (body === null) return null;
+  const content = cloudMessageContent(value);
+  if (content === null) return null;
   const participantId = `${recipientNumber(value.from)}@c.us`;
   const context = isRecord(value.context) ? value.context : null;
   const receivedAt = metaTimestamp(value.timestamp);
   return {
     id: value.id,
-    ...(context !== null && typeof context.id === 'string'
-      ? { replyToMessageId: context.id }
-      : {}),
+    ...(context !== null && typeof context.id === 'string' ? { replyToMessageId: context.id } : {}),
     recipientId: phoneNumberId,
     ...(receivedAt === null ? {} : { receivedAt }),
     chatId: participantId,
@@ -476,14 +513,17 @@ function adaptCloudMessage(value: unknown, phoneNumberId: string): IncomingMessa
     administratorId: null,
     participantIdentityStatus: 'phone',
     messageType: typeof value.type === 'string' ? value.type : 'unknown',
+    visibleText: content.visibleText,
+    ...(content.caption === null ? {} : { caption: content.caption }),
+    ...(contactName === null ? {} : { contactName }),
     groupIdSource: 'from',
-    body,
+    body: content.body,
     isGroup: false,
     fromMe: false,
     isStatus: false,
     isBroadcast: false,
     isChannel: false,
-    hasMedia: false,
+    hasMedia: content.hasMedia,
     mentionsBot: false,
     isReplyToBot: context !== null && typeof context.id === 'string',
   };
@@ -496,7 +536,8 @@ function adaptCloudStatus(value: unknown, phoneNumberId: string): MetaMessageSta
   const occurredAt = metaTimestamp(value.timestamp) ?? new Date(0).toISOString();
   const status = normalizeMetaStatus(value.status);
   const conversation = isRecord(value.conversation) ? value.conversation : null;
-  const firstError = Array.isArray(value.errors) && isRecord(value.errors[0]) ? value.errors[0] : null;
+  const firstError =
+    Array.isArray(value.errors) && isRecord(value.errors[0]) ? value.errors[0] : null;
   return {
     eventId: `status:${value.id}:${status}:${occurredAt}`,
     messageId: value.id,
@@ -507,33 +548,165 @@ function adaptCloudStatus(value: unknown, phoneNumberId: string): MetaMessageSta
     conversationId:
       conversation !== null && typeof conversation.id === 'string' ? conversation.id : null,
     errorCode:
-      firstError !== null && (typeof firstError.code === 'string' || typeof firstError.code === 'number')
+      firstError !== null &&
+      (typeof firstError.code === 'string' || typeof firstError.code === 'number')
         ? String(firstError.code).slice(0, 80)
         : null,
+    errorMessage: safeMetaErrorText(firstError),
   };
 }
 
-function cloudMessageBody(value: Record<string, unknown>): string | null {
+function cloudMessageContent(value: Record<string, unknown>): {
+  body: string;
+  visibleText: string;
+  caption: string | null;
+  hasMedia: boolean;
+} | null {
   if (value.type === 'text' && isRecord(value.text) && typeof value.text.body === 'string') {
-    return value.text.body;
+    return {
+      body: value.text.body,
+      visibleText: value.text.body,
+      caption: null,
+      hasMedia: false,
+    };
   }
   if (value.type === 'interactive' && isRecord(value.interactive)) {
     for (const key of ['button_reply', 'list_reply']) {
       const reply = value.interactive[key];
       if (!isRecord(reply)) continue;
-      if (typeof reply.id === 'string' && reply.id.trim() !== '') return reply.id;
-      if (typeof reply.title === 'string' && reply.title.trim() !== '') return reply.title;
+      const identifier = typeof reply.id === 'string' ? reply.id.trim() : '';
+      const title = typeof reply.title === 'string' ? reply.title.trim() : '';
+      if (identifier !== '' || title !== '') {
+        return {
+          body: identifier || title,
+          visibleText: title || identifier,
+          caption: null,
+          hasMedia: false,
+        };
+      }
     }
   }
   if (value.type === 'button' && isRecord(value.button)) {
-    if (typeof value.button.payload === 'string' && value.button.payload.trim() !== '') {
-      return value.button.payload;
-    }
-    if (typeof value.button.text === 'string' && value.button.text.trim() !== '') {
-      return value.button.text;
+    const payload = typeof value.button.payload === 'string' ? value.button.payload.trim() : '';
+    const text = typeof value.button.text === 'string' ? value.button.text.trim() : '';
+    if (payload !== '' || text !== '') {
+      return {
+        body: payload || text,
+        visibleText: text || payload,
+        caption: null,
+        hasMedia: false,
+      };
     }
   }
+  const labels: Record<string, string> = {
+    image: '[Imagen]',
+    video: '[Video]',
+    document: '[Documento]',
+    audio: '[Audio]',
+  };
+  if (typeof value.type === 'string' && value.type in labels) {
+    const rawMedia = value[value.type];
+    const media = isRecord(rawMedia) ? rawMedia : null;
+    const caption =
+      media !== null && typeof media.caption === 'string' && media.caption.trim() !== ''
+        ? media.caption.trim().slice(0, 1024)
+        : null;
+    const visibleText = caption ?? labels[value.type] ?? '[Multimedia]';
+    return { body: visibleText, visibleText, caption, hasMedia: true };
+  }
   return null;
+}
+
+function contactNameFor(contacts: unknown[], rawMessage: unknown): string | null {
+  if (!isRecord(rawMessage) || typeof rawMessage.from !== 'string') return null;
+  const sender = recipientNumber(rawMessage.from);
+  for (const contact of contacts) {
+    if (!isRecord(contact) || typeof contact.wa_id !== 'string') continue;
+    if (!validRecipient(contact.wa_id) || recipientNumber(contact.wa_id) !== sender) continue;
+    const profile = isRecord(contact.profile) ? contact.profile : null;
+    if (profile === null || typeof profile.name !== 'string') return null;
+    const name = replaceControlCharacters(profile.name, ' ')
+      .replace(/\s+/gu, ' ')
+      .trim()
+      .slice(0, 200);
+    return name === '' ? null : name;
+  }
+  return null;
+}
+
+function outboundPayloadContent(payload: Record<string, unknown>): {
+  text: string | null;
+  caption: string | null;
+} {
+  if (payload.type === 'text' && isRecord(payload.text) && typeof payload.text.body === 'string') {
+    return { text: payload.text.body.slice(0, 4096), caption: null };
+  }
+  if (payload.type === 'interactive' && isRecord(payload.interactive)) {
+    const visible: string[] = [];
+    const header = isRecord(payload.interactive.header) ? payload.interactive.header : null;
+    const body = isRecord(payload.interactive.body) ? payload.interactive.body : null;
+    if (header !== null && typeof header.text === 'string') visible.push(header.text);
+    if (body !== null && typeof body.text === 'string') visible.push(body.text);
+    const action = isRecord(payload.interactive.action) ? payload.interactive.action : null;
+    if (action !== null && Array.isArray(action.buttons)) {
+      const labels = action.buttons
+        .map((button) => (isRecord(button) && isRecord(button.reply) ? button.reply.title : null))
+        .filter((label): label is string => typeof label === 'string');
+      if (labels.length > 0) visible.push(`Opciones: ${labels.join(' · ')}`);
+    }
+    if (action !== null && Array.isArray(action.sections)) {
+      const labels = action.sections.flatMap((section) => {
+        if (!isRecord(section) || !Array.isArray(section.rows)) return [];
+        return section.rows
+          .map((row) => (isRecord(row) ? row.title : null))
+          .filter((label): label is string => typeof label === 'string');
+      });
+      if (labels.length > 0) visible.push(`Opciones: ${labels.join(' · ')}`);
+    }
+    return { text: visible.join('\n').slice(0, 4096) || '[Mensaje interactivo]', caption: null };
+  }
+  const mediaLabels: Record<string, string> = {
+    image: '[Imagen]',
+    video: '[Video]',
+    document: '[Documento]',
+    audio: '[Audio]',
+  };
+  if (typeof payload.type === 'string' && payload.type in mediaLabels) {
+    const rawMedia = payload[payload.type];
+    const media = isRecord(rawMedia) ? rawMedia : null;
+    const caption =
+      media !== null && typeof media.caption === 'string' && media.caption.trim() !== ''
+        ? media.caption.trim().slice(0, 1024)
+        : null;
+    return { text: caption ?? mediaLabels[payload.type] ?? '[Multimedia]', caption };
+  }
+  if (payload.type === 'template') return { text: '[Plantilla]', caption: null };
+  return { text: `[Mensaje ${safeMessageType(payload)}]`, caption: null };
+}
+
+function safeMetaErrorText(error: Record<string, unknown> | null): string | null {
+  if (error === null) return null;
+  const errorData = isRecord(error.error_data) ? error.error_data : null;
+  const candidate = [error.title, error.message, errorData?.details].find(
+    (value): value is string => typeof value === 'string' && value.trim() !== '',
+  );
+  if (candidate === undefined) return null;
+  const sanitized = replaceControlCharacters(candidate, ' ')
+    .replace(/https?:\/\/\S+/giu, '[URL omitida]')
+    .replace(/\bBearer\s+\S+/giu, 'Bearer [oculto]')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .slice(0, 300);
+  return sanitized === '' ? null : sanitized;
+}
+
+function replaceControlCharacters(value: string, replacement: string): string {
+  return [...value]
+    .map((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return code <= 31 || code === 127 ? replacement : character;
+    })
+    .join('');
 }
 
 function normalizeMetaStatus(value: string): MetaMessageStatus['status'] {
@@ -551,7 +724,10 @@ function metaTimestamp(value: unknown): string | null {
 }
 
 function recipientNumber(identifier: string): string {
-  const normalized = identifier.trim().replace(/@(c\.us|lid)$/iu, '').replace(/^\+/u, '');
+  const normalized = identifier
+    .trim()
+    .replace(/@(c\.us|lid)$/iu, '')
+    .replace(/^\+/u, '');
   if (!/^\d{8,15}$/u.test(normalized)) {
     throw new Error('El destinatario de Cloud API no es válido.');
   }
@@ -576,7 +752,10 @@ function validMetaIdentifier(value: unknown): value is string {
   return typeof value === 'string' && /^\d{6,30}$/u.test(value);
 }
 
-function eventAccepted(eventId: string, acceptedEventIds: ReadonlySet<string> | undefined): boolean {
+function eventAccepted(
+  eventId: string,
+  acceptedEventIds: ReadonlySet<string> | undefined,
+): boolean {
   return acceptedEventIds === undefined || acceptedEventIds.has(eventId);
 }
 

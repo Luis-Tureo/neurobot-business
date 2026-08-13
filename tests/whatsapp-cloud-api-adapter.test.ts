@@ -13,7 +13,9 @@ const account = {
   apiVersion: 'v25.0',
 };
 
-function subject(fetchImplementation?: (input: string | URL, init?: RequestInit) => Promise<Response>) {
+function subject(
+  fetchImplementation?: (input: string | URL, init?: RequestInit) => Promise<Response>,
+) {
   const requests: Array<{ url: string; init?: RequestInit }> = [];
   const fetcher =
     fetchImplementation ??
@@ -26,6 +28,7 @@ function subject(fetchImplementation?: (input: string | URL, init?: RequestInit)
     });
   const received: unknown[] = [];
   const statuses: unknown[] = [];
+  const outbound: unknown[] = [];
   const adapter = new WhatsAppCloudApiAdapter(account, createLogger('silent'), fetcher);
   adapter.setEvents({
     onMessage: async (message) => {
@@ -34,15 +37,18 @@ function subject(fetchImplementation?: (input: string | URL, init?: RequestInit)
     onDeliveryStatus: (status) => {
       statuses.push(status);
     },
+    onOutboundMessage: (message) => {
+      outbound.push(message);
+    },
     onStateChange: vi.fn(),
     onReady: vi.fn(),
   });
-  return { adapter, requests, received, statuses, fetcher };
+  return { adapter, requests, received, statuses, outbound, fetcher };
 }
 
 describe('conector oficial WhatsApp Cloud API', () => {
   it('envía texto, respuesta, botones y listas al endpoint oficial del número configurado', async () => {
-    const { adapter, requests } = subject();
+    const { adapter, requests, outbound } = subject();
     await adapter.initialize();
     await expect(
       adapter.sendTextMessage('56912345678@c.us', 'Hola', 'wamid.inbound'),
@@ -73,9 +79,7 @@ describe('conector oficial WhatsApp Cloud API', () => {
     ).resolves.toBe(true);
 
     expect(requests).toHaveLength(3);
-    expect(requests[0]?.url).toBe(
-      'https://graph.facebook.com/v25.0/123456789012345/messages',
-    );
+    expect(requests[0]?.url).toBe('https://graph.facebook.com/v25.0/123456789012345/messages');
     const bodies = requests.map(
       (request) => JSON.parse(String(request.init?.body)) as Record<string, unknown>,
     );
@@ -89,6 +93,23 @@ describe('conector oficial WhatsApp Cloud API', () => {
     expect(requests[0]?.init?.headers).toMatchObject({
       authorization: `Bearer ${account.accessToken}`,
     });
+    expect(outbound).toMatchObject([
+      {
+        messageId: 'wamid.outbound',
+        phoneNumberId: account.phoneNumberId,
+        recipientId: '56912345678',
+        messageType: 'text',
+        text: 'Hola',
+      },
+      {
+        messageType: 'interactive',
+        text: expect.stringContaining('¿Qué necesitas?'),
+      },
+      {
+        messageType: 'interactive',
+        text: expect.stringContaining('Selecciona una opción'),
+      },
+    ]);
   });
 
   it('adapta texto e identifica remitente, receptor, ID y timestamp', async () => {
@@ -106,6 +127,7 @@ describe('conector oficial WhatsApp Cloud API', () => {
                   display_phone_number: '+56 9 0000 0000',
                   phone_number_id: account.phoneNumberId,
                 },
+                contacts: [{ wa_id: '56912345678', profile: { name: 'Persona Real' } }],
                 messages: [
                   {
                     id: 'wamid.text',
@@ -137,9 +159,17 @@ describe('conector oficial WhatsApp Cloud API', () => {
         recipientId: account.phoneNumberId,
         receivedAt: '2026-08-12T16:00:00.000Z',
         body: 'Hola',
+        visibleText: 'Hola',
+        contactName: 'Persona Real',
         isGroup: false,
       },
-      { id: 'wamid.list', recipientId: account.phoneNumberId, body: 'hours' },
+      {
+        id: 'wamid.list',
+        recipientId: account.phoneNumberId,
+        body: 'hours',
+        visibleText: 'Horarios',
+        contactName: 'Persona Real',
+      },
     ]);
   });
 
@@ -185,8 +215,16 @@ describe('conector oficial WhatsApp Cloud API', () => {
       ],
     });
 
-    expect(result).toEqual({ messages: 0, statuses: 2, unsupportedMessages: 1 });
-    expect(received).toHaveLength(0);
+    expect(result).toEqual({ messages: 1, statuses: 2, unsupportedMessages: 0 });
+    expect(received).toMatchObject([
+      {
+        id: 'wamid.image',
+        messageType: 'image',
+        body: '[Imagen]',
+        visibleText: '[Imagen]',
+        hasMedia: true,
+      },
+    ]);
     expect(statuses).toMatchObject([
       {
         messageId: 'wamid.outbound',
@@ -194,7 +232,12 @@ describe('conector oficial WhatsApp Cloud API', () => {
         recipientId: '56912345678',
         status: 'delivered',
       },
-      { messageId: 'wamid.failed', status: 'failed', errorCode: '131047' },
+      {
+        messageId: 'wamid.failed',
+        status: 'failed',
+        errorCode: '131047',
+        errorMessage: 'Re-engagement message',
+      },
     ]);
   });
 
@@ -204,24 +247,34 @@ describe('conector oficial WhatsApp Cloud API', () => {
     await expect(
       adapter.ingestWebhook({
         object: 'whatsapp_business_account',
-        entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: account.phoneNumberId } } }] }],
+        entry: [
+          {
+            changes: [
+              {
+                field: 'messages',
+                value: { metadata: { phone_number_id: account.phoneNumberId } },
+              },
+            ],
+          },
+        ],
       }),
     ).resolves.toEqual({ messages: 0, statuses: 0, unsupportedMessages: 0 });
   });
 
   it('propaga de forma segura errores HTTP y de Graph API', async () => {
-    const fetcher = vi.fn(async () =>
-      new Response(
-        JSON.stringify({
-          error: {
-            message: `Token inválido ${account.accessToken}`,
-            type: 'OAuthException',
-            code: 190,
-            error_subcode: 463,
-          },
-        }),
-        { status: 400 },
-      ),
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              message: `Token inválido ${account.accessToken}`,
+              type: 'OAuthException',
+              code: 190,
+              error_subcode: 463,
+            },
+          }),
+          { status: 400 },
+        ),
     );
     const { adapter } = subject(fetcher);
     await adapter.initialize();
@@ -257,10 +310,7 @@ describe('conector oficial WhatsApp Cloud API', () => {
   });
 
   it('falla claramente sin credenciales obligatorias', async () => {
-    const adapter = new WhatsAppCloudApiAdapter(
-      { apiVersion: 'v25.0' },
-      createLogger('silent'),
-    );
+    const adapter = new WhatsAppCloudApiAdapter({ apiVersion: 'v25.0' }, createLogger('silent'));
     adapter.setEvents({ onMessage: vi.fn(), onStateChange: vi.fn(), onReady: vi.fn() });
     expect(adapter.configurationIssues()).toEqual(['META_ACCESS_TOKEN', 'META_PHONE_NUMBER_ID']);
     await expect(adapter.initialize()).rejects.toThrow('META_ACCESS_TOKEN, META_PHONE_NUMBER_ID');
@@ -270,11 +320,12 @@ describe('conector oficial WhatsApp Cloud API', () => {
   it('no registra el access token ni el mensaje devuelto por Meta', async () => {
     let output = '';
     const logger = pino({ level: 'debug', base: null }, { write: (line) => (output += line) });
-    const fetcher = vi.fn(async () =>
-      new Response(
-        JSON.stringify({ error: { code: 190, message: `secreto ${account.accessToken}` } }),
-        { status: 401 },
-      ),
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ error: { code: 190, message: `secreto ${account.accessToken}` } }),
+          { status: 401 },
+        ),
     );
     const adapter = new WhatsAppCloudApiAdapter(account, logger, fetcher);
     adapter.setEvents({ onMessage: vi.fn(), onStateChange: vi.fn(), onReady: vi.fn() });
