@@ -25,18 +25,6 @@ async function main(): Promise<void> {
   const logger = createLogger(environment.logLevel);
   const database = new AppDatabase(environment.databasePath);
   database.migrate();
-  for (const bot of database.listBots()) {
-    database.updateBotConfiguration({
-      botId: bot.id,
-      mode: 'business',
-      enabled: bot.enabled,
-      groupsEnabled: false,
-      privateMessagesEnabled: true,
-      realMentionRequired: false,
-      continuedConversationsEnabled: true,
-      menuType: bot.menuType,
-    });
-  }
   await ensureInitialAdministrator(database, environment.panelInitialPassword);
 
   const anonymizer = new Anonymizer(environment.anonymizationSecret);
@@ -56,48 +44,22 @@ async function main(): Promise<void> {
     logger,
     {
       maxMessageLength: environment.maxMessageLength,
-      repeatWindowMs:
-        database.getSetting('repeat_window_seconds', environment.repeatWindowMs / 1000) * 1000,
       maxReconnectAttempts: environment.maxReconnectAttempts,
       maxReconnectDelayMs: environment.maxReconnectDelayMs,
       developmentMode: environment.developmentMode,
-      secretVault: vault,
       mediaRoot: resolve(process.cwd(), 'data', 'media'),
       isPaused: () => maintenance?.isRunning() ?? false,
     },
     environment.metaWhatsApp,
   );
   await multiBotManager.prepareAll();
-  const client = multiBotManager.client('neurobot');
-  const connectionManager = multiBotManager.connectionManager('neurobot');
-  const groupDiscovery = multiBotManager.groupDiscovery('neurobot');
-  if (client === null || connectionManager === null || groupDiscovery === null) {
-    throw new Error('No fue posible preparar la instancia inicial de Neurobot.');
-  }
-  maintenance = new MaintenanceService(
-    database,
-    connectionManager,
-    groupDiscovery,
-    anonymizer,
-    logger,
-    {
-      projectRoot: process.cwd(),
-      databasePath: environment.databasePath,
-      resetTransientState: () => multiBotManager.resetTransientState(),
-    },
-  );
-  const automaticMessages = multiBotManager.automaticMessages('neurobot');
-  const pollRepository = multiBotManager.pollRepository('neurobot');
-  const pollService = multiBotManager.pollService('neurobot');
-  const pollScheduler = multiBotManager.pollScheduler('neurobot');
-  if (
-    automaticMessages === null ||
-    pollRepository === null ||
-    pollService === null ||
-    pollScheduler === null
-  ) {
-    throw new Error('No fue posible preparar las automatizaciones de Neurobot.');
-  }
+  maintenance = new MaintenanceService(database, logger, {
+    projectRoot: process.cwd(),
+    databasePath: environment.databasePath,
+    resetTransientState: () => multiBotManager.resetTransientState(),
+    stopMessaging: () => multiBotManager.stopAll(),
+    startMessaging: () => multiBotManager.startAll(),
+  });
 
   const packageData = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8'),
@@ -106,20 +68,12 @@ async function main(): Promise<void> {
   };
   const server = await buildAdminServer({
     database,
-    connectionManager,
-    groupDiscovery,
     anonymizer,
     logger,
     sessionSecret: environment.panelSessionSecret,
     applicationVersion: packageData.version,
     developmentMode: environment.developmentMode,
-    businessOnly: true,
     maintenance,
-    automaticMessages,
-    pollRepository,
-    pollService,
-    pollScheduler,
-    aiProvider: aiProviders.forBot('neurobot'),
     multiBotManager,
     aiProviderFactory: aiProviders,
     secretVault: vault,

@@ -318,11 +318,7 @@ async function toggleBot(bot) {
   await api(`/api/bots/${encodeURIComponent(bot.id)}/configuration`, {
     method: 'PATCH',
     body: JSON.stringify({
-      mode: 'business',
       enabled: !detail.bot.enabled,
-      groupsEnabled: false,
-      privateMessagesEnabled: true,
-      realMentionRequired: false,
       continuedConversationsEnabled: detail.bot.continuedConversationsEnabled,
       menuType: detail.bot.menuType,
     }),
@@ -445,7 +441,6 @@ function fillProfile(profile) {
     input.value = Array.isArray(value) ? value.join('\n') : (value ?? '');
   }
   form.elements.address.value = profile.address || '';
-  if (!form.elements.activationAlias.value) form.elements.activationAlias.value = '@asistente';
 }
 
 function fillBotConfiguration(bot) {
@@ -540,9 +535,7 @@ async function loadBotSummary({ refreshForms = true } = {}) {
   const detail = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}`);
   state.bot = detail.bot;
   state.profile = detail.profile;
-  state.visibleModules = (detail.visibleModules || []).filter(
-    (module) => !['automatic-messages', 'polls', 'moderation', 'maintenance'].includes(module),
-  );
+  state.visibleModules = detail.visibleModules || [];
   navigation.setModuleVisibility(state.visibleModules);
   updateAssistantContext(detail);
   renderOverview(detail);
@@ -2078,7 +2071,6 @@ function configureForms() {
       botName: form.elements.botName.value,
       organizationType: form.elements.organizationType.value,
       timezone: form.elements.timezone.value,
-      mode: 'business',
       connectorType: 'WHATSAPP_CLOUD_API',
       provider: form.elements.provider.value,
       preset: form.elements.preset.value,
@@ -2096,7 +2088,6 @@ function configureForms() {
       internalName: form.elements.internalName.value,
       organizationName: form.elements.organizationName.value,
       botName: form.elements.botName.value,
-      activationAlias: form.elements.activationAlias.value,
       description: form.elements.description.value,
       organizationType: form.elements.organizationType.value,
       industry: form.elements.industry.value,
@@ -2109,8 +2100,6 @@ function configureForms() {
       limitMessage: form.elements.limitMessage.value,
       aiErrorMessage: form.elements.aiErrorMessage.value,
       medicalMessage: form.elements.medicalMessage.value,
-      mentionPromptMessage: form.elements.mentionPromptMessage.value,
-      communityGreetingMessage: form.elements.communityGreetingMessage.value,
       contactInformation: form.elements.contactInformation.value,
       businessHours: form.elements.businessHours.value,
       address: form.elements.address.value.trim() || null,
@@ -2135,11 +2124,7 @@ function configureForms() {
     await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/configuration`, {
       method: 'PATCH',
       body: JSON.stringify({
-        mode: 'business',
         enabled: form.elements.enabled.checked,
-        groupsEnabled: false,
-        privateMessagesEnabled: true,
-        realMentionRequired: false,
         continuedConversationsEnabled: form.elements.continuedConversationsEnabled.checked,
         menuType: form.elements.menuType.value,
       }),
@@ -2548,9 +2533,8 @@ function configureForms() {
   });
   document.querySelector('#history-previous').addEventListener('click', () => {
     state.conversationPage = Math.max(1, state.conversationPage - 1);
-    void withBusy(
-      document.querySelector('#history-previous'),
-      () => loadConversationHistory(),
+    void withBusy(document.querySelector('#history-previous'), () =>
+      loadConversationHistory(),
     ).finally(() => renderConversationList());
   });
   document.querySelector('#history-next').addEventListener('click', () => {

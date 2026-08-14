@@ -253,11 +253,11 @@
     @apply grid gap-1;
   }
 
-  .nav-group-label {
+  .nav-section-label {
     @apply mb-1 mt-5 px-3 text-[0.68rem] font-bold uppercase tracking-[0.14em] text-slate-400;
   }
 
-  .sidebar-nav > div > .nav-group-label:first-child {
+  .sidebar-nav > div > .nav-section-label:first-child {
     margin-top: 0.35rem;
   }
 

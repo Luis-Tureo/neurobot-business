@@ -177,7 +177,7 @@
 
             <nav class="sidebar-nav" aria-label="Secciones del panel">
               <div data-context="global">
-                <p class="nav-group-label">Panel general</p>
+                <p class="nav-section-label">Panel general</p>
                 <button
                   class="nav-item active"
                   data-section="bots"
@@ -202,7 +202,7 @@
                   <span>Mis asistentes</span>
                 </button>
 
-                <p class="nav-group-label">General</p>
+                <p class="nav-section-label">General</p>
                 <button class="nav-item" data-section="status" type="button">
                   <svg aria-hidden="true"><use href="#icon-home"></use></svg><span>Inicio</span>
                 </button>
@@ -211,7 +211,7 @@
                   ><span>WhatsApp</span>
                 </button>
 
-                <p class="nav-group-label">Negocio</p>
+                <p class="nav-section-label">Negocio</p>
                 <button class="nav-item" data-section="profile" type="button">
                   <svg aria-hidden="true"><use href="#icon-profile"></use></svg><span>Perfil</span>
                 </button>
@@ -227,7 +227,7 @@
                   ><span>Multimedia</span>
                 </button>
 
-                <p class="nav-group-label">Automatización</p>
+                <p class="nav-section-label">Automatización</p>
                 <button class="nav-item" data-section="menus" data-module="menus" type="button">
                   <svg aria-hidden="true"><use href="#icon-flow"></use></svg><span>Menús</span>
                 </button>
@@ -244,7 +244,7 @@
                   ><span>Inteligencia artificial</span>
                 </button>
 
-                <p class="nav-group-label">Operación</p>
+                <p class="nav-section-label">Operación</p>
                 <button class="nav-item" data-section="test-center" type="button">
                   <svg aria-hidden="true"><use href="#icon-test"></use></svg
                   ><span>Centro de pruebas</span>
@@ -533,13 +533,15 @@
                     <label>
                       Tipo de negocio
                       <select name="organizationType" required>
-                        <option>Comunidad</option>
-                        <option>Tienda</option>
+                        <option>Comercio</option>
                         <option>Restaurante</option>
-                        <option>Distribuidora</option>
-                        <option>Servicio profesional</option>
-                        <option>Organización social</option>
-                        <option>Institución educativa</option>
+                        <option>Servicios</option>
+                        <option>Salud</option>
+                        <option>Belleza</option>
+                        <option>Turismo</option>
+                        <option>Transporte</option>
+                        <option>Educación</option>
+                        <option>Profesional independiente</option>
                         <option>Otro</option>
                       </select>
                     </label>
@@ -642,21 +644,11 @@
                           required
                         ></textarea>
                       </label>
-                      <label
-                        >Mensaje al recibir una consulta incompleta<textarea
-                          name="mentionPromptMessage"
-                          maxlength="600"
-                          rows="3"
-                          required
-                        ></textarea>
-                      </label>
                     </div>
                   </div>
                 </details>
 
                 <input name="internalName" type="hidden" />
-                <input name="activationAlias" type="hidden" />
-                <input name="communityGreetingMessage" type="hidden" />
                 <input name="businessHours" type="hidden" />
                 <input name="logoPath" type="hidden" />
                 <input name="primaryColor" type="hidden" />
@@ -680,10 +672,6 @@
                 </summary>
                 <div class="disclosure__content">
                   <form id="bot-configuration-form" class="stack-form">
-                    <input name="mode" type="hidden" value="business" />
-                    <input name="groupsEnabled" type="hidden" value="false" />
-                    <input name="privateMessagesEnabled" type="hidden" value="true" />
-                    <input name="realMentionRequired" type="hidden" value="false" />
                     <div class="form-grid two-columns">
                       <label class="switch-row"
                         ><input name="enabled" type="checkbox" role="switch" /><span
@@ -750,7 +738,7 @@
                 <div class="editor-panel__heading">
                   <div>
                     <h3 id="knowledge-categories-title">Categorías</h3>
-                    <p>Organiza la información en grupos claros.</p>
+                    <p>Organiza la información en secciones claras.</p>
                   </div>
                   <button id="new-knowledge-category" class="secondary" type="button">
                     Nueva categoría
@@ -1352,13 +1340,13 @@
                       /></label>
                       <label
                         >Consultas por hora por conversación<input
-                          name="groupHourlyLimit"
+                          name="conversationHourlyLimit"
                           type="number"
                           min="1"
                       /></label>
                       <label
                         >Consultas diarias por conversación<input
-                          name="groupDailyLimit"
+                          name="conversationDailyLimit"
                           type="number"
                           min="1"
                       /></label>

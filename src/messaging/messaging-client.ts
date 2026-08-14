@@ -1,14 +1,8 @@
 import type {
   ConnectionState,
-  DetectedGroup,
-  GroupChangeEvent,
-  GroupJoinEvent,
-  GroupListSource,
   IncomingMessage,
   MetaMessageStatus,
-  NativePoll,
   OutboundMessageAccepted,
-  WelcomeParticipant,
 } from '../domain/types.js';
 
 export type MessagingClientEvents = {
@@ -17,8 +11,6 @@ export type MessagingClientEvents = {
   onReady: () => void | Promise<void>;
   onDeliveryStatus?: (status: MetaMessageStatus) => void | Promise<void>;
   onOutboundMessage?: (message: OutboundMessageAccepted) => void | Promise<void>;
-  onGroupJoin?: (event: GroupJoinEvent) => Promise<void>;
-  onGroupChanged?: (event: GroupChangeEvent) => Promise<void>;
 };
 
 export type InteractiveMenuPayload = {
@@ -29,23 +21,13 @@ export type InteractiveMenuPayload = {
   kind: 'buttons' | 'list';
 };
 
-export type SelectableMenuPayload = Omit<InteractiveMenuPayload, 'kind'>;
-
 export interface MessagingClient {
   setEvents(events: MessagingClientEvents): void;
   initialize(): Promise<void>;
   destroy(): Promise<void>;
   sendMessage(chatId: string, text: string, replyToMessageId?: string): Promise<void>;
-  sendMessageWithMentions?(chatId: string, text: string, mentionIds: string[]): Promise<void>;
-  resolveWelcomeParticipants?(participantIds: string[]): Promise<WelcomeParticipant[]>;
   sendMedia?(chatId: string, absolutePath: string, caption: string): Promise<void>;
   sendInteractiveMenu?(chatId: string, payload: InteractiveMenuPayload): Promise<boolean>;
-  sendSelectableMenu?(chatId: string, payload: SelectableMenuPayload): Promise<boolean>;
-  sendPoll(chatId: string, poll: NativePoll): Promise<void>;
-  listGroups(): Promise<DetectedGroup[]>;
-  getLastGroupScanSkippedCount(): number;
-  getLastGroupListSource(): GroupListSource | null;
   getState(): Promise<string | null>;
   isReady(): boolean;
-  isOwnIdentifier(identifier: string): boolean;
 }

@@ -4,9 +4,8 @@ import {
   assertPlainText,
   containsWholeTerm,
   maskPhoneNumber,
-  normalizeParticipantId,
+  normalizePhoneNumber,
   normalizeText,
-  parseCommand,
 } from '../src/utils/text.js';
 
 describe('normalización y privacidad', () => {
@@ -14,22 +13,15 @@ describe('normalización y privacidad', () => {
     expect(normalizeText('  Información   MÉDICA ')).toBe('informacion medica');
   });
 
-  it('detecta comandos exactos y rechaza enlaces', () => {
-    expect(parseCommand('  !AYUDA   ahora ')).toEqual({ name: 'ayuda', args: ['ahora'] });
-    expect(parseCommand('mira https://ejemplo.test/!ayuda')).toBeNull();
-    expect(parseCommand('texto !ayuda')).toBeNull();
-    expect(parseCommand('!ayuda?')).toBeNull();
-  });
-
   it('evita coincidencias parciales incorrectas', () => {
-    expect(containsWholeTerm('Necesito información sobre autismo.', 'autismo')).toBe(true);
-    expect(containsWholeTerm('Esto es automatismo.', 'autismo')).toBe(false);
+    expect(containsWholeTerm('Necesito información sobre el horario.', 'horario')).toBe(true);
+    expect(containsWholeTerm('Consulta los horarios disponibles.', 'horario')).toBe(false);
   });
 
   it('enmascara y valida números internacionales', () => {
     expect(maskPhoneNumber('+56 9 1234 5678')).toMatch(/^\*+5678$/);
-    expect(normalizeParticipantId('+56 9 1234 5678')).toBe('56912345678@c.us');
-    expect(() => normalizeParticipantId('123')).toThrow('formato internacional');
+    expect(normalizePhoneNumber('+56 9 1234 5678')).toBe('56912345678@c.us');
+    expect(() => normalizePhoneNumber('123')).toThrow('formato internacional');
   });
 
   it('rechaza HTML en respuestas configurables', () => {

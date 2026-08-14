@@ -9,8 +9,6 @@ const sensitivePaths = [
   '*.secret',
   'body',
   '*.body',
-  'participantId',
-  '*.participantId',
   'chatId',
   '*.chatId',
   'cookie',

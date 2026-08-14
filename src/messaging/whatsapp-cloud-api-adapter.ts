@@ -1,11 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { Logger } from 'pino';
-import type {
-  DetectedGroup,
-  IncomingMessage,
-  MetaMessageStatus,
-  NativePoll,
-} from '../domain/types.js';
+import type { IncomingMessage, MetaMessageStatus } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import type {
   InteractiveMenuPayload,
@@ -199,22 +194,6 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
     });
   }
 
-  public async sendPoll(_chatId: string, _poll: NativePoll): Promise<void> {
-    throw new Error('Las encuestas de grupos no están disponibles en WhatsApp Cloud API.');
-  }
-
-  public async listGroups(): Promise<DetectedGroup[]> {
-    return [];
-  }
-
-  public getLastGroupScanSkippedCount(): number {
-    return 0;
-  }
-
-  public getLastGroupListSource(): null {
-    return null;
-  }
-
   public async getState(): Promise<string | null> {
     return this.ready ? 'CONNECTED' : null;
   }
@@ -225,10 +204,6 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
 
   public status(): { lastErrorCode: string | null } {
     return { lastErrorCode: this.lastErrorCode };
-  }
-
-  public isOwnIdentifier(identifier: string): boolean {
-    return this.options.phoneNumberId !== undefined && identifier === this.options.phoneNumberId;
   }
 
   public async ingestWebhook(
@@ -495,38 +470,39 @@ function adaptCloudMessage(
   phoneNumberId: string,
   contactName: string | null,
 ): IncomingMessage | null {
-  if (!isRecord(value) || typeof value.id !== 'string' || !validRecipient(value.from)) {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    !isPrivateMessageEnvelope(value) ||
+    !validRecipient(value.from)
+  ) {
     return null;
   }
   const content = cloudMessageContent(value);
   if (content === null) return null;
-  const participantId = `${recipientNumber(value.from)}@c.us`;
+  const customerId = recipientNumber(value.from);
   const context = isRecord(value.context) ? value.context : null;
   const receivedAt = metaTimestamp(value.timestamp);
   return {
     id: value.id,
     ...(context !== null && typeof context.id === 'string' ? { replyToMessageId: context.id } : {}),
-    recipientId: phoneNumberId,
+    businessPhoneNumberId: phoneNumberId,
     ...(receivedAt === null ? {} : { receivedAt }),
-    chatId: participantId,
-    participantId,
-    administratorId: null,
-    participantIdentityStatus: 'phone',
+    chatId: customerId,
+    customerId,
     messageType: typeof value.type === 'string' ? value.type : 'unknown',
     visibleText: content.visibleText,
     ...(content.caption === null ? {} : { caption: content.caption }),
     ...(contactName === null ? {} : { contactName }),
-    groupIdSource: 'from',
     body: content.body,
-    isGroup: false,
-    fromMe: false,
-    isStatus: false,
-    isBroadcast: false,
-    isChannel: false,
     hasMedia: content.hasMedia,
-    mentionsBot: false,
     isReplyToBot: context !== null && typeof context.id === 'string',
   };
+}
+
+function isPrivateMessageEnvelope(value: Record<string, unknown>): boolean {
+  if (value.recipient_type === 'group' || value.type === 'group') return false;
+  return !('group_id' in value) && !('group' in value);
 }
 
 function adaptCloudStatus(value: unknown, phoneNumberId: string): MetaMessageStatus | null {

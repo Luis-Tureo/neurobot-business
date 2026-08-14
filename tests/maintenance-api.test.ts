@@ -4,11 +4,8 @@ import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { Response as InjectResponse } from 'light-my-request';
 import { buildAdminServer } from '../src/admin/server.js';
-import { ConnectionManager } from '../src/core/connection-manager.js';
-import { GroupDiscoveryService } from '../src/core/group-discovery-service.js';
 import { MaintenanceService, type MaintenanceStage } from '../src/core/maintenance-service.js';
 import { createLogger } from '../src/infrastructure/logger.js';
-import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { Anonymizer } from '../src/security/anonymizer.js';
 import { hashPassword } from '../src/security/password.js';
@@ -83,19 +80,24 @@ describe('API de mantenimiento', () => {
       code: 'FACTORY_RESET_COMPLETED',
       logoutRequired: true,
     });
-    expect(subject.database.getBot('neurobot')?.connectorType).toBe('WHATSAPP_CLOUD_API');
-    await vi.waitFor(async () => {
-      const session = await subject.app.inject({
-        method: 'GET',
-        url: '/api/auth/session',
-        headers: { cookie: auth.cookie },
-      });
-      expect(session.statusCode).toBe(401);
-    }, { timeout: 3_500 });
-    expect((await login(subject.app, 'contraseña-nueva-segura')).cookie).toContain('panel_session=');
+    expect(subject.database.getBot('negocio-ejemplo')?.connectorType).toBe('WHATSAPP_CLOUD_API');
+    await vi.waitFor(
+      async () => {
+        const session = await subject.app.inject({
+          method: 'GET',
+          url: '/api/auth/session',
+          headers: { cookie: auth.cookie },
+        });
+        expect(session.statusCode).toBe(401);
+      },
+      { timeout: 3_500 },
+    );
+    expect((await login(subject.app, 'contraseña-nueva-segura')).cookie).toContain(
+      'panel_session=',
+    );
   });
 
-  it('retira el endpoint de sesiones locales y bloquea cambios durante un reset', async () => {
+  it('bloquea cambios durante un restablecimiento y evita duplicados', async () => {
     let release: () => void = () => undefined;
     const blocked = new Promise<void>((resolvePromise) => {
       release = resolvePromise;
@@ -105,13 +107,6 @@ describe('API de mantenimiento', () => {
     });
     subjects.push(subject);
     const auth = await login(subject.app);
-    const obsolete = await injectAuthenticated(subject.app, auth, {
-      method: 'POST',
-      url: '/api/admin/maintenance/unlink-whatsapp',
-      payload: { confirmation: 'DESVINCULAR WHATSAPP', currentPassword: CURRENT_PASSWORD },
-    });
-    expect(obsolete.statusCode).toBe(404);
-
     const first = await injectAuthenticated(subject.app, auth, {
       method: 'POST',
       url: '/api/admin/maintenance/factory-reset',
@@ -126,8 +121,12 @@ describe('API de mantenimiento', () => {
     );
     const blockedAction = await injectAuthenticated(subject.app, auth, {
       method: 'PATCH',
-      url: '/api/settings',
-      payload: { bot_enabled: false },
+      url: '/api/bots/negocio-ejemplo/configuration',
+      payload: {
+        enabled: false,
+        continuedConversationsEnabled: true,
+        menuType: 'automatic',
+      },
     });
     expect(blockedAction.statusCode).toBe(423);
     const duplicate = await injectAuthenticated(subject.app, auth, {
@@ -149,28 +148,15 @@ async function createApiSubject(beforeStage?: (stage: MaintenanceStage) => void 
   database.setPanelPasswordHash(await hashPassword(CURRENT_PASSWORD));
   const logger = createLogger('silent');
   const anonymizer = new Anonymizer('a'.repeat(32));
-  const client = new SimulatedMessagingClient();
-  const manager = new ConnectionManager(client, logger, { maxAttempts: 1, maxDelayMs: 10 });
-  const discovery = new GroupDiscoveryService(
-    client,
-    database,
-    logger,
-    {
-      onLoading: () => manager.updateState('loading_chats'),
-      onLoaded: () => manager.updateState('connected'),
-      onFailure: (code) => manager.updateState('loading_chats', code),
-    },
-    { developmentMode: false, readyRetryDelaysMs: [0] },
-  );
-  const maintenance = new MaintenanceService(database, manager, discovery, anonymizer, logger, {
+  const maintenance = new MaintenanceService(database, logger, {
     projectRoot,
     databasePath,
+    stopMessaging: async () => undefined,
+    startMessaging: async () => undefined,
     ...(beforeStage === undefined ? {} : { beforeStage }),
   });
   const app = await buildAdminServer({
     database,
-    connectionManager: manager,
-    groupDiscovery: discovery,
     anonymizer,
     logger,
     sessionSecret: 's'.repeat(32),

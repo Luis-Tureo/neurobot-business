@@ -11,9 +11,6 @@ export type AssistantModuleKey =
   | 'knowledge'
   | 'cached-answers'
   | 'ai'
-  | 'moderation'
-  | 'automatic-messages'
-  | 'polls'
   | 'requests'
   | 'statistics';
 
@@ -26,16 +23,13 @@ const common: AssistantModuleKey[] = [
   'ai',
   'statistics',
 ];
-const community: AssistantModuleKey[] = ['automatic-messages', 'polls', 'moderation'];
-const commercial: AssistantModuleKey[] = ['menus', 'catalog', 'media', 'hours', 'requests'];
+const business: AssistantModuleKey[] = ['menus', 'catalog', 'media', 'hours', 'requests'];
 
 export class AssistantModuleVisibilityService {
   public visibleModules(bot: BotRecord): AssistantModuleKey[] {
     if (['ARCHIVED', 'PENDING_DELETION', 'DELETED'].includes(bot.lifecycleStatus)) return [];
     const modules = new Set<AssistantModuleKey>(common);
-    if (bot.groupChannelEnabled) community.forEach((module) => modules.add(module));
-    if (bot.privateChannelEnabled) commercial.forEach((module) => modules.add(module));
-    if (!bot.capabilities.pollsForCommunityEngagementEnabled) modules.delete('polls');
+    business.forEach((module) => modules.add(module));
     if (!bot.capabilities.catalogEnabled) {
       modules.delete('catalog');
       modules.delete('media');

@@ -1,24 +1,13 @@
 import type { Logger } from 'pino';
 import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
-import type {
-  AssistantProfile,
-  BotMode,
-  BotRecord,
-  ConnectorType,
-  MenuType,
-} from '../domain/types.js';
+import type { AssistantProfile, BotRecord, ConnectorType, MenuType } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import { WhatsAppCloudApiAdapter } from '../messaging/whatsapp-cloud-api-adapter.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import type { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
-import type { ModerationService } from '../moderation/moderation-service.js';
-import type { AutomaticMessageService } from './automatic-message-service.js';
 import { BotInstance, type BotInstanceOptions } from './bot-instance.js';
-import type { PollRepository } from './poll-repository.js';
-import type { PollScheduler } from './poll-scheduler.js';
-import type { PollService } from './poll-service.js';
 
 export type MetaBotAccount = {
   botId: string;
@@ -51,9 +40,7 @@ export class MultiBotManager {
       new WhatsAppCloudApiAdapter(
         {
           ...(account?.accessToken === undefined ? {} : { accessToken: account.accessToken }),
-          ...(account?.phoneNumberId === undefined
-            ? {}
-            : { phoneNumberId: account.phoneNumberId }),
+          ...(account?.phoneNumberId === undefined ? {} : { phoneNumberId: account.phoneNumberId }),
           ...(account?.wabaId === undefined ? {} : { wabaId: account.wabaId }),
           apiVersion: meta.apiVersion,
           requestTimeoutMs: meta.requestTimeoutMs,
@@ -63,8 +50,13 @@ export class MultiBotManager {
   ) {
     for (const account of meta.accounts) {
       this.accountsByBot.set(account.botId, account);
-      if (account.phoneNumberId !== undefined) {
+      if (account.phoneNumberId !== undefined && this.database.getBot(account.botId) !== null) {
         this.database.configureMetaConnector(account.botId, account.phoneNumberId);
+      } else if (this.database.getBot(account.botId) === null) {
+        this.logger.warn(
+          { operation: 'META_ACCOUNT_ASSISTANT_MISSING', botId: account.botId },
+          'La cuenta Meta se conservará sin asociar hasta que exista el negocio correspondiente',
+        );
       }
     }
   }
@@ -106,7 +98,8 @@ export class MultiBotManager {
     if (existing !== undefined) return existing;
     const bot = this.database.getBot(botId);
     if (bot === null) throw new Error('El asistente no existe.');
-    if (!this.canPrepare(bot)) throw new Error('El asistente no puede prepararse en su estado actual.');
+    if (!this.canPrepare(bot))
+      throw new Error('El asistente no puede prepararse en su estado actual.');
     const account = this.accountsByBot.get(botId);
     const instance = new BotInstance(
       bot,
@@ -123,7 +116,6 @@ export class MultiBotManager {
 
   public async create(input: {
     id: string;
-    mode: BotMode;
     connectorType: ConnectorType;
     menuType: MenuType;
     profile: Omit<AssistantProfile, 'id' | 'active' | 'createdAt' | 'updatedAt'>;
@@ -172,10 +164,6 @@ export class MultiBotManager {
     };
   }
 
-  public moderationService(botId: string): ModerationService | null {
-    return this.instances.get(botId)?.moderationService() ?? null;
-  }
-
   public async restart(botId: string): Promise<void> {
     const instance = this.instances.get(botId);
     if (instance === undefined) return this.start(botId);
@@ -196,7 +184,10 @@ export class MultiBotManager {
     this.started.clear();
   }
 
-  public snapshots(): Array<{ bot: BotRecord; runtime: ReturnType<BotInstance['snapshot']> | null }> {
+  public snapshots(): Array<{
+    bot: BotRecord;
+    runtime: ReturnType<BotInstance['snapshot']> | null;
+  }> {
     return this.database
       .listBots()
       .map((bot) => ({ bot, runtime: this.instances.get(bot.id)?.snapshot() ?? null }));
@@ -212,26 +203,6 @@ export class MultiBotManager {
 
   public connectionManager(botId: string): ReturnType<BotInstance['connectionManager']> | null {
     return this.instances.get(botId)?.connectionManager() ?? null;
-  }
-
-  public groupDiscovery(botId: string): ReturnType<BotInstance['groupDiscovery']> | null {
-    return this.instances.get(botId)?.groupDiscovery() ?? null;
-  }
-
-  public automaticMessages(botId: string): AutomaticMessageService | null {
-    return this.instances.get(botId)?.automaticMessageService() ?? null;
-  }
-
-  public pollRepository(botId: string): PollRepository | null {
-    return this.instances.get(botId)?.pollDataRepository() ?? null;
-  }
-
-  public pollService(botId: string): PollService | null {
-    return this.instances.get(botId)?.pollSendingService() ?? null;
-  }
-
-  public pollScheduler(botId: string): PollScheduler | null {
-    return this.instances.get(botId)?.pollTaskScheduler() ?? null;
   }
 
   public aiQueue(botId: string): AIRequestQueueService | null {

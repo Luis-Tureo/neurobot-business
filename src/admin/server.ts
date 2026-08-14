@@ -8,41 +8,20 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { z } from 'zod';
-import type { AIProvider } from '../ai/ai-provider.js';
 import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
 import { hashNormalizedQuestion, normalizeQuestionForCache } from '../ai/answer-cache-service.js';
-import type { AutomaticMessageService } from '../core/automatic-message-service.js';
 import { CatalogService } from '../core/catalog-service.js';
-import {
-  AUTOMATIC_TEMPLATE_KEYS,
-  DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION,
-} from '../core/automatic-message-defaults.js';
-import { messageMetrics } from '../core/brief-message-defaults.js';
 import {
   AssistantModuleVisibilityService,
   type AssistantModuleKey,
 } from '../core/assistant-module-visibility-service.js';
-import type { ConnectionManager } from '../core/connection-manager.js';
-import type { GroupDiscoveryService } from '../core/group-discovery-service.js';
 import { InteractiveMessageAdapter } from '../core/interactive-message-adapter.js';
 import {
   MaintenanceAlreadyRunningError,
   type MaintenanceService,
 } from '../core/maintenance-service.js';
-import type { PollRepository } from '../core/poll-repository.js';
-import type { PollScheduler } from '../core/poll-scheduler.js';
-import type { PollService } from '../core/poll-service.js';
 import type { MultiBotManager } from '../core/multi-bot-manager.js';
-import {
-  applyProfilePreset,
-  createProfileFromPreset,
-  PROFILE_PRESETS,
-} from '../core/profile-presets.js';
-import { toLocalDateTime } from '../core/automatic-message-service.js';
-import {
-  sanitizeWhatsAppDisplayName,
-  validateWelcomeTemplate,
-} from '../core/welcome-personalization.js';
+import { createProfileFromPreset, PROFILE_PRESETS } from '../core/profile-presets.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import {
   isValidMetaWebhookPayload,
@@ -54,27 +33,21 @@ import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import type { SecretVault } from '../security/secret-vault.js';
 import { hashPassword, verifyPassword } from '../security/password.js';
-import { LocalModerationEngine } from '../moderation/local-moderation-engine.js';
-import { normalizeModerationConfigurationValue } from '../moderation/moderation-service.js';
-import { GroupModerationService } from '../moderation/group-moderation-service.js';
-import {
-  assertPlainText,
-  maskPhoneNumber,
-  normalizeBotIdentifier,
-  normalizeParticipantId,
-} from '../utils/text.js';
+import { maskPhoneNumber, normalizeBotIdentifier, normalizePhoneNumber } from '../utils/text.js';
 import { LoginAttemptGate, SessionStore, type PanelSession } from './session-store.js';
 
 const COOKIE_NAME = 'panel_session';
 
 const organizationTypeSchema = z.enum([
-  'Comunidad',
-  'Tienda',
+  'Comercio',
   'Restaurante',
-  'Distribuidora',
-  'Servicio profesional',
-  'Organización social',
-  'Institución educativa',
+  'Servicios',
+  'Salud',
+  'Belleza',
+  'Turismo',
+  'Transporte',
+  'Educación',
+  'Profesional independiente',
   'Otro',
 ]);
 
@@ -83,7 +56,6 @@ const profileFieldsSchema = z
     internalName: z.string().trim().min(1).max(120),
     organizationName: z.string().trim().min(1).max(160),
     botName: z.string().trim().min(1).max(80),
-    activationAlias: z.string().trim().startsWith('@').max(80),
     description: z.string().trim().min(1).max(1000),
     organizationType: organizationTypeSchema,
     industry: z.string().trim().min(1).max(160),
@@ -96,8 +68,6 @@ const profileFieldsSchema = z
     limitMessage: z.string().trim().min(1).max(600),
     aiErrorMessage: z.string().trim().min(1).max(600),
     medicalMessage: z.string().trim().min(1).max(600),
-    mentionPromptMessage: z.string().trim().min(1).max(600),
-    communityGreetingMessage: z.string().trim().min(1).max(1200),
     contactInformation: z.string().trim().max(1000),
     businessHours: z.string().trim().max(1000),
     address: z.string().trim().max(500).nullable(),
@@ -151,8 +121,8 @@ const aiSettingsSchema = z
     interactionHourlyLimit: z.number().int().min(1).max(5000),
     interactionCooldownSeconds: z.number().int().min(0).max(3600),
     duplicateQueryWindowSeconds: z.number().int().min(0).max(3600),
-    groupHourlyLimit: z.number().int().min(1).max(2000),
-    groupDailyLimit: z.number().int().min(1).max(10_000),
+    conversationHourlyLimit: z.number().int().min(1).max(2000),
+    conversationDailyLimit: z.number().int().min(1).max(10_000),
     globalDailyLimit: z.number().int().min(1).max(100_000),
     globalMonthlyLimit: z.number().int().min(1).max(1_000_000),
     globalDailyTokenLimit: z.number().int().min(1).max(100_000_000),
@@ -213,13 +183,6 @@ const permanentlyDeleteAssistantSchema = z
   })
   .strict();
 
-const transferCommercialConfigurationSchema = z
-  .object({
-    password: z.string().min(1).max(200),
-    confirmationPhrase: z.literal('TRANSFERIR A NEUROBOT'),
-  })
-  .strict();
-
 const panelEventSchema = z
   .object({
     eventType: z.enum([
@@ -255,10 +218,9 @@ const botCreateSchema = z
     botName: z.string().trim().min(1).max(80),
     organizationType: organizationTypeSchema,
     timezone: z.string().trim().min(1).max(80),
-    mode: z.enum(['community', 'business', 'mixed']),
     connectorType: z.literal('WHATSAPP_CLOUD_API'),
     provider: z.enum(['groq', 'disabled']),
-    preset: z.enum(['community', 'store', 'restaurant', 'distributor', 'service', 'empty']),
+    preset: z.enum(['store', 'restaurant', 'service', 'empty']),
     menuType: z
       .enum(['automatic', 'native_buttons', 'native_list', 'numbered'])
       .default('automatic'),
@@ -267,27 +229,9 @@ const botCreateSchema = z
 
 const botConfigurationSchema = z
   .object({
-    mode: z.enum(['community', 'business', 'mixed']),
     enabled: z.boolean(),
-    groupsEnabled: z.boolean(),
-    privateMessagesEnabled: z.boolean(),
-    realMentionRequired: z.boolean(),
     continuedConversationsEnabled: z.boolean(),
     menuType: z.enum(['automatic', 'native_buttons', 'native_list', 'numbered']),
-  })
-  .strict();
-
-const activationAliasesSchema = z
-  .object({
-    aliases: z
-      .array(
-        z
-          .string()
-          .trim()
-          .regex(/^@[\p{L}\p{N}_.-]{2,40}$/u),
-      )
-      .min(1)
-      .max(10),
   })
   .strict();
 
@@ -386,7 +330,7 @@ const businessHourSchema = z
 const manualBotTestSchema = z
   .object({
     kind: z.enum(['menu', 'catalog_item', 'media']),
-    groupKey: z.string().length(20),
+    recipient: z.string().trim().min(8).max(24),
     resourceId: z.number().int().positive().optional(),
     confirmed: z.literal(true),
   })
@@ -420,182 +364,6 @@ const conversationMessagesQuerySchema = z
   })
   .strict();
 
-const commandSchema = z.object({
-  name: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .regex(/^[a-z0-9_-]{2,32}$/),
-  response: z.string().trim().min(1).max(4000),
-  enabled: z.boolean(),
-  priority: z.number().int().min(-1000).max(1000),
-  healthRelated: z.boolean(),
-});
-
-const keywordSchema = z.object({
-  keywords: z
-    .array(
-      z.object({
-        term: z.string().trim().min(2).max(100),
-        priority: z.number().int().min(-1000).max(1000),
-        enabled: z.boolean(),
-      }),
-    )
-    .max(100),
-});
-
-const settingsSchema = z
-  .object({
-    bot_enabled: z.boolean().optional(),
-    fallback_response: z.string().trim().min(1).max(4000).optional(),
-    professional_warning: z.string().trim().min(1).max(1000).optional(),
-    log_level: z.enum(['error', 'warn', 'info', 'debug']).optional(),
-    user_rate_limit: z.number().int().min(1).max(100).optional(),
-    group_rate_limit: z.number().int().min(1).max(500).optional(),
-    rate_window_seconds: z.number().int().min(10).max(3600).optional(),
-    user_cooldown_seconds: z.number().int().min(0).max(3600).optional(),
-    repeat_window_seconds: z.number().int().min(0).max(86_400).optional(),
-    require_authorized_admin_in_group: z.boolean().optional(),
-    group_archive_after_hours: z.number().int().min(1).max(720).optional(),
-    group_delete_after_days: z.number().int().min(1).max(3650).optional(),
-    group_auto_delete_enabled: z.boolean().optional(),
-    group_sync_interval_minutes: z.number().int().min(5).max(1440).optional(),
-  })
-  .strict();
-
-const welcomeTemplateSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(2000)
-  .superRefine((value, context) => {
-    try {
-      validateWelcomeTemplate(value);
-    } catch (error) {
-      context.addIssue({
-        code: 'custom',
-        message: error instanceof Error ? error.message : 'Plantilla inválida.',
-      });
-    }
-  });
-
-const automaticMessagesSchema = z
-  .object({
-    timezone: z.string().trim().min(1).max(80),
-    welcome: z
-      .object({
-        enabled: z.boolean(),
-        batchWindowSeconds: z.number().int().min(5).max(300),
-        groupSimultaneous: z.boolean().default(true),
-        reconciliationIntervalSeconds: z.number().int().min(60).max(3600).default(120),
-        template: welcomeTemplateSchema,
-        includePublicName: z.boolean().default(true),
-        enableRealMention: z.boolean().default(true),
-        unknownNameFallback: z
-          .string()
-          .trim()
-          .min(1)
-          .max(80)
-          .refine(
-            (value) => sanitizeWhatsAppDisplayName(value) !== null,
-            'El texto alternativo no es válido.',
-          )
-          .default('nuevo/a integrante'),
-        multipleJoinMode: z.enum(['INDIVIDUAL', 'GROUPED']).default('GROUPED'),
-        maximumGroupedNames: z.number().int().min(1).max(5).default(5),
-        sendDelaySeconds: z.number().int().min(0).max(60).default(2),
-      })
-      .strict(),
-    dailyGreeting: z
-      .object({
-        enabled: z.boolean(),
-        sendTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u),
-        toleranceMinutes: z.number().int().min(0).max(180),
-        templates: z
-          .object({
-            monday: z.string().trim().min(1).max(2000),
-            weekday: z.string().trim().min(1).max(2000),
-            friday: z.string().trim().min(1).max(2000),
-            weekend: z.string().trim().min(1).max(2000),
-          })
-          .strict(),
-      })
-      .strict(),
-    dailyRules: z
-      .object({
-        enabled: z.boolean(),
-        sendTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u),
-        toleranceMinutes: z.number().int().min(0).max(180),
-        template: z.string().trim().min(1).max(8000),
-      })
-      .strict(),
-  })
-  .strict();
-
-const automaticManualSendSchema = z
-  .object({
-    groupKey: z.string().length(20),
-    confirmed: z.literal(true),
-    fictitiousName: z.string().trim().min(1).max(80).optional(),
-  })
-  .strict();
-
-const welcomeGroupSettingSchema = z
-  .object({
-    groupKey: z.string().length(20),
-    enabled: z.boolean(),
-    inheritAssistantTemplate: z.boolean(),
-    customTemplate: welcomeTemplateSchema.nullable(),
-  })
-  .strict();
-
-const welcomePreviewSchema = z
-  .object({
-    fictitiousName: z.string().trim().min(1).max(80),
-    groupKey: z.string().length(20).optional(),
-  })
-  .strict();
-
-const pollConfigurationSchema = z
-  .object({
-    enabled: z.boolean(),
-    sendTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u),
-    timezone: z.string().trim().min(1).max(80),
-    toleranceMinutes: z.number().int().min(0).max(180),
-    selectionMode: z.enum(['SAME_FOR_ALL', 'PER_GROUP']),
-  })
-  .strict();
-
-const pollTemplateSchema = z
-  .object({
-    id: z.number().int().positive().optional(),
-    question: z.string().trim().min(1).max(200),
-    category: z.string().trim().min(1).max(80),
-    options: z.array(z.string().trim().min(1).max(100)).min(2).max(12),
-    allowMultipleAnswers: z.boolean(),
-    enabled: z.boolean(),
-    favorite: z.boolean(),
-    disabledUntil: z.string().datetime().nullable(),
-  })
-  .strict();
-
-const pollOverrideSchema = z
-  .object({
-    localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
-    templateId: z.number().int().positive(),
-    replaceConfirmed: z.boolean().default(false),
-  })
-  .strict();
-
-const pollManualSendSchema = z
-  .object({
-    groupKey: z.string().length(20),
-    templateId: z.number().int().positive(),
-    countsAsDaily: z.boolean(),
-    confirmed: z.literal(true),
-  })
-  .strict();
-
 const aiQueueSettingsSchema = z
   .object({
     maxConcurrent: z.number().int().min(1).max(10),
@@ -618,166 +386,6 @@ const aiQueueSimulationSchema = z
   .object({
     requests: z.number().int().min(1).max(30),
     scenario: z.enum(['normal', 'repeated', 'rate_limited', 'timeout']),
-  })
-  .strict();
-
-const moderationSettingsSchema = z
-  .object({
-    enabled: z.boolean(),
-    defaultGroupMode: z.enum(['INHERIT', 'ENABLED', 'DISABLED']),
-    reviewThreshold: z.number().int().min(1).max(20),
-    warningThreshold: z.number().int().min(1).max(20),
-    adminNotificationThreshold: z.number().int().min(1).max(20),
-    recurrenceWindowDays: z.number().int().min(1).max(90),
-    warningCooldownMinutes: z.number().int().min(1).max(1440),
-    publicWarningLimit: z.number().int().min(1).max(20),
-    publicWarningWindowMinutes: z.number().int().min(1).max(1440),
-    temporaryEvidenceEnabled: z.boolean(),
-    temporaryEvidenceHours: z.number().int().min(1).max(168),
-    warningMode: z.enum(['GROUP_GENERAL', 'GROUP_MENTION', 'ADMIN_ONLY']),
-    automaticAIReviewEnabled: z.literal(false),
-    manualAIReviewEnabled: z.literal(false),
-    automaticBanEnabled: z.literal(false),
-    automaticDeletionEnabled: z.literal(false),
-    firstWarningMessage: z.string().trim().min(40).max(1000),
-    secondWarningMessage: z.string().trim().min(40).max(1000),
-    repeatedWarningMessage: z.string().trim().min(20).max(1000),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (value.reviewThreshold > value.warningThreshold)
-      context.addIssue({
-        code: 'custom',
-        path: ['reviewThreshold'],
-        message: 'El umbral de revisión no puede superar al de advertencia.',
-      });
-    const first = value.firstWarningMessage.toLocaleLowerCase('es');
-    for (const phrase of [
-      'advertencia automática',
-      'podría incumplir',
-      'generada automáticamente',
-      'revisada por la administración',
-    ])
-      if (!first.includes(phrase))
-        context.addIssue({
-          code: 'custom',
-          path: ['firstWarningMessage'],
-          message: `La primera advertencia debe incluir “${phrase}”.`,
-        });
-    const second = value.secondWarningMessage.toLocaleLowerCase('es');
-    for (const phrase of [
-      'segunda advertencia automática',
-      'administración',
-      'generada automáticamente',
-      'no implica una expulsión automática',
-    ])
-      if (!second.includes(phrase))
-        context.addIssue({
-          code: 'custom',
-          path: ['secondWarningMessage'],
-          message: `La segunda advertencia debe incluir “${phrase}”.`,
-        });
-  });
-const moderationConditionSchema = z
-  .object({
-    id: z.number().int().nonnegative().default(0),
-    conditionType: z.enum([
-      'EXACT_WORD',
-      'EXACT_PHRASE',
-      'COMBINED_WORDS',
-      'TERM_CONTAINS',
-      'REPETITION',
-      'FREQUENCY',
-      'BLOCKED_DOMAIN',
-      'ADVERTISING',
-      'PERSONAL_INFO',
-      'EXCESSIVE_CAPS',
-      'SAFE_REGEX',
-    ]),
-    operator: z.enum(['ALL', 'ANY', 'EXCLUDE']),
-    normalizedValue: z.string().trim().max(500),
-    configuration: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
-    enabled: z.boolean(),
-  })
-  .strict();
-const moderationExceptionSchema = z
-  .object({
-    id: z.number().int().nonnegative().default(0),
-    exceptionType: z.enum(['ADMINISTRATOR', 'EXACT_PHRASE', 'EXACT_WORD', 'ALLOWED_DOMAIN']),
-    normalizedValue: z.string().trim().max(500),
-    enabled: z.boolean(),
-  })
-  .strict();
-const moderationRuleSchema = z
-  .object({
-    name: z.string().trim().min(1).max(120),
-    description: z.string().trim().min(1).max(1000),
-    category: z.string().trim().min(1).max(80),
-    severity: z.enum(['INFORMATIVA', 'LEVE', 'MEDIA', 'ALTA', 'CRITICA']),
-    detectionType: z.string().trim().min(1).max(80),
-    score: z.number().int().min(0).max(20),
-    reviewThreshold: z.number().int().min(1).max(20),
-    warningThreshold: z.number().int().min(1).max(20),
-    adminNotificationThreshold: z.number().int().min(1).max(20),
-    enabled: z.boolean(),
-    appliesToAllGroups: z.boolean(),
-    conditions: z.array(moderationConditionSchema).max(50),
-    exceptions: z.array(moderationExceptionSchema).max(50),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (value.enabled && !value.conditions.some((condition) => condition.enabled))
-      context.addIssue({
-        code: 'custom',
-        path: ['conditions'],
-        message: 'Una regla activa requiere al menos una condición.',
-      });
-    const valueOptional = new Set([
-      'REPETITION',
-      'FREQUENCY',
-      'PERSONAL_INFO',
-      'EXCESSIVE_CAPS',
-      'ADVERTISING',
-    ]);
-    for (const [index, condition] of value.conditions.entries())
-      if (
-        condition.enabled &&
-        !valueOptional.has(condition.conditionType) &&
-        condition.normalizedValue.trim() === ''
-      )
-        context.addIssue({
-          code: 'custom',
-          path: ['conditions', index, 'normalizedValue'],
-          message: 'Esta condición requiere un valor concreto.',
-        });
-    for (const [index, condition] of value.conditions.entries())
-      if (
-        condition.conditionType === 'SAFE_REGEX' &&
-        !LocalModerationEngine.validateSafePattern(condition.normalizedValue)
-      )
-        context.addIssue({
-          code: 'custom',
-          path: ['conditions', index, 'normalizedValue'],
-          message: 'El patrón avanzado no es seguro.',
-        });
-  });
-const moderationTermSchema = z
-  .object({
-    ruleId: z.number().int().positive().nullable(),
-    term: z.string().trim().min(1).max(200),
-    category: z.string().trim().min(1).max(80),
-    severity: z.enum(['INFORMATIVA', 'LEVE', 'MEDIA', 'ALTA', 'CRITICA']),
-    matchMode: z.enum(['WHOLE_WORD', 'EXACT_PHRASE']),
-    score: z.number().int().min(0).max(20),
-    enabled: z.boolean(),
-  })
-  .strict();
-const moderationImportSchema = z
-  .object({
-    rules: z.array(moderationRuleSchema).max(200),
-    terms: z.array(moderationTermSchema).max(1000),
-    settings: moderationSettingsSchema.optional(),
-    confirmed: z.literal(true),
   })
   .strict();
 
@@ -804,21 +412,13 @@ const factoryResetSchema = z
 
 export type AdminServerContext = {
   database: AppDatabase;
-  connectionManager: ConnectionManager;
-  groupDiscovery: GroupDiscoveryService;
   anonymizer: Anonymizer;
   logger: Logger;
   sessionSecret: string;
   applicationVersion: string;
   developmentMode: boolean;
-  businessOnly?: boolean;
   publicDirectory?: string;
   maintenance?: MaintenanceService;
-  automaticMessages?: AutomaticMessageService;
-  pollRepository?: PollRepository;
-  pollService?: PollService;
-  pollScheduler?: PollScheduler;
-  aiProvider?: AIProvider;
   brandingDirectory?: string;
   multiBotManager?: MultiBotManager;
   aiProviderFactory?: AIProviderFactory;
@@ -844,10 +444,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
   const sessions = new SessionStore(context.sessionSecret);
   const loginGate = new LoginAttemptGate();
   const maintenanceGate = new LoginAttemptGate(3, 15 * 60 * 1000, 15 * 60 * 1000);
-  const manualAutomaticSendGate = new Map<string, number>();
-  const manualPollSendGate = new Map<string, number>();
   const moduleVisibility = new AssistantModuleVisibilityService();
-  const groupModeration = new GroupModerationService(context.database);
 
   app.removeContentTypeParser('application/json');
   app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (request, body, done) => {
@@ -1021,24 +618,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
   });
 
   app.addHook('preHandler', async (request, reply) => {
-    if (context.businessOnly !== true || !request.url.startsWith('/api/')) return;
-    const route = request.routeOptions.url ?? request.url.split('?')[0] ?? '';
-    const communityRoute =
-      route.startsWith('/api/groups') ||
-      route.startsWith('/api/linked-groups') ||
-      route.startsWith('/api/polls') ||
-      route.startsWith('/api/automatic-messages') ||
-      route.includes('/moderation') ||
-      route.includes('/groups') ||
-      route.includes('/manual-test');
-    if (!communityRoute) return;
-    await reply.code(404).send({
-      error: 'Esta función no forma parte de Neurobot Business.',
-      code: 'BUSINESS_ONLY_ROUTE',
-    });
-  });
-
-  app.addHook('preHandler', async (request, reply) => {
     if (!request.url.startsWith('/api/')) return;
     const route = request.routeOptions.url ?? '';
     const module = moduleForProtectedRoute(route);
@@ -1147,8 +726,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           botName: bot.botName,
           organizationName: bot.organizationName,
           organizationType: bot.organizationType,
-          mode: bot.mode,
-          operatingMode: bot.operatingMode,
           connectorType: bot.connectorType,
           capabilities: bot.capabilities,
           enabled: bot.enabled,
@@ -1158,20 +735,12 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           aiConfigured: provider?.isConfigured() ?? false,
           aiEnabled: aiSettings.enabled,
           aiProvider: aiSettings.provider,
-          activeGroups:
-            context.businessOnly === true
-              ? 0
-              : context.database
-                  .listBotGroups(bot.id, (identifier) => context.anonymizer.identifier(identifier))
-                  .filter((group) => group.active && !group.blocked).length,
           requestsToday: usage.requests,
           tokensToday: usage.totalTokens,
           lastConnectedAt: runtime?.connection.lastConnectedAt ?? bot.lastConnectedAt,
           meta: metaConfigurationFor(context, bot.id),
           lifecycleStatus: bot.lifecycleStatus,
           deletionLocked: bot.deletionLocked,
-          groupChannelEnabled: bot.groupChannelEnabled,
-          privateChannelEnabled: bot.privateChannelEnabled,
           connectorConflict: safeConnectorConflict(context, bot),
           visibleModules: moduleVisibility.visibleModules(bot),
         };
@@ -1187,7 +756,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         id: bot.id,
         botName: bot.botName,
         organizationName: bot.organizationName,
-        operatingMode: bot.operatingMode,
+        organizationType: bot.organizationType,
         phoneNumber: adminPhoneNumberFor(context, bot.id),
         deletedAt: bot.deletedAt,
         scheduledPermanentDeletionAt: bot.scheduledPermanentDeletionAt,
@@ -1315,64 +884,15 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
   );
 
   app.post(
-    '/api/bots/:botId/transfer-commercial-to-neurobot',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const sourceBotId = parseBotId(request.params);
-      const source = context.database.getBot(sourceBotId);
-      if (source === null) return reply.code(404).send({ error: 'Asistente no encontrado.' });
-      if (
-        source.id === 'neurobot' ||
-        source.mode === 'community' ||
-        source.lifecycleStatus === 'ARCHIVED'
-      ) {
-        return reply.code(409).send({
-          error: 'Este asistente no contiene una configuración comercial transferible.',
-          code: 'COMMERCIAL_TRANSFER_NOT_AVAILABLE',
-        });
-      }
-      const input = transferCommercialConfigurationSchema.parse(request.body);
-      const session = getSession(request, sessions) as PanelSession;
-      const passwordHash = context.database.getPanelPasswordHash(session.username);
-      if (passwordHash === null || !(await verifyPassword(input.password, passwordHash))) {
-        return reply
-          .code(401)
-          .send({ error: 'La contraseña actual no es válida.', code: 'INVALID_PASSWORD' });
-      }
-      const result = context.database.transferCommercialConfigurationToNeurobot(
-        sourceBotId,
-        context.anonymizer.identifier(session.username),
-      );
-      if (context.multiBotManager !== undefined) {
-        await context.multiBotManager.stop(sourceBotId);
-        await context.multiBotManager.stop('neurobot');
-        await context.multiBotManager.start('neurobot');
-      }
-      audit(context, 'draft_configuration_transferred', sourceBotId, 'ok', 'neurobot');
-      return { transferred: true, targetAssistantId: 'neurobot', sourceArchived: true, result };
-    },
-  );
-
-  app.post(
     '/api/bots',
     { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
     async (request, reply) => {
       if (context.multiBotManager === undefined)
         return reply.code(503).send({ error: 'El gestor multibot no está disponible.' });
-      const parsedInput = botCreateSchema.parse(request.body);
-      const input =
-        context.businessOnly === true
-          ? {
-              ...parsedInput,
-              mode: 'business' as const,
-              connectorType: 'WHATSAPP_CLOUD_API' as const,
-              preset: parsedInput.preset === 'community' ? ('empty' as const) : parsedInput.preset,
-            }
-          : parsedInput;
+      const input = botCreateSchema.parse(request.body);
       const profile = createProfileFromPreset(input);
       const bot = await context.multiBotManager.create({
         id: input.id,
-        mode: input.mode,
         connectorType: input.connectorType,
         menuType: input.menuType,
         profile,
@@ -1406,13 +926,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         provider?.getModelInformation().model ?? 'disabled',
       ),
       usage: context.database.getAIUsageSummary(profile.id, period.date, period.month),
-      groups:
-        context.businessOnly === true
-          ? []
-          : context.database.listBotGroups(botId, (identifier) =>
-              context.anonymizer.identifier(identifier),
-            ),
-      activationAliases: context.database.listBotActivationAliases(botId),
       activeConversations: context.database.countActiveConversationStates(botId),
       pendingRequests: context.database
         .listHumanAssistanceRequests(botId)
@@ -1509,46 +1022,16 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     },
   );
 
-  app.put(
-    '/api/bots/:botId/activation-aliases',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const botId = parseBotId(request.params);
-      const input = activationAliasesSchema.parse(request.body);
-      const profile = context.database.getBotProfile(botId);
-      const aliases = context.database.saveBotActivationAliases(botId, [
-        profile.activationAlias,
-        ...input.aliases,
-      ]);
-      audit(context, 'bot_activation_aliases_update', botId, 'ok', botId);
-      return { aliases };
-    },
-  );
-
   app.patch(
     '/api/bots/:botId/configuration',
     { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
     async (request) => {
       const botId = parseBotId(request.params);
-      const parsedInput = botConfigurationSchema.parse(request.body);
-      const input =
-        context.businessOnly === true
-          ? {
-              ...parsedInput,
-              mode: 'business' as const,
-              groupsEnabled: false,
-              privateMessagesEnabled: true,
-              realMentionRequired: false,
-            }
-          : parsedInput;
+      const input = botConfigurationSchema.parse(request.body);
       const previous = context.database.getBot(botId);
       const bot = context.database.updateBotConfiguration({ botId, ...input });
       if (context.multiBotManager !== undefined) {
-        const connectionSettingsChanged =
-          previous !== null &&
-          (previous.privateMessagesEnabled !== bot.privateMessagesEnabled ||
-            previous.groupsEnabled !== bot.groupsEnabled ||
-            previous.enabled !== bot.enabled);
+        const connectionSettingsChanged = previous !== null && previous.enabled !== bot.enabled;
         if (!bot.enabled) await context.multiBotManager.stop(botId);
         else if (connectionSettingsChanged) {
           await context.multiBotManager.stop(botId);
@@ -1567,11 +1050,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const botId = parseBotId(request.params);
       const existing = context.database.getBotProfile(botId);
       const input = profileFieldsSchema.parse(request.body);
-      const fixedIdentity =
-        botId === 'neurobot'
-          ? { ...input, botName: 'Neurobot', activationAlias: '@neurobot' }
-          : input;
-      const profile = context.database.saveAssistantProfile({ ...existing, ...fixedIdentity });
+      const profile = context.database.saveAssistantProfile({ ...existing, ...input });
       audit(context, 'bot_profile_update', String(profile.id), 'ok', botId);
       return { profile };
     },
@@ -1872,626 +1351,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     },
   );
 
-  app.get(
-    '/api/bots/:botId/moderation',
-    { preHandler: requireSession(sessions) },
-    async (request) => {
-      const botId = parseBotId(request.params);
-      const cases = context.database.listModerationCases(botId);
-      const groups = context.database.listBotGroups(botId, (identifier) =>
-        context.anonymizer.identifier(identifier),
-      );
-      const profiles = context.database.listGroupModerationProfiles(botId);
-      return {
-        settings: context.database.getModerationSettings(botId),
-        cases,
-        groups: groups
-          .filter((group) => group.active && !group.blocked)
-          .map((group) => {
-            const profile =
-              profiles.find((item) => item.groupHash === group.groupHash) ??
-              context.database.getGroupModerationProfile(botId, group.groupHash);
-            return {
-              groupHash: group.groupHash,
-              name: group.name,
-              active: true,
-              enabled: profile.enabled,
-              analysisStatus: profile.analysisStatus,
-              testStatus: profile.testStatus,
-            };
-          }),
-        metrics: context.database.getModerationMetrics(botId),
-        summary: {
-          protectedGroups: profiles.filter(
-            (profile) => profile.enabled && profile.analysisStatus === 'ACTIVE',
-          ).length,
-          pendingCases: cases.filter((item) => item.status === 'PENDING').length,
-          lastEvent: cases[0]?.createdAt ?? null,
-          aiConsumption: '0 tokens durante la moderación diaria.',
-        },
-        administrators: context.database.listAdministrators().map((identifier) => ({
-          identifier,
-          hash: context.anonymizer.identifier(identifier),
-          label: identifier.replace(/@(?:c|lid)\.us$/u, ''),
-        })),
-        safety: {
-          automaticAIReviewEnabled: false,
-          manualAIReviewEnabled: false,
-          automaticBanEnabled: false,
-          automaticDeletionEnabled: false,
-        },
-      };
-    },
-  );
-
-  app.get(
-    '/api/bots/:botId/moderation/groups/:groupHash',
-    { preHandler: requireSession(sessions) },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const groupHash = z
-        .object({ groupHash: z.string().length(20) })
-        .parse(request.params).groupHash;
-      const group = context.database
-        .listBotGroups(botId, (identifier) => context.anonymizer.identifier(identifier))
-        .find((item) => item.groupHash === groupHash && item.active && !item.blocked);
-      if (group === undefined) return reply.code(404).send({ error: 'Grupo no disponible.' });
-      const profile = context.database.getGroupModerationProfile(botId, groupHash);
-      const tests = context.database.listGroupModerationTests(botId, groupHash, profile.rulesHash);
-      return {
-        group: { groupHash, name: group.name },
-        profile: { ...profile, compiled: undefined },
-        tests,
-        recipientHashes: context.database
-          .listGroupModerationRecipients(botId, groupHash)
-          .map((item) => item.administratorHash),
-        progress: {
-          rulesSaved: profile.rulesText.length >= 20,
-          analyzed:
-            profile.compiled !== null &&
-            !['DRAFT', 'OUTDATED', 'ANALYSIS_FAILED'].includes(profile.analysisStatus),
-          automaticTestsPassed:
-            tests.some((item) => item.testType === 'AUTOMATIC') &&
-            tests
-              .filter((item) => item.testType === 'AUTOMATIC')
-              .every((item) => item.passed === 1),
-          manualAllowedPassed: tests.some(
-            (item) => item.testType === 'MANUAL_ALLOWED' && item.passed === 1,
-          ),
-          manualWarningPassed: tests.some(
-            (item) => item.testType === 'MANUAL_WARNING' && item.passed === 1,
-          ),
-          ready: profile.testStatus === 'APPROVED',
-        },
-      };
-    },
-  );
-
-  app.patch(
-    '/api/bots/:botId/moderation/groups/:groupHash/draft',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const groupHash = z
-        .object({ groupHash: z.string().length(20) })
-        .parse(request.params).groupHash;
-      const { rulesText } = z
-        .object({ rulesText: z.string().trim().min(20).max(20_000) })
-        .strict()
-        .parse(request.body);
-      if (
-        !context.database
-          .listBotGroups(botId, (identifier) => context.anonymizer.identifier(identifier))
-          .some((group) => group.groupHash === groupHash && group.active && !group.blocked)
-      )
-        return reply.code(404).send({ error: 'Grupo no disponible.' });
-      const previous = context.database.getGroupModerationProfile(botId, groupHash);
-      const profile = groupModeration.saveDraft(botId, groupHash, rulesText);
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'GROUP_MODERATION_RULES_DRAFT_SAVED',
-        groupHash,
-        result: 'disabled',
-      });
-      if (previous.rulesHash !== '' && previous.rulesHash !== profile.rulesHash)
-        context.database.recordTechnicalEvent({
-          botId,
-          eventType: 'GROUP_MODERATION_RULES_OUTDATED',
-          groupHash,
-          result: 'disabled',
-        });
-      return { profile: { ...profile, compiled: undefined } };
-    },
-  );
-
-  app.post(
-    '/api/bots/:botId/moderation/groups/:groupHash/analyze',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const groupHash = z
-        .object({ groupHash: z.string().length(20) })
-        .parse(request.params).groupHash;
-      const provider = context.aiProviderFactory?.forBot(botId);
-      if (provider === undefined)
-        return reply
-          .code(503)
-          .send({ error: 'El proveedor de IA no está disponible.', code: 'AI_NOT_CONFIGURED' });
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'GROUP_MODERATION_RULES_ANALYSIS_STARTED',
-        groupHash,
-        result: 'started',
-      });
-      try {
-        const result = await groupModeration.analyze(botId, groupHash, provider);
-        context.database.recordTechnicalEvent({
-          botId,
-          eventType: 'GROUP_MODERATION_RULES_ANALYSIS_COMPLETED',
-          groupHash,
-          result: result.reused ? 'reused' : result.profile.testStatus,
-          itemCount: result.automaticTests.length,
-        });
-        return { ...result, profile: { ...result.profile, compiled: undefined } };
-      } catch (error) {
-        context.database.recordTechnicalEvent({
-          botId,
-          eventType: 'GROUP_MODERATION_RULES_ANALYSIS_FAILED',
-          groupHash,
-          result: 'failed',
-          errorCode: provider.classifyProviderError(error),
-        });
-        context.logger.error(
-          {
-            operation: 'GROUP_MODERATION_RULES_ANALYSIS_FAILED',
-            botId,
-            groupHash,
-            errorCode: provider.classifyProviderError(error),
-          },
-          'No fue posible preparar la moderación del grupo',
-        );
-        return reply.code(422).send({
-          error:
-            'No fue posible preparar una configuración segura. Revisa el texto e inténtalo nuevamente.',
-          code: 'MODERATION_ANALYSIS_FAILED',
-        });
-      }
-    },
-  );
-
-  app.post(
-    '/api/bots/:botId/moderation/groups/:groupHash/test',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const botId = parseBotId(request.params);
-      const groupHash = z
-        .object({ groupHash: z.string().length(20) })
-        .parse(request.params).groupHash;
-      const input = z
-        .object({ text: z.string().min(1).max(4000), expected: z.enum(['ALLOW', 'WARNING']) })
-        .strict()
-        .parse(request.body);
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'GROUP_MODERATION_TEST_STARTED',
-        groupHash,
-        result: 'started',
-      });
-      const result = groupModeration.test(botId, groupHash, input.text, input.expected);
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: result.passed ? 'GROUP_MODERATION_TEST_PASSED' : 'GROUP_MODERATION_TEST_FAILED',
-        groupHash,
-        result: result.passed ? 'passed' : 'failed',
-      });
-      return {
-        actual: result.actual,
-        passed: result.passed,
-        categories: result.result.categories,
-        profile: { ...result.profile, compiled: undefined },
-        notice: 'El texto no fue guardado y no se utilizó IA.',
-      };
-    },
-  );
-
-  app.patch(
-    '/api/bots/:botId/moderation/groups/:groupHash/activation',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const groupHash = z
-        .object({ groupHash: z.string().length(20) })
-        .parse(request.params).groupHash;
-      const enabled = z.object({ enabled: z.boolean() }).strict().parse(request.body).enabled;
-      if (enabled && context.database.listGroupModerationRecipients(botId, groupHash).length === 0)
-        return reply.code(409).send({
-          error: 'Selecciona al menos un administrador para los avisos privados.',
-          code: 'MODERATION_ADMIN_REQUIRED',
-        });
-      try {
-        const profile = context.database.setGroupModerationEnabled(botId, groupHash, enabled);
-        context.database.recordTechnicalEvent({
-          botId,
-          eventType: enabled ? 'GROUP_MODERATION_ENABLED' : 'GROUP_MODERATION_DISABLED',
-          groupHash,
-          result: 'updated',
-        });
-        return { profile: { ...profile, compiled: undefined } };
-      } catch {
-        return reply.code(409).send({
-          error: 'Completa y aprueba las pruebas antes de activar la moderación.',
-          code: 'MODERATION_TESTS_REQUIRED',
-        });
-      }
-    },
-  );
-
-  app.patch(
-    '/api/bots/:botId/moderation/groups/:groupHash/administrators',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const groupHash = z
-        .object({ groupHash: z.string().length(20) })
-        .parse(request.params).groupHash;
-      const identifiers = z
-        .object({ identifiers: z.array(z.string().min(5).max(100)).max(20) })
-        .strict()
-        .parse(request.body).identifiers;
-      if (context.secretVault?.isConfigured() !== true)
-        return reply.code(409).send({ error: 'El cifrado local no está disponible.' });
-      const available = new Set(context.database.listAdministrators());
-      if (identifiers.some((identifier) => !available.has(identifier)))
-        return reply
-          .code(400)
-          .send({ error: 'Selecciona solamente administradores configurados.' });
-      const recipients = identifiers.map((identifier) => {
-        const administratorHash = context.anonymizer.identifier(identifier);
-        return {
-          administratorHash,
-          encryptedIdentifier: context.secretVault?.encrypt(
-            identifier,
-            `moderation-recipient:${botId}:${groupHash}:${administratorHash}`,
-          ).encrypted as string,
-        };
-      });
-      context.database.replaceGroupModerationRecipients(botId, groupHash, recipients);
-      return { saved: true, recipientHashes: recipients.map((item) => item.administratorHash) };
-    },
-  );
-
-  app.patch(
-    '/api/bots/:botId/moderation/settings',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const botId = parseBotId(request.params);
-      const input = moderationSettingsSchema.parse(request.body);
-      const previous = context.database.getModerationSettings(botId);
-      const settings = context.database.saveModerationSettings(botId, input);
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: settings.enabled ? 'MODERATION_ENABLED' : 'MODERATION_DISABLED',
-        result: 'updated',
-      });
-      audit(
-        context,
-        previous.enabled === settings.enabled
-          ? 'moderation_settings_update'
-          : settings.enabled
-            ? 'moderation_enable'
-            : 'moderation_disable',
-        botId,
-        'ok',
-        botId,
-      );
-      return { settings };
-    },
-  );
-
-  app.post(
-    '/api/bots/:botId/moderation/rules',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const botId = parseBotId(request.params);
-      const input = moderationRuleSchema.parse(request.body);
-      const rule = context.database.createModerationRule(botId, sanitizeModerationRule(input));
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'MODERATION_RULE_CREATED',
-        result: rule.enabled ? 'enabled' : 'draft',
-        itemCount: rule.conditions.length,
-      });
-      audit(context, 'moderation_rule_create', String(rule.id), 'ok', botId);
-      return { rule };
-    },
-  );
-
-  app.put(
-    '/api/bots/:botId/moderation/rules/:ruleId',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const botId = parseBotId(request.params);
-      const ruleId = z
-        .object({ ruleId: z.coerce.number().int().positive() })
-        .parse(request.params).ruleId;
-      const rule = context.database.updateModerationRule(
-        botId,
-        ruleId,
-        sanitizeModerationRule(moderationRuleSchema.parse(request.body)),
-      );
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: rule.enabled ? 'MODERATION_RULE_UPDATED' : 'MODERATION_RULE_DISABLED',
-        result: 'updated',
-      });
-      audit(context, 'moderation_rule_update', String(ruleId), 'ok', botId);
-      return { rule };
-    },
-  );
-
-  app.delete(
-    '/api/bots/:botId/moderation/rules/:ruleId',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const ruleId = z
-        .object({ ruleId: z.coerce.number().int().positive() })
-        .parse(request.params).ruleId;
-      if (!context.database.deleteModerationRule(botId, ruleId))
-        return reply.code(404).send({ error: 'Regla no encontrada.' });
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'MODERATION_RULE_DELETED',
-        result: 'deleted',
-      });
-      audit(context, 'moderation_rule_delete', String(ruleId), 'ok', botId);
-      return { deleted: true };
-    },
-  );
-
-  app.post(
-    '/api/bots/:botId/moderation/terms',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const botId = parseBotId(request.params);
-      const input = moderationTermSchema.parse(request.body);
-      const term = context.database.createModerationTerm(botId, {
-        ...input,
-        normalizedTerm: normalizeModerationConfigurationValue(input.term),
-      });
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'MODERATION_TERM_CREATED',
-        result: 'created',
-      });
-      audit(context, 'moderation_term_create', String(term.id), 'ok', botId);
-      return { term };
-    },
-  );
-
-  app.delete(
-    '/api/bots/:botId/moderation/terms/:termId',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const termId = z
-        .object({ termId: z.coerce.number().int().positive() })
-        .parse(request.params).termId;
-      if (!context.database.deleteModerationTerm(botId, termId))
-        return reply.code(404).send({ error: 'Término no encontrado.' });
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'MODERATION_TERM_REMOVED',
-        result: 'deleted',
-      });
-      return { deleted: true };
-    },
-  );
-
-  app.post(
-    '/api/bots/:botId/moderation/test',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const botId = parseBotId(request.params);
-      const text = z
-        .object({ text: z.string().min(1).max(4000) })
-        .strict()
-        .parse(request.body).text;
-      const service = context.multiBotManager?.moderationService(botId);
-      const result =
-        service?.test(text) ??
-        new LocalModerationEngine().evaluate(
-          {
-            assistantId: botId,
-            groupHash: 'simulation',
-            participantHash: 'simulation',
-            messageHash: randomUUID(),
-            text,
-            isAdministrator: false,
-            simulate: true,
-          },
-          context.database.getModerationSettings(botId),
-          context.database.listModerationRules(botId, false),
-          context.database.listModerationTerms(botId).map((item) => ({
-            id: Number(item.id),
-            term: String(item.term),
-            normalizedTerm: String(item.normalizedTerm),
-            category: String(item.category),
-            severity: String(item.severity) as
-              'INFORMATIVA' | 'LEVE' | 'MEDIA' | 'ALTA' | 'CRITICA',
-            matchMode: String(item.matchMode),
-            score: Number(item.score),
-            enabled: item.enabled === 1,
-          })),
-        );
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'MODERATION_RULE_TESTED',
-        result: result.action,
-        itemCount: result.matchedRules.length,
-      });
-      return {
-        simulation: true,
-        result,
-        notice: 'Simulación: el texto no fue guardado, no se enviaron mensajes y no se utilizó IA.',
-      };
-    },
-  );
-
-  app.patch(
-    '/api/bots/:botId/moderation/cases/:caseId',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const caseId = z
-        .object({ caseId: z.coerce.number().int().positive() })
-        .parse(request.params).caseId;
-      const decision = z
-        .object({ decision: z.enum(['CONFIRMED', 'FALSE_POSITIVE', 'DISMISSED', 'RESOLVED']) })
-        .strict()
-        .parse(request.body).decision;
-      const existing = context.database
-        .listModerationCases(botId)
-        .find((item) => item.id === caseId);
-      if (existing === undefined || !context.database.reviewModerationCase(botId, caseId, decision))
-        return reply.code(404).send({ error: 'Caso no encontrado.' });
-      if (decision === 'FALSE_POSITIVE') {
-        context.database.decrementModerationRecurrence(
-          botId,
-          String(existing.groupHash),
-          String(existing.participantHash),
-        );
-        context.database.incrementModerationMetric(botId, 'falsePositives');
-      }
-      if (decision === 'CONFIRMED') context.database.incrementModerationMetric(botId, 'confirmed');
-      const eventType =
-        decision === 'FALSE_POSITIVE'
-          ? 'MODERATION_FALSE_POSITIVE'
-          : decision === 'CONFIRMED'
-            ? 'MODERATION_CASE_CONFIRMED'
-            : decision === 'DISMISSED'
-              ? 'MODERATION_CASE_DISMISSED'
-              : 'MODERATION_CASE_RESOLVED';
-      context.database.recordTechnicalEvent({ botId, eventType, result: decision });
-      if (decision === 'FALSE_POSITIVE')
-        context.database.recordTechnicalEvent({
-          botId,
-          eventType: 'GROUP_MODERATION_FALSE_POSITIVE',
-          groupHash: String(existing.groupHash),
-          result: decision,
-        });
-      if (decision === 'RESOLVED')
-        context.database.recordTechnicalEvent({
-          botId,
-          eventType: 'GROUP_MODERATION_CASE_RESOLVED',
-          groupHash: String(existing.groupHash),
-          result: decision,
-        });
-      audit(context, 'moderation_case_review', String(caseId), 'ok', botId);
-      return { reviewed: true, decision };
-    },
-  );
-
-  app.get(
-    '/api/bots/:botId/moderation/cases/:caseId/evidence',
-    { preHandler: requireSession(sessions) },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const caseId = z
-        .object({ caseId: z.coerce.number().int().positive() })
-        .parse(request.params).caseId;
-      const evidence = context.database.getModerationEvidence(botId, caseId);
-      if (evidence === null)
-        return reply.code(404).send({ error: 'La evidencia no existe o ya expiró.' });
-      if (context.secretVault?.isConfigured() !== true)
-        return reply.code(409).send({ error: 'El cifrado local no está disponible.' });
-      const decrypted = context.secretVault.decrypt(
-        evidence.encrypted,
-        `moderation:${botId}:${evidence.messageHash}`,
-      );
-      return {
-        temporary: true,
-        expiresAt: evidence.expiresAt,
-        text: decrypted.replace(/^moderation-evidence:/u, ''),
-      };
-    },
-  );
-
-  app.get(
-    '/api/bots/:botId/moderation/export',
-    { preHandler: requireSession(sessions) },
-    async (request) => {
-      const botId = parseBotId(request.params);
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'MODERATION_RULES_EXPORTED',
-        result: 'exported',
-      });
-      return {
-        version: 1,
-        assistantId: botId,
-        settings: context.database.getModerationSettings(botId),
-        rules: context.database
-          .listModerationRules(botId)
-          .map((rule) => ({ ...moderationRuleForTransfer(rule), enabled: false })),
-        terms: context.database.listModerationTerms(botId).map((term) => ({
-          ruleId: null,
-          term: String(term.term),
-          category: String(term.category),
-          severity: String(term.severity),
-          matchMode: String(term.matchMode),
-          score: Number(term.score),
-          enabled: false,
-        })),
-      };
-    },
-  );
-
-  app.post(
-    '/api/bots/:botId/moderation/import',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const botId = parseBotId(request.params);
-      const input = moderationImportSchema.parse(request.body);
-      const existingNames = new Set(
-        context.database
-          .listModerationRules(botId)
-          .map((rule) => rule.name.toLocaleLowerCase('es')),
-      );
-      let importedRules = 0;
-      for (const candidate of input.rules) {
-        if (existingNames.has(candidate.name.toLocaleLowerCase('es'))) continue;
-        context.database.createModerationRule(
-          botId,
-          sanitizeModerationRule({ ...candidate, enabled: false }),
-        );
-        importedRules += 1;
-      }
-      let importedTerms = 0;
-      for (const term of input.terms) {
-        try {
-          context.database.createModerationTerm(botId, {
-            ...term,
-            ruleId: null,
-            normalizedTerm: normalizeModerationConfigurationValue(term.term),
-            enabled: false,
-          });
-          importedTerms += 1;
-        } catch {
-          continue;
-        }
-      }
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'MODERATION_RULES_IMPORTED',
-        result: 'imported',
-        itemCount: importedRules,
-      });
-      audit(context, 'moderation_rules_import', botId, 'ok', botId);
-      return { importedRules, importedTerms, activated: false };
-    },
-  );
-
   app.get('/api/ai/global-limits', { preHandler: requireSession(sessions) }, async () => ({
     limits: context.database.getGlobalAILimits(),
   }));
@@ -2597,37 +1456,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         .header('content-disposition', `attachment; filename="${botId}-ai-usage.json"`)
         .type('application/json')
         .send(exportData);
-    },
-  );
-
-  app.get('/api/bots/:botId/groups', { preHandler: requireSession(sessions) }, async (request) => ({
-    groups: context.database
-      .listBotGroups(parseBotId(request.params), (identifier) =>
-        context.anonymizer.identifier(identifier),
-      )
-      .filter((group) => group.botIsMember === true && group.status !== 'BOT_NOT_MEMBER'),
-  }));
-
-  app.post(
-    '/api/bots/:botId/groups/:key/block',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const key = z.object({ key: z.string().length(20) }).parse(request.params).key;
-      const input = z.object({ blocked: z.boolean() }).strict().parse(request.body);
-      const groupId = resolveBotGroupKey(context, botId, key);
-      if (groupId === null || !context.database.setBotGroupBlocked(botId, groupId, input.blocked)) {
-        return reply.code(404).send({ error: 'Grupo no encontrado.' });
-      }
-      recordGroupTechnical(
-        context,
-        input.blocked ? 'GROUP_MANUALLY_BLOCKED' : 'GROUP_MANUALLY_UNBLOCKED',
-        groupId,
-        'ok',
-        botId,
-      );
-      audit(context, input.blocked ? 'bot_group_block' : 'bot_group_unblock', key, 'ok', botId);
-      return { blocked: input.blocked };
     },
   );
 
@@ -2993,11 +1821,8 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     async (request, reply) => {
       const botId = parseBotId(request.params);
       const input = manualBotTestSchema.parse(request.body);
-      const groupId = resolveBotGroupKey(context, botId, input.groupKey);
+      const recipient = normalizePhoneNumber(input.recipient);
       const client = context.multiBotManager?.client(botId) ?? null;
-      if (groupId === null || !context.database.canBotSendToGroup(botId, groupId)) {
-        return reply.code(404).send({ error: 'El grupo de prueba no está disponible.' });
-      }
       if (client === null || !client.isReady()) {
         return reply.code(503).send({ error: 'WhatsApp no está conectado para este asistente.' });
       }
@@ -3021,7 +1846,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           return reply.code(404).send({ error: 'No existe un menú inicial activo.' });
         const adapter = new InteractiveMessageAdapter(client, context.logger, botId);
         await adapter.sendMenu(
-          groupId,
+          recipient,
           menu,
           context.database.listMenuOptions(botId, menu.id),
           context.database.getBot(botId)?.menuType ?? 'numbered',
@@ -3030,7 +1855,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         if (input.resourceId === undefined)
           return reply.code(400).send({ error: 'Selecciona un producto o servicio.' });
         await client.sendMessage(
-          groupId,
+          recipient,
           new CatalogService(context.database, botId).itemText(input.resourceId),
         );
       } else {
@@ -3044,12 +1869,18 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           return reply.code(404).send({ error: 'La imagen no está disponible.' });
         const root = context.mediaDirectory ?? resolve(process.cwd(), 'data', 'media');
         await client.sendMedia(
-          groupId,
+          recipient,
           join(root, botId, basename(asset.relativePath)),
           asset.caption,
         );
       }
-      audit(context, `manual_${input.kind}_test`, input.groupKey, 'sent', botId);
+      audit(
+        context,
+        `manual_${input.kind}_test`,
+        context.anonymizer.identifier(recipient),
+        'sent',
+        botId,
+      );
       return { sent: true, kind: input.kind };
     },
   );
@@ -3064,665 +1895,10 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     },
   );
 
-  app.get('/api/status', { preHandler: requireSession(sessions) }, async () => {
-    const profile = context.database.getActiveAssistantProfile();
-    const period = localPeriod(new Date(), profile.timezone);
-    const providerInfo = context.aiProvider?.getModelInformation() ?? {
-      provider: 'disabled',
-      model: 'disabled',
-    };
-    return {
-      connection: context.connectionManager.snapshot(),
-      groupDiscovery: context.groupDiscovery.snapshot(),
-      botEnabled: context.database.getSetting('bot_enabled', true),
-      maintenance: context.maintenance?.snapshot() ?? null,
-      version: context.applicationVersion,
-      profile: {
-        id: profile.id,
-        organizationName: profile.organizationName,
-        botName: profile.botName,
-        organizationType: profile.organizationType,
-        applicationName: profile.applicationName,
-        headerText: profile.headerText,
-        footerText: profile.footerText,
-        logoPath: profile.logoPath,
-        primaryColor: profile.primaryColor,
-        secondaryColor: profile.secondaryColor,
-      },
-      ai: context.database.getAIProviderStatus(
-        profile.id,
-        context.aiProvider?.isConfigured() ?? false,
-        providerInfo.model,
-      ),
-      usage: context.database.getAIUsageSummary(profile.id, period.date, period.month),
-      activeGroups: context.database
-        .listGroups()
-        .filter((group) => context.database.canSendToGroup(group.id)).length,
-      nextAutomation: context.pollService?.nextScheduledDescription() ?? null,
-    };
-  });
-
-  app.get('/api/profiles', { preHandler: requireSession(sessions) }, async () => ({
-    profiles: context.database.listAssistantProfiles(),
-    templates: PROFILE_PRESETS,
-  }));
-
-  app.post(
-    '/api/profiles',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const input = profileFieldsSchema.parse(request.body);
-      const profile = context.database.createAssistantProfile(input);
-      audit(context, 'profile_create', String(profile.id), 'ok');
-      return reply.code(201).send({ profile });
-    },
-  );
-
-  app.patch(
-    '/api/profiles/:id',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      const existing = context.database.getAssistantProfile(id);
-      if (existing === null) return reply.code(404).send({ error: 'Perfil no encontrado.' });
-      const input = profileFieldsSchema.parse(request.body);
-      const neurobotProfileId = context.database.getBotProfile('neurobot').id;
-      const fixedIdentity =
-        id === neurobotProfileId
-          ? { ...input, botName: 'Neurobot', activationAlias: '@neurobot' }
-          : input;
-      const profile = context.database.saveAssistantProfile({ ...existing, ...fixedIdentity });
-      audit(context, 'profile_update', String(id), 'ok');
-      return { profile };
-    },
-  );
-
-  app.post(
-    '/api/profiles/:id/activate',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      const profile = context.database.activateAssistantProfile(id);
-      audit(context, 'profile_activate', String(id), 'ok');
-      return { profile };
-    },
-  );
-
-  app.post(
-    '/api/profiles/:id/apply-template',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      const input = z
-        .object({
-          preset: z.enum(['community', 'store', 'restaurant', 'distributor', 'service', 'empty']),
-          confirmed: z.literal(true),
-        })
-        .strict()
-        .parse(request.body);
-      const existing = context.database.getAssistantProfile(id);
-      if (existing === null) return reply.code(404).send({ error: 'Perfil no encontrado.' });
-      const profile = context.database.saveAssistantProfile(
-        applyProfilePreset(existing, input.preset),
-      );
-      audit(context, 'profile_template_apply', String(id), 'ok');
-      return { profile };
-    },
-  );
-
-  app.post(
-    '/api/branding/logo',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const input = z
-        .object({
-          mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
-          data: z.string().min(1).max(520_000),
-        })
-        .strict()
-        .parse(request.body);
-      if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(input.data)) {
-        return reply.code(400).send({ error: 'El archivo no tiene un formato válido.' });
-      }
-      const content = Buffer.from(input.data, 'base64');
-      if (
-        content.length === 0 ||
-        content.length > 384 * 1024 ||
-        !matchesImageSignature(content, input.mimeType)
-      ) {
-        return reply
-          .code(400)
-          .send({ error: 'El logo debe ser PNG, JPEG o WebP y pesar menos de 384 KB.' });
-      }
-      const extension =
-        input.mimeType === 'image/png' ? 'png' : input.mimeType === 'image/webp' ? 'webp' : 'jpg';
-      const fileName = `${randomUUID()}.${extension}`;
-      const brandingDirectory =
-        context.brandingDirectory ?? resolve(process.cwd(), 'data', 'branding');
-      await mkdir(brandingDirectory, { recursive: true });
-      await writeFile(join(brandingDirectory, fileName), content, { flag: 'wx' });
-      audit(context, 'branding_logo_upload', 'local-logo', 'ok');
-      return reply.code(201).send({ path: `/branding/${fileName}` });
-    },
-  );
-
-  app.get('/branding/:file', { preHandler: requireSession(sessions) }, async (request, reply) => {
-    const file = z
-      .object({ file: z.string().regex(/^[a-f0-9-]+\.(?:png|jpe?g|webp)$/u) })
-      .parse(request.params).file;
-    const brandingDirectory =
-      context.brandingDirectory ?? resolve(process.cwd(), 'data', 'branding');
-    const content = await readFile(join(brandingDirectory, basename(file)));
-    const type = file.endsWith('.png')
-      ? 'image/png'
-      : file.endsWith('.webp')
-        ? 'image/webp'
-        : 'image/jpeg';
-    return reply.type(type).send(content);
-  });
-
-  app.get('/api/knowledge', { preHandler: requireSession(sessions) }, async () => {
-    const profile = context.database.getActiveAssistantProfile();
-    return {
-      profileId: profile.id,
-      categories: context.database.listKnowledgeCategories(profile.id),
-      entries: context.database.listKnowledgeEntries(profile.id),
-    };
-  });
-
-  app.post(
-    '/api/knowledge/categories',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const input = knowledgeCategorySchema.parse(request.body);
-      const profile = context.database.getActiveAssistantProfile();
-      const category = context.database.saveKnowledgeCategory({
-        ...(input.id === undefined ? {} : { id: input.id }),
-        profileId: profile.id,
-        name: input.name,
-        enabled: input.enabled,
-      });
-      audit(context, 'knowledge_category_save', String(category.id), 'ok');
-      return reply.code(input.id === undefined ? 201 : 200).send({ category });
-    },
-  );
-
-  app.delete(
-    '/api/knowledge/categories/:id',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      const profile = context.database.getActiveAssistantProfile();
-      if (!context.database.deleteKnowledgeCategory(profile.id, id)) {
-        return reply.code(409).send({ error: 'La categoría no existe o contiene entradas.' });
-      }
-      audit(context, 'knowledge_category_delete', String(id), 'ok');
-      return { deleted: true };
-    },
-  );
-
-  app.post(
-    '/api/knowledge/entries',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const input = knowledgeEntrySchema.parse(request.body);
-      const profile = context.database.getActiveAssistantProfile();
-      const entry = context.database.saveKnowledgeEntry({
-        ...input,
-        id: input.id ?? 0,
-        profileId: profile.id,
-      });
-      audit(context, 'knowledge_entry_save', String(entry.id), 'ok');
-      return reply.code(input.id === undefined ? 201 : 200).send({ entry });
-    },
-  );
-
-  app.delete(
-    '/api/knowledge/entries/:id',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      const profile = context.database.getActiveAssistantProfile();
-      if (!context.database.deleteKnowledgeEntry(profile.id, id))
-        return reply.code(404).send({ error: 'Entrada no encontrada.' });
-      audit(context, 'knowledge_entry_delete', String(id), 'ok');
-      return { deleted: true };
-    },
-  );
-
-  app.get('/api/ai', { preHandler: requireSession(sessions) }, async () => {
-    const profile = context.database.getActiveAssistantProfile();
-    const period = localPeriod(new Date(), profile.timezone);
-    const model = context.aiProvider?.getModelInformation().model ?? 'disabled';
-    return {
-      settings: context.database.getAISettings(profile.id),
-      status: context.database.getAIProviderStatus(
-        profile.id,
-        context.aiProvider?.isConfigured() ?? false,
-        model,
-      ),
-      usage: context.database.getAIUsageSummary(profile.id, period.date, period.month),
-      recentEvents: context.database.listRecentAIUsageEvents(profile.id),
-      nextDailyReset: `${period.date} 00:00 (${profile.timezone})`,
-      nextMonthlyReset: `${period.month}-01 00:00 (${profile.timezone})`,
-    };
-  });
-
-  app.patch(
-    '/api/ai/settings',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const input = aiSettingsSchema.parse(request.body);
-      const profile = context.database.getActiveAssistantProfile();
-      if (exceedsSafeDefaults(input) && !input.confirmIncreasedLimits) {
-        return reply.code(409).send({
-          error: 'Confirma explícitamente el aumento sobre los límites seguros iniciales.',
-          code: 'AI_LIMIT_INCREASE_CONFIRMATION_REQUIRED',
-        });
-      }
-      const { confirmIncreasedLimits, ...values } = input;
-      void confirmIncreasedLimits;
-      const settings = context.database.saveAISettings({
-        ...values,
-        profileId: profile.id,
-        updatedAt: new Date().toISOString(),
-      });
-      audit(context, 'ai_settings_update', String(profile.id), 'ok');
-      return { settings };
-    },
-  );
-
-  app.post(
-    '/api/ai/test-connection',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (_request, reply) => {
-      const profile = context.database.getActiveAssistantProfile();
-      if (context.aiProvider === undefined)
-        return reply.code(503).send({ configured: false, connection: 'failed' });
-      const result = await context.aiProvider.testConnection(
-        context.database.getAISettings(profile.id).timeoutMs,
-      );
-      context.database.updateAIProviderHealth(
-        profile.id,
-        context.aiProvider.getModelInformation().provider,
-        result.successful,
-        result.successful ? null : result.errorCode,
-      );
-      return {
-        configured: context.aiProvider.isConfigured(),
-        connection: result.successful ? 'successful' : 'failed',
-      };
-    },
-  );
-
-  app.post(
-    '/api/ai/reset-development-counters',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      if (!context.developmentMode)
-        return reply.code(404).send({ error: 'Operación no disponible.' });
-      const input = resetCountersSchema.parse(request.body);
-      const session = getSession(request, sessions) as PanelSession;
-      const passwordHash = context.database.getPanelPasswordHash(session.username);
-      if (passwordHash === null || !(await verifyPassword(input.password, passwordHash))) {
-        return reply.code(401).send({ error: 'Contraseña incorrecta.' });
-      }
-      const profile = context.database.getActiveAssistantProfile();
-      context.database.resetAIUsageForDevelopment(profile.id);
-      context.database.recordTechnicalEvent({
-        botId: 'neurobot',
-        eventType: 'TEST_COUNTERS_RESET',
-        result: 'ok',
-      });
-      audit(context, 'TEST_COUNTERS_RESET', String(profile.id), 'ok', 'neurobot');
-      return { reset: true };
-    },
-  );
-
-  app.get('/api/ai/export', { preHandler: requireSession(sessions) }, async (_request, reply) => {
-    const profile = context.database.getActiveAssistantProfile();
-    const exportData = {
-      profileId: profile.id,
-      exportedAt: new Date().toISOString(),
-      events: context.database.listRecentAIUsageEvents(profile.id, 500),
-    };
-    return reply
-      .header('content-disposition', 'attachment; filename="ai-usage.json"')
-      .type('application/json')
-      .send(exportData);
-  });
-
-  app.get('/api/linked-groups', { preHandler: requireSession(sessions) }, async () => ({
-    groups: context.database
-      .listLinkedGroups((identifier) => context.anonymizer.identifier(identifier))
-      .filter((group) => group.botIsMember === true && group.status !== 'BOT_NOT_MEMBER'),
-  }));
-
-  app.post(
-    '/api/linked-groups/:key/block',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const key = z.object({ key: z.string().length(20) }).parse(request.params).key;
-      const input = z.object({ blocked: z.boolean() }).strict().parse(request.body);
-      const group = findGroupByAnonymousKey(context, key);
-      if (group === undefined || !context.database.setGroupBlocked(group.id, input.blocked)) {
-        return reply.code(404).send({ error: 'Grupo vinculado no encontrado.' });
-      }
-      recordGroupTechnical(
-        context,
-        input.blocked ? 'GROUP_MANUALLY_BLOCKED' : 'GROUP_MANUALLY_UNBLOCKED',
-        group.id,
-        'ok',
-      );
-      audit(context, input.blocked ? 'group_block' : 'group_unblock', key, 'ok');
-      return { blocked: input.blocked };
-    },
-  );
-
-  app.get('/api/groups', { preHandler: requireSession(sessions) }, async (request) => {
-    const { filter } = z
-      .object({
-        filter: z
-          .enum(['active', 'authorized', 'unauthorized', 'attention', 'archived'])
-          .default('active'),
-      })
-      .parse(request.query ?? {});
-    const allGroups = context.database.listGroups();
-    const groups = allGroups.filter((group) => groupMatchesFilter(group, filter));
-    return {
-      discovery: context.groupDiscovery.snapshot(),
-      filter,
-      summary: {
-        active: allGroups.filter((group) => group.status === 'ACTIVE').length,
-        authorized: allGroups.filter((group) => group.status === 'ACTIVE' && group.authorized)
-          .length,
-        unauthorized: allGroups.filter((group) => group.status === 'ACTIVE' && !group.authorized)
-          .length,
-        attention: allGroups.filter((group) =>
-          ['NO_AUTHORIZED_ADMIN', 'PENDING_RECHECK', 'INACCESSIBLE'].includes(group.status),
-        ).length,
-        archived: allGroups.filter((group) =>
-          ['ARCHIVED', 'NOT_FOUND', 'BOT_NOT_MEMBER'].includes(group.status),
-        ).length,
-      },
-      groups: groups.map((group) => ({
-        key: context.anonymizer.identifier(group.id),
-        name: group.name,
-        publicName: group.publicName,
-        listedPublicly: group.listedPublicly,
-        identifier: context.anonymizer.identifier(group.id),
-        authorized: group.authorized,
-        status: group.status,
-        botIsMember: group.botIsMember,
-        hasAuthorizedAdmin: group.hasAuthorizedAdmin,
-        lastSuccessfulCheckAt: group.lastSuccessfulCheckAt,
-        missingSince: group.missingSince,
-        archivedAt: group.archivedAt,
-        failureCount: group.failureCount,
-        lastFailureCode: group.lastFailureCode,
-        canAuthorize: context.database.canAuthorizeGroup(group.id),
-        updatedAt: group.updatedAt,
-      })),
-    };
-  });
-
-  app.post(
-    '/api/groups/refresh',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async () => {
-      const discovery = await context.groupDiscovery.refreshNow();
-      return { detected: discovery.detectedGroups, discovery, summary: discovery.summary ?? null };
-    },
-  );
-
-  app.patch(
-    '/api/groups/:key',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const key = z.object({ key: z.string().length(20) }).parse(request.params).key;
-      const authorized = z.object({ authorized: z.boolean() }).parse(request.body).authorized;
-      const group = findGroupByAnonymousKey(context, key);
-      if (group === undefined) return reply.code(404).send({ error: 'Grupo no encontrado.' });
-      if (!context.database.setGroupAuthorized(group.id, authorized)) {
-        return reply.code(409).send({
-          error:
-            'El grupo no puede autorizarse hasta confirmar acceso, presencia del bot y una administración autorizada.',
-          code: 'GROUP_NOT_ELIGIBLE_FOR_AUTHORIZATION',
-        });
-      }
-      audit(context, 'group_authorization', key, 'ok');
-      return { updated: true };
-    },
-  );
-
-  app.patch(
-    '/api/groups/:key/public-listing',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const key = z.object({ key: z.string().length(20) }).parse(request.params).key;
-      const input = z
-        .object({
-          listedPublicly: z.boolean(),
-          publicName: z.string().trim().min(1).max(80).nullable(),
-        })
-        .strict()
-        .parse(request.body);
-      const group = findGroupByAnonymousKey(context, key);
-      if (group === undefined) return reply.code(404).send({ error: 'Grupo no encontrado.' });
-      if (input.listedPublicly && group.status !== 'ACTIVE') {
-        return reply.code(409).send({ error: 'Solo un grupo activo puede publicarse.' });
-      }
-      context.database.setGroupPublicListing(
-        group.id,
-        input.listedPublicly,
-        input.publicName === null ? null : assertPlainText(input.publicName),
-      );
-      audit(context, 'group_public_listing', key, 'ok');
-      return { updated: true };
-    },
-  );
-
-  app.post(
-    '/api/groups/:key/recheck',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const key = z.object({ key: z.string().length(20) }).parse(request.params).key;
-      if (findGroupByAnonymousKey(context, key) === undefined) {
-        return reply.code(404).send({ error: 'Grupo no encontrado.' });
-      }
-      const discovery = await context.groupDiscovery.refreshNow();
-      audit(context, 'group_recheck', key, discovery.state);
-      return { discovery };
-    },
-  );
-
-  app.post(
-    '/api/groups/:key/archive',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const key = z.object({ key: z.string().length(20) }).parse(request.params).key;
-      const group = findGroupByAnonymousKey(context, key);
-      if (group === undefined || !context.database.archiveGroup(group.id)) {
-        return reply.code(404).send({ error: 'Grupo no encontrado.' });
-      }
-      recordGroupTechnical(context, 'GROUP_ARCHIVED', group.id, 'archived');
-      audit(context, 'group_archive', key, 'ok');
-      return { archived: true };
-    },
-  );
-
-  app.post(
-    '/api/groups/:key/restore',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const key = z.object({ key: z.string().length(20) }).parse(request.params).key;
-      const group = findGroupByAnonymousKey(context, key);
-      if (group === undefined || !context.database.restoreGroup(group.id)) {
-        return reply.code(409).send({ error: 'El grupo no está archivado o no existe.' });
-      }
-      recordGroupTechnical(context, 'GROUP_RESTORED', group.id, 'restored');
-      audit(context, 'group_restore', key, 'ok');
-      return { restored: true };
-    },
-  );
-
-  app.delete(
-    '/api/groups/:key/local-record',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const key = z.object({ key: z.string().length(20) }).parse(request.params).key;
-      z.object({ confirmed: z.literal(true) })
-        .strict()
-        .parse(request.body);
-      const group = findGroupByAnonymousKey(context, key);
-      if (group === undefined) {
-        return reply.code(404).send({ error: 'Grupo no encontrado.' });
-      }
-      if (group.status !== 'ARCHIVED') {
-        return reply.code(409).send({ error: 'Solo puede eliminarse un registro archivado.' });
-      }
-      if (!context.database.deleteGroupRecord(group.id)) {
-        return reply.code(404).send({ error: 'Grupo no encontrado.' });
-      }
-      recordGroupTechnical(context, 'GROUP_LOCAL_RECORD_DELETED', group.id, 'deleted');
-      audit(context, 'group_local_record_delete', key, 'ok');
-      return { deleted: true };
-    },
-  );
-
-  app.get('/api/groups/cleanup-preview', { preHandler: requireSession(sessions) }, async () => {
-    const preview = context.database.previewGroupCleanup();
-    return {
-      archiveCandidates: preview.archiveCandidates.map((group) => ({
-        key: context.anonymizer.identifier(group.id),
-        name: group.name,
-      })),
-      deleteCandidates: preview.deleteCandidates.map((group) => ({
-        key: context.anonymizer.identifier(group.id),
-        name: group.name,
-      })),
-    };
-  });
-
-  app.post(
-    '/api/groups/cleanup',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const input = z
-        .object({ confirmed: z.literal(true), deleteExpired: z.boolean() })
-        .strict()
-        .parse(request.body);
-      const preview = context.database.previewGroupCleanup();
-      const result = context.database.cleanupInactiveGroups(new Date(), input.deleteExpired);
-      for (const group of preview.archiveCandidates) {
-        recordGroupTechnical(context, 'GROUP_ARCHIVED', group.id, 'archived');
-      }
-      if (input.deleteExpired) {
-        for (const group of preview.deleteCandidates) {
-          if (context.database.getGroupById(group.id) === null) {
-            recordGroupTechnical(context, 'GROUP_LOCAL_RECORD_DELETED', group.id, 'deleted');
-          }
-        }
-      }
-      if (result.orphanedSchedules > 0) {
-        context.database.recordTechnicalEvent({
-          eventType: 'ORPHANED_SCHEDULE_REMOVED',
-          result: 'deleted',
-          itemCount: result.orphanedSchedules,
-        });
-      }
-      audit(context, 'group_cleanup', 'groups', 'ok');
-      return result;
-    },
-  );
-
-  app.get('/api/commands', { preHandler: requireSession(sessions) }, async () => ({
-    commands: context.database.listCommands().map((command) => ({
-      ...command,
-      defaultResponse: context.database.getDefaultCommandResponse(command.name),
-      metrics: messageMetrics(command.response),
-    })),
-    keywords: context.database.listKeywords(),
-  }));
-
-  app.post(
-    '/api/commands/:id/restore-default',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      const existing = context.database.getCommandById(id);
-      if (existing === null) return reply.code(404).send({ error: 'Comando no encontrado.' });
-      const command = context.database.restoreCommandDefault(existing.name);
-      if (command === null) {
-        return reply.code(409).send({ error: 'Este comando no tiene un texto predeterminado.' });
-      }
-      audit(context, 'command_restore_default', String(id), 'ok');
-      return { command };
-    },
-  );
-
-  app.post(
-    '/api/commands',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const input = commandSchema.parse(request.body);
-      const command = context.database.saveCommand({
-        ...input,
-        response: assertPlainText(input.response),
-      });
-      audit(context, 'command_create', String(command.id), 'ok');
-      return reply.code(201).send({ command });
-    },
-  );
-
-  app.patch(
-    '/api/commands/:id',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      const input = commandSchema.parse(request.body);
-      const command = context.database.saveCommand({
-        id,
-        ...input,
-        response: assertPlainText(input.response),
-      });
-      audit(context, 'command_update', String(id), 'ok');
-      return { command };
-    },
-  );
-
-  app.delete(
-    '/api/commands/:id',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      const deleted = context.database.deleteCommand(id);
-      if (!deleted) return reply.code(404).send({ error: 'Comando no encontrado.' });
-      audit(context, 'command_delete', String(id), 'ok');
-      return { deleted: true };
-    },
-  );
-
-  app.put(
-    '/api/commands/:id/keywords',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      if (context.database.getCommandById(id) === null) throw new Error('El comando no existe.');
-      const input = keywordSchema.parse(request.body);
-      const unique = new Set(input.keywords.map((keyword) => keyword.term.toLocaleLowerCase('es')));
-      if (unique.size !== input.keywords.length)
-        throw new Error('Las palabras clave no pueden repetirse.');
-      context.database.replaceKeywords(id, input.keywords);
-      audit(context, 'keywords_replace', String(id), 'ok');
-      return { updated: true };
-    },
-  );
-
   app.get('/api/administrators', { preHandler: requireSession(sessions) }, async () => ({
-    administrators: context.database.listAdministrators().map((participantId) => ({
-      key: context.anonymizer.identifier(participantId),
-      masked: maskPhoneNumber(participantId),
+    administrators: context.database.listAdministrators().map((phoneNumber) => ({
+      key: context.anonymizer.identifier(phoneNumber),
+      masked: maskPhoneNumber(phoneNumber),
     })),
   }));
 
@@ -3731,13 +1907,13 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
     async (request, reply) => {
       const number = z.object({ number: z.string().trim() }).parse(request.body).number;
-      const participantId = normalizeParticipantId(number);
-      if (!context.database.addAdministrator(participantId)) {
+      const phoneNumber = normalizePhoneNumber(number);
+      if (!context.database.addAdministrator(phoneNumber)) {
         return reply.code(409).send({ error: 'El administrador ya existe.' });
       }
-      const key = context.anonymizer.identifier(participantId);
+      const key = context.anonymizer.identifier(phoneNumber);
       audit(context, 'administrator_add', key, 'ok');
-      return reply.code(201).send({ key, masked: maskPhoneNumber(participantId) });
+      return reply.code(201).send({ key, masked: maskPhoneNumber(phoneNumber) });
     },
   );
 
@@ -3746,617 +1922,14 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
     async (request, reply) => {
       const key = z.object({ key: z.string().length(20) }).parse(request.params).key;
-      const participantId = context.database
+      const phoneNumber = context.database
         .listAdministrators()
         .find((item) => context.anonymizer.identifier(item) === key);
-      if (participantId === undefined || !context.database.removeAdministrator(participantId)) {
+      if (phoneNumber === undefined || !context.database.removeAdministrator(phoneNumber)) {
         return reply.code(404).send({ error: 'Administrador no encontrado.' });
       }
       audit(context, 'administrator_remove', key, 'ok');
       return { deleted: true };
-    },
-  );
-
-  app.get('/api/settings', { preHandler: requireSession(sessions) }, async () => ({
-    settings: context.database.listSettings(),
-  }));
-
-  app.patch(
-    '/api/settings',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const input = settingsSchema.parse(request.body);
-      for (const [key, value] of Object.entries(input)) {
-        const finalValue = typeof value === 'string' ? assertPlainText(value) : value;
-        context.database.setSetting(key, finalValue);
-      }
-      context.groupDiscovery.reconfigurePeriodic();
-      audit(context, 'settings_update', 'general', 'ok');
-      return { updated: true };
-    },
-  );
-
-  app.get('/api/automatic-messages', { preHandler: requireSession(sessions) }, async (request) => {
-    const botId = parseBotIdQuery(request.query, context);
-    const groups = context.database.listBotGroups(botId, (identifier) =>
-      context.anonymizer.identifier(identifier),
-    );
-    const welcomeGroupSettings = new Map(
-      context.database
-        .listWelcomeGroupSettings(botId)
-        .map((setting) => [setting.groupHash, setting]),
-    );
-    const groupNames = new Map(groups.map((group) => [group.groupHash, group.name]));
-    const seen = new Set<string>();
-    const deliveries = context.database.listScheduledDeliveries(200, botId).filter((delivery) => {
-      const key = `${delivery.taskType}:${delivery.groupId}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-    return {
-      configuration: context.database.getAutomaticMessageConfiguration(botId),
-      defaultConfiguration: DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION,
-      templateCustomization: context.database.getAutomaticTemplateCustomization(botId),
-      schedulerStarted: automaticMessagesFor(context, botId)?.isStarted() ?? false,
-      welcomeStatus: automaticMessagesFor(context, botId)?.getWelcomeStatus() ?? null,
-      authorizedGroups: groups
-        .filter((group) => group.active && !group.blocked && group.botIsMember === true)
-        .map((group) => ({
-          key: group.groupHash,
-          name: group.name,
-          welcome: welcomeGroupSettings.get(group.groupHash) ?? {
-            enabled: true,
-            customTemplate: null,
-            inheritAssistantTemplate: true,
-          },
-        })),
-      lastDeliveries: deliveries.map((delivery) => ({
-        taskType: delivery.taskType,
-        groupKey: context.anonymizer.identifier(delivery.groupId),
-        groupName:
-          groupNames.get(context.anonymizer.identifier(delivery.groupId)) ?? 'Grupo no disponible',
-        localDate: delivery.localDate,
-        source: delivery.source,
-        status: delivery.status,
-        attempts: delivery.attempts,
-        errorCode: delivery.errorCode,
-        sentAt: delivery.sentAt,
-      })),
-    };
-  });
-
-  app.post(
-    '/api/automatic-messages/templates/:key/restore',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const { key } = z
-        .object({
-          key: z.enum(['welcome', 'rules', 'monday', 'weekday', 'friday', 'weekend']),
-        })
-        .parse(request.params);
-      const templateKey = {
-        welcome: AUTOMATIC_TEMPLATE_KEYS.welcome,
-        rules: AUTOMATIC_TEMPLATE_KEYS.dailyRules,
-        monday: AUTOMATIC_TEMPLATE_KEYS.greetingMonday,
-        weekday: AUTOMATIC_TEMPLATE_KEYS.greetingWeekday,
-        friday: AUTOMATIC_TEMPLATE_KEYS.greetingFriday,
-        weekend: AUTOMATIC_TEMPLATE_KEYS.greetingWeekend,
-      }[key];
-      if (!context.database.restoreAutomaticTemplate(templateKey, botId)) {
-        return reply.code(404).send({ error: 'Plantilla no encontrada.' });
-      }
-      automaticMessagesFor(context, botId)?.reconfigure();
-      audit(context, 'automatic_template_restore', key, 'ok', botId);
-      return { restored: true };
-    },
-  );
-
-  app.patch(
-    '/api/automatic-messages',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const input = automaticMessagesSchema.parse(request.body);
-      const configuration = {
-        ...input,
-        welcome: { ...input.welcome, template: assertPlainText(input.welcome.template) },
-        dailyGreeting: {
-          ...input.dailyGreeting,
-          templates: {
-            monday: assertPlainText(input.dailyGreeting.templates.monday),
-            weekday: assertPlainText(input.dailyGreeting.templates.weekday),
-            friday: assertPlainText(input.dailyGreeting.templates.friday),
-            weekend: assertPlainText(input.dailyGreeting.templates.weekend),
-          },
-        },
-        dailyRules: {
-          ...input.dailyRules,
-          template: assertPlainText(input.dailyRules.template),
-        },
-      };
-      context.database.saveAutomaticMessageConfiguration(configuration, botId);
-      automaticMessagesFor(context, botId)?.reconfigure();
-      audit(context, 'automatic_messages_update', 'configuration', 'ok', botId);
-      return { updated: true, configuration };
-    },
-  );
-
-  app.patch(
-    '/api/automatic-messages/welcome/groups',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const input = welcomeGroupSettingSchema.parse(request.body);
-      const groupId = context.database.resolveBotGroupKey(botId, input.groupKey, (identifier) =>
-        context.anonymizer.identifier(identifier),
-      );
-      if (groupId === null || !context.database.canBotSendToGroup(botId, groupId)) {
-        return reply.code(404).send({ error: 'El grupo autorizado no existe.' });
-      }
-      context.database.saveWelcomeGroupSetting(
-        input.groupKey,
-        {
-          enabled: input.enabled,
-          inheritAssistantTemplate: input.inheritAssistantTemplate,
-          customTemplate:
-            input.customTemplate === null ? null : validateWelcomeTemplate(input.customTemplate),
-        },
-        botId,
-      );
-      audit(
-        context,
-        input.enabled ? 'GROUP_WELCOME_ENABLED' : 'GROUP_WELCOME_DISABLED',
-        input.groupKey,
-        'ok',
-        botId,
-      );
-      return { updated: true };
-    },
-  );
-
-  app.post(
-    '/api/automatic-messages/welcome/preview',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const input = welcomePreviewSchema.parse(request.body);
-      const service = automaticMessagesFor(context, botId);
-      if (service === null)
-        return reply.code(503).send({ error: 'La bienvenida no está disponible.' });
-      const groupId =
-        input.groupKey === undefined
-          ? undefined
-          : (context.database.resolveBotGroupKey(botId, input.groupKey, (identifier) =>
-              context.anonymizer.identifier(identifier),
-            ) ?? undefined);
-      return { simulation: true, text: service.previewWelcome(input.fictitiousName, groupId) };
-    },
-  );
-
-  app.post(
-    '/api/automatic-messages/send/:kind',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const automaticMessages = automaticMessagesFor(context, botId);
-      if (automaticMessages === null) {
-        return reply.code(503).send({
-          error: 'El servicio de mensajes automáticos no está disponible.',
-          code: 'AUTOMATIC_MESSAGES_UNAVAILABLE',
-        });
-      }
-      const { kind } = z
-        .object({ kind: z.enum(['welcome', 'greeting', 'rules']) })
-        .parse(request.params);
-      const input = automaticManualSendSchema.parse(request.body);
-      const groupId = context.database.resolveBotGroupKey(botId, input.groupKey, (identifier) =>
-        context.anonymizer.identifier(identifier),
-      );
-      if (groupId === null || !context.database.canBotSendToGroup(botId, groupId)) {
-        return reply.code(404).send({
-          error: 'El grupo autorizado no existe.',
-          code: 'AUTHORIZED_GROUP_NOT_FOUND',
-        });
-      }
-      const gateKey = `${request.ip}:${botId}:${kind}`;
-      const now = Date.now();
-      for (const [key, expiresAt] of manualAutomaticSendGate) {
-        if (expiresAt <= now) manualAutomaticSendGate.delete(key);
-      }
-      if ((manualAutomaticSendGate.get(gateKey) ?? 0) > now) {
-        return reply.code(429).send({
-          error: 'Espera unos segundos antes de repetir el envío manual.',
-          code: 'MANUAL_SEND_RATE_LIMITED',
-        });
-      }
-      manualAutomaticSendGate.set(gateKey, now + 10_000);
-      const taskType =
-        kind === 'welcome' ? 'WELCOME' : kind === 'greeting' ? 'DAILY_GREETING' : 'DAILY_RULES';
-      const result =
-        taskType === 'WELCOME'
-          ? await automaticMessages.sendWelcomeTest(groupId, input.fictitiousName ?? 'María')
-          : await automaticMessages.sendManual(taskType, groupId);
-      if (taskType === 'WELCOME' && result.status === 'SENT') {
-        context.database.recordTechnicalEvent({
-          botId,
-          eventType: 'WELCOME_TEST_SENT',
-          source: 'manual-test',
-          groupHash: context.anonymizer.identifier(groupId),
-          result: 'sent',
-        });
-      }
-      audit(
-        context,
-        'automatic_message_manual_send',
-        `${taskType}:${input.groupKey}`,
-        result.status,
-        botId,
-      );
-      const statusCode = result.status === 'SENT' ? 200 : result.status === 'FAILED' ? 502 : 409;
-      return reply.code(statusCode).send({ taskType, ...result });
-    },
-  );
-
-  app.get('/api/polls', { preHandler: requireSession(sessions) }, async (request, reply) => {
-    const botId = parseBotIdQuery(request.query, context);
-    const services = pollServicesFor(context, botId);
-    if (services === null) return pollServiceUnavailable(reply);
-    const { repository, service, scheduler } = services;
-    const groups = context.database.listBotGroups(botId, (identifier) =>
-      context.anonymizer.identifier(identifier),
-    );
-    const groupNames = new Map(groups.map((group) => [group.groupHash, group.name]));
-    const templates = repository.templates();
-    const templateQuestions = new Map(
-      templates.map((template) => [template.id, template.question]),
-    );
-    return {
-      configuration: repository.configuration(),
-      schedulerStarted: scheduler.isStarted(),
-      nextScheduledAt: service.nextScheduledDescription(),
-      templates,
-      hiddenTemplates: repository.hiddenTemplates(),
-      overrides: repository.overrides(),
-      authorizedGroups: groups
-        .filter((group) => group.active && !group.blocked && group.botIsMember === true)
-        .map((group) => ({ key: group.groupHash, name: group.name })),
-      history: repository.history(100).map((entry) => ({
-        id: entry.id,
-        groupKey: context.anonymizer.identifier(entry.groupId),
-        groupName:
-          groupNames.get(context.anonymizer.identifier(entry.groupId)) ?? 'Grupo no disponible',
-        localDate: entry.localDate,
-        templateId: entry.templateId,
-        question: templateQuestions.get(entry.templateId) ?? 'Plantilla eliminada',
-        source: entry.source,
-        status: entry.status,
-        attempts: entry.attempts,
-        scheduledAt: entry.scheduledAt,
-        sentAt: entry.sentAt,
-        failureCode: entry.failureCode,
-      })),
-    };
-  });
-
-  app.patch(
-    '/api/polls/configuration',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const configuration = pollConfigurationSchema.parse(request.body);
-      services.repository.saveConfiguration(configuration);
-      services.scheduler.reconfigure();
-      audit(context, 'poll_configuration_update', 'daily-poll', 'ok', botId);
-      return {
-        updated: true,
-        configuration,
-        nextScheduledAt: services.service.nextScheduledDescription(),
-      };
-    },
-  );
-
-  app.post(
-    '/api/polls/templates',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const repository = services.repository;
-      const input = pollTemplateSchema.parse(request.body);
-      const existed = input.id === undefined ? null : repository.template(input.id);
-      if (input.id !== undefined && existed === null) {
-        return reply
-          .code(404)
-          .send({ error: 'Plantilla no encontrada.', code: 'POLL_TEMPLATE_NOT_FOUND' });
-      }
-      const template = repository.saveTemplate({
-        ...(input.id === undefined ? {} : { id: input.id }),
-        question: assertPlainText(input.question),
-        category: assertPlainText(input.category),
-        options: input.options.map((option) => assertPlainText(option)),
-        allowMultipleAnswers: input.allowMultipleAnswers,
-        enabled: input.enabled,
-        favorite: input.favorite,
-        disabledUntil: input.disabledUntil,
-      });
-      const eventType = !template.enabled
-        ? 'POLL_TEMPLATE_DISABLED'
-        : existed === null
-          ? 'POLL_TEMPLATE_CREATED'
-          : 'POLL_TEMPLATE_UPDATED';
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType,
-        source: 'poll',
-        templateId: template.id,
-        category: template.category,
-        result: 'ok',
-      });
-      audit(
-        context,
-        existed === null ? 'poll_template_create' : 'poll_template_update',
-        String(template.id),
-        'ok',
-        botId,
-      );
-      return reply.code(existed === null ? 201 : 200).send({ template });
-    },
-  );
-
-  app.delete(
-    '/api/polls/templates/:id',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
-      const template = services.repository.template(id);
-      if (template === null) {
-        if (services.repository.hiddenTemplates().some((item) => item.id === id)) {
-          return reply.code(409).send({
-            error: 'Esta encuesta ya fue eliminada de este asistente.',
-            code: 'POLL_TEMPLATE_ALREADY_HIDDEN',
-          });
-        }
-        context.database.recordTechnicalEvent({
-          botId,
-          eventType: 'POLL_ASSISTANT_MISMATCH_REJECTED',
-          source: 'poll',
-          templateId: id,
-          result: 'rejected',
-        });
-        return reply.code(404).send({
-          error: 'No se pudo modificar la encuesta seleccionada.',
-          code: 'POLL_TEMPLATE_NOT_FOUND',
-        });
-      }
-      if (template.isDefault) {
-        const session = getSession(request, sessions) as PanelSession;
-        const outcome = services.repository.hideDefaultTemplate(
-          id,
-          context.anonymizer.identifier(session.username),
-        );
-        if (!outcome.hidden) {
-          return reply.code(409).send({
-            error: 'Esta encuesta ya fue eliminada de este asistente.',
-            code: 'POLL_TEMPLATE_ALREADY_HIDDEN',
-          });
-        }
-        context.database.recordTechnicalEvent({
-          botId,
-          eventType: 'POLL_TEMPLATE_HIDDEN_FOR_ASSISTANT',
-          source: 'poll',
-          templateId: id,
-          result: 'hidden',
-        });
-        if (outcome.cancelledOverrides > 0)
-          context.database.recordTechnicalEvent({
-            botId,
-            eventType: 'FUTURE_POLL_SCHEDULE_CANCELLED',
-            source: 'poll',
-            templateId: id,
-            result: 'cancelled',
-          });
-        audit(context, 'poll_template_hidden_for_assistant', String(id), 'ok', botId);
-        return outcome;
-      }
-      if (!services.repository.deleteTemplate(id)) {
-        return reply.code(404).send({
-          error: 'No se pudo modificar la encuesta seleccionada.',
-          code: 'POLL_TEMPLATE_NOT_FOUND',
-        });
-      }
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'CUSTOM_POLL_DELETED',
-        source: 'poll',
-        templateId: id,
-        result: 'deleted',
-      });
-      audit(context, 'poll_template_delete', String(id), 'ok', botId);
-      return { deleted: true };
-    },
-  );
-
-  app.post(
-    '/api/polls/templates/:id/restore',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
-      const session = getSession(request, sessions) as PanelSession;
-      const restored = services.repository.restoreDefaultTemplate(
-        id,
-        context.anonymizer.identifier(session.username),
-      );
-      if (!restored)
-        return reply.code(409).send({
-          error: 'Esta encuesta ya se encuentra disponible.',
-          code: 'POLL_TEMPLATE_ALREADY_ACTIVE',
-        });
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'POLL_TEMPLATE_RESTORED_FOR_ASSISTANT',
-        source: 'poll',
-        templateId: id,
-        result: 'restored',
-      });
-      audit(context, 'poll_template_restored_for_assistant', String(id), 'ok', botId);
-      return { restored: true };
-    },
-  );
-
-  app.post(
-    '/api/polls/templates/restore-defaults',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const session = getSession(request, sessions) as PanelSession;
-      const restored = services.repository.restoreDefaults(
-        context.anonymizer.identifier(session.username),
-      );
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'ALL_DEFAULT_POLLS_RESTORED_FOR_ASSISTANT',
-        source: 'poll',
-        result: restored > 0 ? 'restored' : 'unchanged',
-      });
-      audit(context, 'poll_templates_restore_defaults', 'default-polls', 'ok', botId);
-      return { restored };
-    },
-  );
-
-  app.put(
-    '/api/polls/overrides',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const repository = services.repository;
-      const input = pollOverrideSchema.parse(request.body);
-      if (
-        input.localDate <= toLocalDateTime(new Date(), repository.configuration().timezone).date
-      ) {
-        return reply
-          .code(400)
-          .send({ error: 'Selecciona una fecha futura.', code: 'POLL_DATE_NOT_FUTURE' });
-      }
-      const existing = repository.override(input.localDate);
-      if (
-        existing !== null &&
-        existing.templateId !== input.templateId &&
-        !input.replaceConfirmed
-      ) {
-        return reply.code(409).send({
-          error: 'La fecha ya tiene una encuesta. Confirma su reemplazo.',
-          code: 'POLL_OVERRIDE_REPLACEMENT_CONFIRMATION_REQUIRED',
-        });
-      }
-      const override = repository.saveOverride(input.localDate, input.templateId);
-      audit(context, 'poll_override_save', input.localDate, 'ok', botId);
-      return { override };
-    },
-  );
-
-  app.delete(
-    '/api/polls/overrides/:localDate',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const { localDate } = z
-        .object({ localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u) })
-        .parse(request.params);
-      if (!services.repository.deleteOverride(localDate)) {
-        return reply
-          .code(404)
-          .send({ error: 'Programación no encontrada.', code: 'POLL_OVERRIDE_NOT_FOUND' });
-      }
-      audit(context, 'poll_override_delete', localDate, 'ok', botId);
-      return { deleted: true };
-    },
-  );
-
-  app.post(
-    '/api/polls/send-test',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const input = pollManualSendSchema.parse(request.body);
-      const groupId = context.database.resolveBotGroupKey(botId, input.groupKey, (identifier) =>
-        context.anonymizer.identifier(identifier),
-      );
-      if (groupId === null || !context.database.canBotSendToGroup(botId, groupId)) {
-        return reply.code(404).send({
-          error: 'El grupo autorizado no está disponible.',
-          code: 'POLL_GROUP_NOT_AVAILABLE',
-        });
-      }
-      const now = Date.now();
-      for (const [key, expiresAt] of manualPollSendGate) {
-        if (expiresAt <= now) manualPollSendGate.delete(key);
-      }
-      const gateKey = `${request.ip}:${botId}:poll-test`;
-      if ((manualPollSendGate.get(gateKey) ?? 0) > now) {
-        return reply.code(429).send({
-          error: 'Espera unos segundos antes de repetir la prueba.',
-          code: 'POLL_TEST_RATE_LIMITED',
-        });
-      }
-      manualPollSendGate.set(gateKey, now + 10_000);
-      try {
-        const result = await services.service.sendManual(
-          input.templateId,
-          groupId,
-          input.countsAsDaily,
-        );
-        audit(
-          context,
-          'poll_manual_send',
-          `${input.templateId}:${input.groupKey}`,
-          result.status,
-          botId,
-        );
-        return reply.code(result.status === 'SENT' ? 200 : 502).send(result);
-      } catch (error) {
-        const code = error instanceof Error ? error.message : 'POLL_TEST_FAILED';
-        const known = new Set([
-          'POLL_TEMPLATE_UNAVAILABLE',
-          'DUPLICATE_DAILY_POLL',
-          'GROUP_NOT_AVAILABLE',
-          'GROUP_SILENCED',
-          'BOT_DISABLED',
-          'WHATSAPP_NOT_CONNECTED',
-        ]);
-        if (!known.has(code)) throw error;
-        return reply
-          .code(code === 'WHATSAPP_NOT_CONNECTED' ? 503 : 409)
-          .send({ error: 'No fue posible enviar la encuesta de prueba.', code });
-      }
-    },
-  );
-
-  app.post(
-    '/api/connection/restart',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async () => {
-      await context.connectionManager.restart();
-      audit(context, 'connection_restart', 'whatsapp', 'ok');
-      return { restarted: true };
     },
   );
 
@@ -4492,25 +2065,6 @@ function utcDateBoundary(value: string, addDays = 0): string | null {
   return date.toISOString();
 }
 
-function groupMatchesFilter(
-  group: ReturnType<AppDatabase['listGroups']>[number],
-  filter: 'active' | 'authorized' | 'unauthorized' | 'attention' | 'archived',
-): boolean {
-  if (filter === 'active') return group.status === 'ACTIVE';
-  if (filter === 'authorized') return group.status === 'ACTIVE' && group.authorized;
-  if (filter === 'unauthorized') return group.status === 'ACTIVE' && !group.authorized;
-  if (filter === 'attention') {
-    return ['NO_AUTHORIZED_ADMIN', 'PENDING_RECHECK', 'INACCESSIBLE'].includes(group.status);
-  }
-  return ['ARCHIVED', 'NOT_FOUND', 'BOT_NOT_MEMBER'].includes(group.status);
-}
-
-function findGroupByAnonymousKey(context: AdminServerContext, key: string) {
-  return context.database
-    .listGroups()
-    .find((item) => context.anonymizer.identifier(item.id) === key);
-}
-
 function requireSession(sessions: SessionStore) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (getSession(request, sessions) === null) {
@@ -4563,27 +2117,7 @@ function parseBotId(params: unknown): string {
   return z.object({ botId: z.string().regex(/^[a-z][a-z0-9-]{2,39}$/u) }).parse(params).botId;
 }
 
-function parseBotIdQuery(query: unknown, context: AdminServerContext): string {
-  const botId = z
-    .object({
-      botId: z
-        .string()
-        .trim()
-        .toLowerCase()
-        .regex(/^[a-z][a-z0-9-]{2,39}$/u)
-        .default('neurobot'),
-    })
-    .passthrough()
-    .parse(query ?? {}).botId;
-  if (context.database.getBot(botId) === null) throw new Error('El asistente no existe.');
-  return botId;
-}
-
 function moduleForProtectedRoute(route: string): AssistantModuleKey | null {
-  if (route.includes('/moderation')) return 'moderation';
-  if (route.startsWith('/api/polls')) return 'polls';
-  if (route.startsWith('/api/automatic-messages')) return 'automatic-messages';
-  if (route.includes('/groups')) return 'automatic-messages';
   if (route.includes('/catalog')) return 'catalog';
   if (route.includes('/media')) return 'media';
   if (route.includes('/hours')) return 'hours';
@@ -4592,110 +2126,23 @@ function moduleForProtectedRoute(route: string): AssistantModuleKey | null {
   return null;
 }
 
-function sanitizeModerationRule(
-  input: z.infer<typeof moderationRuleSchema>,
-): z.infer<typeof moderationRuleSchema> {
-  return {
-    ...input,
-    conditions: input.conditions.map((condition) => ({
-      ...condition,
-      normalizedValue:
-        condition.conditionType === 'SAFE_REGEX'
-          ? condition.normalizedValue.trim()
-          : normalizeModerationConfigurationValue(condition.normalizedValue),
-    })),
-    exceptions: input.exceptions.map((exception) => ({
-      ...exception,
-      normalizedValue: normalizeModerationConfigurationValue(exception.normalizedValue),
-    })),
-  };
-}
-
-function moderationRuleForTransfer(
-  rule: ReturnType<AppDatabase['listModerationRules']>[number],
-): z.infer<typeof moderationRuleSchema> {
-  return {
-    name: rule.name,
-    description: rule.description,
-    category: rule.category,
-    severity: rule.severity,
-    detectionType: rule.detectionType,
-    score: rule.score,
-    reviewThreshold: rule.reviewThreshold,
-    warningThreshold: rule.warningThreshold,
-    adminNotificationThreshold: rule.adminNotificationThreshold,
-    enabled: false,
-    appliesToAllGroups: rule.appliesToAllGroups,
-    conditions: rule.conditions.map((condition) => ({
-      id: 0,
-      conditionType: condition.conditionType as z.infer<
-        typeof moderationConditionSchema
-      >['conditionType'],
-      operator: condition.operator,
-      normalizedValue: condition.normalizedValue,
-      configuration: condition.configuration as Record<string, string | number | boolean | null>,
-      enabled: condition.enabled,
-    })),
-    exceptions: rule.exceptions.map((exception) => ({
-      id: 0,
-      exceptionType: exception.exceptionType as z.infer<
-        typeof moderationExceptionSchema
-      >['exceptionType'],
-      normalizedValue: exception.normalizedValue,
-      enabled: exception.enabled,
-    })),
-  };
-}
-
 function botIdForProtectedRoute(request: FastifyRequest, route: string): string | null {
   if (route.includes(':botId')) {
     const value = (request.params as { botId?: unknown } | null)?.botId;
     return typeof value === 'string' && /^[a-z][a-z0-9-]{2,39}$/u.test(value) ? value : null;
   }
-  if (route.startsWith('/api/polls') || route.startsWith('/api/automatic-messages')) {
-    const value = (request.query as { botId?: unknown } | null)?.botId ?? 'neurobot';
-    return typeof value === 'string' && /^[a-z][a-z0-9-]{2,39}$/u.test(value) ? value : null;
-  }
   return null;
-}
-
-function automaticMessagesFor(context: AdminServerContext, botId: string) {
-  return (
-    context.multiBotManager?.automaticMessages(botId) ??
-    (botId === 'neurobot' ? (context.automaticMessages ?? null) : null)
-  );
-}
-
-function pollServicesFor(context: AdminServerContext, botId: string) {
-  const repository =
-    context.multiBotManager?.pollRepository(botId) ??
-    (botId === 'neurobot' ? (context.pollRepository ?? null) : null);
-  const service =
-    context.multiBotManager?.pollService(botId) ??
-    (botId === 'neurobot' ? (context.pollService ?? null) : null);
-  const scheduler =
-    context.multiBotManager?.pollScheduler(botId) ??
-    (botId === 'neurobot' ? (context.pollScheduler ?? null) : null);
-  return repository === null || service === null || scheduler === null
-    ? null
-    : { repository, service, scheduler };
 }
 
 function safeBotResponse(bot: NonNullable<ReturnType<AppDatabase['getBot']>>) {
   return {
     id: bot.id,
     internalIdentifier: bot.internalIdentifier,
-    mode: bot.mode,
     connectorType: bot.connectorType,
-    operatingMode: bot.operatingMode,
     lifecycleStatus: bot.lifecycleStatus,
     deletionLocked: bot.deletionLocked,
     deletedAt: bot.deletedAt,
     scheduledPermanentDeletionAt: bot.scheduledPermanentDeletionAt,
-    groupChannelEnabled: bot.groupChannelEnabled,
-    privateChannelEnabled: bot.privateChannelEnabled,
-    privateBusinessModeEnabled: bot.privateBusinessModeEnabled,
-    connectorMigrationLocked: bot.connectorMigrationLocked,
     capabilities: bot.capabilities,
     enabled: bot.enabled,
     profileId: bot.profileId,
@@ -4706,9 +2153,6 @@ function safeBotResponse(bot: NonNullable<ReturnType<AppDatabase['getBot']>>) {
     whatsappStatus: bot.whatsappStatus,
     maskedNumber: bot.maskedNumber,
     lastConnectedAt: bot.lastConnectedAt,
-    groupsEnabled: bot.groupsEnabled,
-    privateMessagesEnabled: bot.privateMessagesEnabled,
-    realMentionRequired: bot.realMentionRequired,
     continuedConversationsEnabled: bot.continuedConversationsEnabled,
     menuType: bot.menuType,
     aiCredentialMode: bot.aiCredentialMode,
@@ -4767,7 +2211,7 @@ function safeConnectorConflict(
     reason: conflict.reason,
     existingAssistantId: existing.id,
     existingAssistantName: existing.botName,
-    existingAssistantType: existing.operatingMode,
+    existingAssistantType: existing.organizationType,
     existingAssistantStatus: existing.lifecycleStatus,
     phoneNumber: adminPhoneNumberFor(context, existing.id),
   };
@@ -4781,31 +2225,6 @@ function isSecureCredentialRequest(request: FastifyRequest): boolean {
     hostname === '127.0.0.1' ||
     hostname === '::1' ||
     hostname === '[::1]'
-  );
-}
-
-function recordGroupTechnical(
-  context: AdminServerContext,
-  eventType: string,
-  groupId: string,
-  result: string,
-  botId?: string,
-): void {
-  context.database.recordTechnicalEvent({
-    ...(botId === undefined ? {} : { botId }),
-    eventType,
-    groupHash: context.anonymizer.identifier(groupId),
-    result,
-  });
-}
-
-function resolveBotGroupKey(
-  context: AdminServerContext,
-  botId: string,
-  key: string,
-): string | null {
-  return context.database.resolveBotGroupKey(botId, key, (identifier) =>
-    context.anonymizer.identifier(identifier),
   );
 }
 
@@ -4855,8 +2274,8 @@ function exceedsSafeDefaults(settings: z.infer<typeof aiSettingsSchema>): boolea
     settings.interactionHourlyLimit > 60 ||
     settings.interactionCooldownSeconds > 3 ||
     settings.duplicateQueryWindowSeconds > 15 ||
-    settings.groupHourlyLimit > 150 ||
-    settings.groupDailyLimit > 500 ||
+    settings.conversationHourlyLimit > 150 ||
+    settings.conversationDailyLimit > 500 ||
     settings.globalDailyLimit > 500 ||
     settings.globalMonthlyLimit > 10_000 ||
     settings.globalDailyTokenLimit > 50_000 ||
@@ -4869,13 +2288,6 @@ function maintenanceUnavailable(reply: FastifyReply): FastifyReply {
   return reply.code(503).send({
     error: 'El servicio de mantenimiento no está disponible.',
     code: 'MAINTENANCE_UNAVAILABLE',
-  });
-}
-
-function pollServiceUnavailable(reply: FastifyReply): FastifyReply {
-  return reply.code(503).send({
-    error: 'El servicio de encuestas no está disponible.',
-    code: 'POLL_SERVICE_UNAVAILABLE',
   });
 }
 

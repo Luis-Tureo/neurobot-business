@@ -5,9 +5,6 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { Logger } from 'pino';
 import { serializeError } from '../infrastructure/safe-error.js';
 import type { AppDatabase } from '../persistence/database.js';
-import type { Anonymizer } from '../security/anonymizer.js';
-import type { ConnectionManager } from './connection-manager.js';
-import type { GroupDiscoveryService } from './group-discovery-service.js';
 
 export type MaintenanceOperation = 'factory_reset';
 export type MaintenanceResult = 'running' | 'completed' | 'failed';
@@ -40,6 +37,8 @@ export type MaintenanceServiceOptions = {
   now?: () => Date;
   beforeStage?: (stage: MaintenanceStage) => void | Promise<void>;
   resetTransientState?: () => void;
+  stopMessaging: () => Promise<void>;
+  startMessaging: () => Promise<void>;
 };
 
 type FactoryResetInput = {
@@ -78,13 +77,9 @@ export class MaintenanceService {
 
   public constructor(
     private readonly database: AppDatabase,
-    private readonly connectionManager: ConnectionManager,
-    private readonly groupDiscovery: GroupDiscoveryService,
-    anonymizer: Anonymizer,
     private readonly logger: Logger,
     private readonly options: MaintenanceServiceOptions,
   ) {
-    void anonymizer;
     this.projectRoot = resolve(options.projectRoot);
     this.dataRoot = resolve(this.projectRoot, 'data');
     this.databasePath = resolve(options.databasePath);
@@ -135,10 +130,7 @@ export class MaintenanceService {
     let databaseClosed = false;
     try {
       await this.changeStage('stopping_messaging');
-      this.groupDiscovery.cancel();
-      this.connectionManager.updateState('resetting');
-      await this.connectionManager.stop();
-      this.connectionManager.updateState('resetting');
+      await this.options.stopMessaging();
 
       await this.changeStage('closing_database');
       this.database.checkpoint();
@@ -159,10 +151,15 @@ export class MaintenanceService {
       this.options.resetTransientState?.();
 
       await this.changeStage('restarting_services');
-      await this.connectionManager.start();
+      await this.options.startMessaging();
       await this.changeStage('ready');
       this.finish('completed', 'FACTORY_RESET_COMPLETED');
-      this.recordAudit('factory_reset', 'completed', input.administratorHash, Date.now() - startedAt);
+      this.recordAudit(
+        'factory_reset',
+        'completed',
+        input.administratorHash,
+        Date.now() - startedAt,
+      );
     } catch (error) {
       const failureCode = factoryFailureCode(this.current.stage, error);
       this.logFailure(error, failureCode);
@@ -179,7 +176,9 @@ export class MaintenanceService {
   }
 
   private async deleteFactoryResetTargets(): Promise<void> {
-    for (const path of await listFiles(this.dataRoot, (candidate) => DATABASE_PATTERN.test(candidate))) {
+    for (const path of await listFiles(this.dataRoot, (candidate) =>
+      DATABASE_PATTERN.test(candidate),
+    )) {
       assertAllowedMaintenancePath(this.projectRoot, path, this.dataRoot);
       await rm(path, { force: true });
     }
@@ -193,31 +192,32 @@ export class MaintenanceService {
 
   private async recoverStoppedServices(databaseClosed: boolean): Promise<void> {
     try {
-      await this.connectionManager.stop();
+      await this.options.stopMessaging();
       if (databaseClosed && !this.database.isOpen()) {
         this.database.reopen();
         this.database.migrate();
       }
-      await this.connectionManager.start();
+      await this.options.startMessaging();
     } catch (error) {
       this.logFailure(error, 'RESET_RECOVERY_FAILED');
     }
   }
 
   private assertFactoryDefaults(): void {
-    if (!this.database.getSetting('bot_enabled', false)) {
-      throw new Error('No se restauró la configuración predeterminada del bot.');
+    const assistants = this.database.listBots();
+    if (assistants.length !== 1 || assistants[0]?.enabled !== false) {
+      throw new Error('No se restauró el asistente empresarial de ejemplo desactivado.');
     }
-    if (this.database.listGroups().length !== 0 || this.database.getAdministratorCount() !== 0) {
-      throw new Error('La base de datos nueva contiene autorizaciones anteriores.');
-    }
-    if (this.database.listCommands().length === 0) {
-      throw new Error('No se restauraron los comandos predeterminados.');
+    if (this.database.getAdministratorCount() !== 0) {
+      throw new Error('La base de datos nueva contiene administradores anteriores.');
     }
   }
 
   private validateConfiguredPaths(): void {
-    if (!DATABASE_PATTERN.test(this.databasePath) || this.database.getPath() !== this.databasePath) {
+    if (
+      !DATABASE_PATTERN.test(this.databasePath) ||
+      this.database.getPath() !== this.databasePath
+    ) {
       throw new UnsafeMaintenancePathError();
     }
     assertAllowedMaintenancePath(this.projectRoot, this.dataRoot, this.projectRoot);
@@ -301,7 +301,11 @@ export function assertAllowedMaintenancePath(
   const project = resolve(projectRoot);
   const candidate = resolve(candidatePath);
   const allowed = resolve(allowedRoot);
-  if (!isInside(project, allowed) || !isInside(project, candidate) || !isInside(allowed, candidate)) {
+  if (
+    !isInside(project, allowed) ||
+    !isInside(project, candidate) ||
+    !isInside(allowed, candidate)
+  ) {
     throw new UnsafeMaintenancePathError();
   }
 }
@@ -315,7 +319,9 @@ function assertNoSymbolicLinks(projectRoot: string, candidatePath: string): void
   const project = resolve(projectRoot);
   const candidate = resolve(candidatePath);
   let current = project;
-  for (const part of relative(project, candidate).split(/[\\/]+/u).filter(Boolean)) {
+  for (const part of relative(project, candidate)
+    .split(/[\\/]+/u)
+    .filter(Boolean)) {
     current = join(current, part);
     try {
       if (lstatSync(current).isSymbolicLink()) throw new UnsafeMaintenancePathError();

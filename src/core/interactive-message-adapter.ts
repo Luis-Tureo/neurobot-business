@@ -2,7 +2,7 @@ import type { Logger } from 'pino';
 import type { MenuDefinition, MenuOption, MenuType } from '../domain/types.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 
-export type InteractiveDelivery = 'native_poll' | 'native_buttons' | 'native_list' | 'numbered';
+export type InteractiveDelivery = 'native_buttons' | 'native_list' | 'numbered';
 
 export class InteractiveMessageAdapter {
   public constructor(
@@ -16,35 +16,8 @@ export class InteractiveMessageAdapter {
     menu: MenuDefinition,
     options: MenuOption[],
     configuredType: MenuType,
-    preferSelectableMenu = false,
   ): Promise<InteractiveDelivery> {
     const activeOptions = options.filter((option) => option.enabled).slice(0, 20);
-    if (
-      preferSelectableMenu &&
-      activeOptions.length >= 2 &&
-      this.client.sendSelectableMenu !== undefined
-    ) {
-      try {
-        const sent = await this.client.sendSelectableMenu(chatId, {
-          title: menu.title,
-          message: menu.message,
-          helpText: menu.helpText,
-          options: activeOptions.map((option) => ({ id: String(option.id), label: option.label })),
-        });
-        if (sent) {
-          this.logger.info(
-            { operation: 'SELECTABLE_COMMUNITY_MENU_SENT', botId: this.botId, result: 'native_poll' },
-            'Se enviaron opciones seleccionables para el menú comunitario',
-          );
-          return 'native_poll';
-        }
-      } catch {
-        this.logger.warn(
-          { operation: 'MENU_FALLBACK_USED', botId: this.botId, reason: 'SELECTABLE_SEND_FAILED' },
-          'Las opciones seleccionables no estuvieron disponibles; se usará la alternativa numerada',
-        );
-      }
-    }
     const nativeKind = chooseNativeKind(configuredType, activeOptions.length);
     if (nativeKind !== null && this.client.sendInteractiveMenu !== undefined) {
       try {
@@ -55,9 +28,7 @@ export class InteractiveMessageAdapter {
           options: activeOptions.map((option) => ({ id: String(option.id), label: option.label })),
           kind: nativeKind,
         });
-        if (sent) {
-          return nativeKind === 'buttons' ? 'native_buttons' : 'native_list';
-        }
+        if (sent) return nativeKind === 'buttons' ? 'native_buttons' : 'native_list';
       } catch {
         this.logger.warn(
           { operation: 'MENU_FALLBACK_USED', botId: this.botId, reason: 'NATIVE_SEND_FAILED' },

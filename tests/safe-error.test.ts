@@ -4,10 +4,10 @@ describe('diagnóstico seguro de errores', () => {
   it('reemplaza nombres minificados de una letra por un código útil', () => {
     const error = new Error('fallo al cargar chats');
     error.name = 'r';
-    expect(serializeError(error, 'GROUP_LIST_FETCH_FAILED')).toMatchObject({
+    expect(serializeError(error, 'BUSINESS_OPERATION_FAILED')).toMatchObject({
       errorName: 'r',
       errorMessage: 'fallo al cargar chats',
-      errorCode: 'GROUP_LIST_FETCH_FAILED',
+      errorCode: 'BUSINESS_OPERATION_FAILED',
     });
   });
 
