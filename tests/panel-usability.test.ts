@@ -8,8 +8,8 @@ describe('interfaz empresarial simplificada', () => {
 
   it('agrupa la navegación por tareas y usa un drawer en smartphone', () => {
     expect(html).toContain('class="panel-sidebar"');
-    for (const group of ['Panel general', 'General', 'Negocio', 'Automatización', 'Operación']) {
-      expect(html).toContain(group);
+    for (const section of ['Panel general', 'General', 'Negocio', 'Automatización', 'Operación']) {
+      expect(html).toContain(section);
     }
     expect(html).toContain('aria-controls="panel-sidebar"');
     expect(html).toContain('aria-expanded="false"');
@@ -18,9 +18,17 @@ describe('interfaz empresarial simplificada', () => {
     expect(html).not.toContain('<select id="mobile-navigation"');
   });
 
-  it('no ofrece navegación comunitaria ni técnica', () => {
-    for (const section of ['automatic-messages', 'polls', 'moderation', 'maintenance', 'system']) {
-      expect(html).not.toContain(`data-section="${section}"`);
+  it('ofrece solo la navegación empresarial esperada', () => {
+    for (const section of [
+      'bots',
+      'whatsapp',
+      'profile',
+      'knowledge',
+      'menus',
+      'catalog',
+      'hours',
+    ]) {
+      expect(html).toContain(`data-section="${section}"`);
     }
     expect(html).not.toContain('Sistema y respaldos');
     expect(html).not.toContain('Buscar una opción');
@@ -36,11 +44,11 @@ describe('interfaz empresarial simplificada', () => {
     expect(panel).toContain("['Número', bot.maskedNumber");
   });
 
-  it('guarda siempre una configuración privada de negocio', () => {
-    expect(panel).toContain("mode: 'business'");
-    expect(panel).toContain('groupsEnabled: false');
-    expect(panel).toContain('privateMessagesEnabled: true');
-    expect(panel).toContain('realMentionRequired: false');
+  it('guarda un contrato empresarial mínimo', () => {
+    expect(panel).toContain(
+      'continuedConversationsEnabled: form.elements.continuedConversationsEnabled.checked',
+    );
+    expect(panel).toContain('menuType: form.elements.menuType.value');
     expect(panel).toContain("connectorType: 'WHATSAPP_CLOUD_API'");
   });
 

@@ -2,23 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import BetterSqlite3 from 'better-sqlite3';
-import {
-  AUTOMATIC_TEMPLATE_KEYS,
-  DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION,
-  LEGACY_AUTOMATIC_TEMPLATES,
-} from '../core/automatic-message-defaults.js';
-import {
-  BRIEF_COMMAND_DEFAULTS,
-  BRIEF_COMMAND_DEFAULTS_BY_NAME,
-  LEGACY_COMMAND_RESPONSES,
-} from '../core/brief-message-defaults.js';
-import { DEFAULT_POLL_TEMPLATES } from '../core/poll-defaults.js';
 import type {
-  AutomaticMessageConfiguration,
-  AutomaticMessageType,
-  BotCapabilities,
-  BotMode,
-  BotOperatingMode,
   BotRecord,
   BusinessHour,
   CatalogCategory,
@@ -35,41 +19,21 @@ import type {
   AIUsageSummary,
   AssistantLifecycleStatus,
   AssistantProfile,
-  CommandRecord,
   ConversationState,
   ConnectorType,
-  DeliverySource,
-  DetectedGroup,
-  GroupRecord,
-  GroupStatus,
-  KeywordRecord,
   KnowledgeCategory,
   KnowledgeEntry,
   KnowledgeFragment,
-  LinkedGroupRecord,
   HumanAssistanceRequest,
-  HiddenPollTemplate,
   MediaAsset,
   MenuActionType,
   MenuDefinition,
   MenuOption,
   MenuType,
-  ModerationGroupMode,
-  ModerationRule,
-  ModerationSettings,
-  ModerationSeverity,
   OrganizationType,
-  PollConfiguration,
-  PollDateOverride,
-  PollDeliverySource,
-  PollDeliveryStatus,
-  PollSelectionMode,
-  PollSendHistoryRecord,
-  PollTemplate,
-  ScheduledDeliveryRecord,
-  ScheduledDeliveryStatus,
 } from '../domain/types.js';
 import { canonicalPhoneIdentity } from '../messaging/identifiers.js';
+import { migrateBusinessSchema } from './business-schema.js';
 import {
   ConversationHistoryRepository,
   type ConversationListQuery,
@@ -80,128 +44,11 @@ import {
   type ConversationListItem,
 } from './conversation-history-repository.js';
 
-type CommandRow = {
-  id: number;
-  name: string;
-  response: string;
-  enabled: number;
-  essential: number;
-  custom: number;
-  priority: number;
-  health_related: number;
-};
-
-type GroupRow = {
-  chat_id: string;
-  name: string;
-  public_name: string | null;
-  listed_publicly: number;
-  authorized: number;
-  status: GroupStatus;
-  bot_is_member: number | null;
-  has_authorized_admin: number | null;
-  first_seen_at: string;
-  last_seen_at: string | null;
-  last_successful_check_at: string | null;
-  missing_since: string | null;
-  archived_at: string | null;
-  failure_count: number;
-  last_failure_code: string | null;
-  detected_at: string;
-  updated_at: string;
-};
-
-export type GroupModerationProfile = {
-  assistantId: string;
-  groupHash: string;
-  enabled: boolean;
-  rulesText: string;
-  rulesHash: string;
-  analysisStatus:
-    'DRAFT' | 'ANALYZING' | 'ANALYSIS_FAILED' | 'PENDING_TESTS' | 'READY' | 'ACTIVE' | 'OUTDATED';
-  testStatus: 'PENDING' | 'FAILED' | 'APPROVED';
-  compiled: Record<string, unknown> | null;
-  summary: Record<string, unknown> | null;
-  provider: string | null;
-  model: string | null;
-  inputTokens: number;
-  outputTokens: number;
-  firstWarningMessage: string;
-  secondWarningMessage: string;
-  recurrenceWindowDays: number;
-  lastAnalyzedAt: string | null;
-  lastTestedAt: string | null;
-  activatedAt: string | null;
-  updatedAt: string;
-};
-
-type KeywordRow = {
-  id: number;
-  command_id: number;
-  term: string;
-  priority: number;
-  enabled: number;
-};
-
-type AutomaticTaskRow = {
-  task_type: AutomaticMessageType;
-  enabled: number;
-  send_time: string | null;
-  timezone: string;
-  tolerance_minutes: number;
-  batch_window_seconds: number | null;
-};
-
-type ScheduledDeliveryRow = {
-  id: number;
-  task_type: AutomaticMessageType;
-  group_id: string;
-  local_date: string;
-  source: DeliverySource;
-  status: ScheduledDeliveryStatus;
-  attempts: number;
-  error_code: string | null;
-  created_at: string;
-  updated_at: string;
-  sent_at: string | null;
-};
-
-type PollTemplateRow = {
-  id: number;
-  default_key: string | null;
-  question: string;
-  category: string;
-  allow_multiple_answers: number;
-  enabled: number;
-  is_default: number;
-  favorite: number;
-  created_at: string;
-  updated_at: string;
-  last_used_at: string | null;
-  disabled_until: string | null;
-};
-
-type PollHistoryRow = {
-  id: number;
-  group_id: string;
-  local_date: string;
-  template_id: number;
-  source: PollDeliverySource;
-  counts_as_daily: number;
-  status: PollDeliveryStatus;
-  attempts: number;
-  scheduled_at: string;
-  attempted_at: string | null;
-  sent_at: string | null;
-  failure_code: string | null;
-};
-
 type AssistantProfileRow = {
   id: number;
   internal_name: string;
   organization_name: string;
   bot_name: string;
-  activation_alias: string;
   description: string;
   organization_type: OrganizationType;
   industry: string;
@@ -214,8 +61,6 @@ type AssistantProfileRow = {
   limit_message: string;
   ai_error_message: string;
   medical_message: string;
-  mention_prompt_message: string;
-  community_greeting_message: string;
   contact_information: string;
   business_hours: string;
   address: string | null;
@@ -253,18 +98,12 @@ export type TechnicalEvent = {
   eventType: string;
   source?: string;
   activationType?: string;
-  commandName?: string;
-  groupHash?: string;
-  userHash?: string;
+  conversationHash?: string;
+  customerHash?: string;
   result: string;
   durationMs?: number;
   errorCode?: string;
   itemCount?: number;
-  templateId?: number;
-  category?: string;
-  localDate?: string;
-  localTime?: string;
-  attempt?: number;
 };
 
 export type AssistantActivityEvent = {
@@ -272,8 +111,8 @@ export type AssistantActivityEvent = {
   occurredAt: string;
   eventType: string;
   source: string | null;
-  userHash: string | null;
-  groupHash: string | null;
+  customerHash: string | null;
+  conversationHash: string | null;
   result: string;
   errorCode: string | null;
   durationMs: number | null;
@@ -330,2259 +169,7 @@ export class AppDatabase {
   }
 
   public migrate(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS migrations (
-        version INTEGER PRIMARY KEY,
-        applied_at TEXT NOT NULL
-      );
-    `);
-
-    const applied = new Set(
-      this.db
-        .prepare('SELECT version FROM migrations')
-        .all()
-        .map((row) => (row as { version: number }).version),
-    );
-
-    const migrations = [
-      {
-        version: 1,
-        sql: `
-          CREATE TABLE settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE groups (
-            chat_id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            authorized INTEGER NOT NULL DEFAULT 0 CHECK (authorized IN (0, 1)),
-            detected_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE administrators (
-            participant_id TEXT PRIMARY KEY,
-            created_at TEXT NOT NULL
-          );
-          CREATE TABLE commands (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            response TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            essential INTEGER NOT NULL DEFAULT 0 CHECK (essential IN (0, 1)),
-            custom INTEGER NOT NULL DEFAULT 1 CHECK (custom IN (0, 1)),
-            priority INTEGER NOT NULL DEFAULT 0,
-            health_related INTEGER NOT NULL DEFAULT 0 CHECK (health_related IN (0, 1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE keywords (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            command_id INTEGER NOT NULL REFERENCES commands(id) ON DELETE CASCADE,
-            term TEXT NOT NULL,
-            priority INTEGER NOT NULL DEFAULT 0,
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            UNIQUE(command_id, term)
-          );
-          CREATE TABLE silences (
-            group_id TEXT PRIMARY KEY,
-            until_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE technical_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_at TEXT NOT NULL,
-            event_type TEXT NOT NULL,
-            activation_type TEXT,
-            command_name TEXT,
-            group_hash TEXT,
-            user_hash TEXT,
-            result TEXT NOT NULL,
-            duration_ms INTEGER,
-            error_code TEXT
-          );
-          CREATE TABLE audit_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_at TEXT NOT NULL,
-            action_type TEXT NOT NULL,
-            resource TEXT NOT NULL,
-            result TEXT NOT NULL,
-            administrator_hash TEXT NOT NULL
-          );
-          CREATE TABLE panel_users (
-            username TEXT PRIMARY KEY,
-            password_hash TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE INDEX idx_keywords_enabled_priority ON keywords(enabled, priority DESC);
-          CREATE INDEX idx_technical_events_created ON technical_events(created_at);
-          CREATE INDEX idx_audit_events_created ON audit_events(created_at);
-        `,
-      },
-      {
-        version: 2,
-        sql: `
-          ALTER TABLE audit_events ADD COLUMN duration_ms INTEGER;
-          ALTER TABLE audit_events ADD COLUMN backup_created INTEGER;
-          ALTER TABLE audit_events ADD COLUMN error_code TEXT;
-        `,
-      },
-      {
-        version: 3,
-        sql: `
-          ALTER TABLE technical_events ADD COLUMN item_count INTEGER;
-          CREATE TABLE automatic_message_tasks (
-            task_type TEXT PRIMARY KEY CHECK (task_type IN ('WELCOME', 'DAILY_GREETING', 'DAILY_RULES')),
-            enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
-            send_time TEXT,
-            timezone TEXT NOT NULL DEFAULT 'America/Santiago',
-            tolerance_minutes INTEGER NOT NULL DEFAULT 30 CHECK (tolerance_minutes BETWEEN 0 AND 180),
-            batch_window_seconds INTEGER CHECK (batch_window_seconds BETWEEN 5 AND 300),
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE automatic_message_templates (
-            template_key TEXT PRIMARY KEY,
-            content TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE scheduled_message_deliveries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            deduplication_key TEXT NOT NULL UNIQUE,
-            task_type TEXT NOT NULL CHECK (task_type IN ('WELCOME', 'DAILY_GREETING', 'DAILY_RULES')),
-            group_id TEXT NOT NULL,
-            local_date TEXT NOT NULL,
-            source TEXT NOT NULL CHECK (source IN ('scheduled', 'manual')),
-            status TEXT NOT NULL CHECK (status IN ('PENDING', 'SENT', 'SKIPPED', 'FAILED')),
-            attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 2),
-            error_code TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            sent_at TEXT
-          );
-          CREATE TABLE automatic_group_backoff (
-            group_id TEXT PRIMARY KEY,
-            disabled_until TEXT NOT NULL,
-            error_code TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE INDEX idx_scheduled_delivery_group_date
-            ON scheduled_message_deliveries(group_id, local_date, task_type);
-          CREATE INDEX idx_scheduled_delivery_updated
-            ON scheduled_message_deliveries(updated_at DESC);
-        `,
-      },
-      {
-        version: 4,
-        sql: `
-          ALTER TABLE groups ADD COLUMN public_name TEXT;
-          ALTER TABLE groups ADD COLUMN listed_publicly INTEGER NOT NULL DEFAULT 0
-            CHECK (listed_publicly IN (0, 1));
-          ALTER TABLE groups ADD COLUMN status TEXT NOT NULL DEFAULT 'PENDING_RECHECK'
-            CHECK (status IN ('ACTIVE', 'BOT_NOT_MEMBER', 'NO_AUTHORIZED_ADMIN',
-              'PENDING_RECHECK', 'NOT_FOUND', 'INACCESSIBLE', 'ARCHIVED'));
-          ALTER TABLE groups ADD COLUMN bot_is_member INTEGER CHECK (bot_is_member IN (0, 1));
-          ALTER TABLE groups ADD COLUMN has_authorized_admin INTEGER
-            CHECK (has_authorized_admin IN (0, 1));
-          ALTER TABLE groups ADD COLUMN first_seen_at TEXT;
-          ALTER TABLE groups ADD COLUMN last_seen_at TEXT;
-          ALTER TABLE groups ADD COLUMN last_successful_check_at TEXT;
-          ALTER TABLE groups ADD COLUMN missing_since TEXT;
-          ALTER TABLE groups ADD COLUMN archived_at TEXT;
-          ALTER TABLE groups ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0;
-          ALTER TABLE groups ADD COLUMN last_failure_code TEXT;
-          ALTER TABLE automatic_message_templates ADD COLUMN customized INTEGER NOT NULL DEFAULT 0
-            CHECK (customized IN (0, 1));
-          ALTER TABLE technical_events ADD COLUMN source TEXT;
-          UPDATE groups SET first_seen_at = detected_at WHERE first_seen_at IS NULL;
-          CREATE INDEX idx_groups_status ON groups(status, authorized);
-          CREATE INDEX idx_groups_last_seen ON groups(last_seen_at);
-        `,
-      },
-      {
-        version: 5,
-        sql: `
-          CREATE TABLE poll_templates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            default_key TEXT UNIQUE,
-            question TEXT NOT NULL,
-            category TEXT NOT NULL,
-            allow_multiple_answers INTEGER NOT NULL DEFAULT 0
-              CHECK (allow_multiple_answers IN (0, 1)),
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1)),
-            favorite INTEGER NOT NULL DEFAULT 0 CHECK (favorite IN (0, 1)),
-            disabled_until TEXT,
-            last_used_at TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE poll_options (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            template_id INTEGER NOT NULL REFERENCES poll_templates(id) ON DELETE CASCADE,
-            option_order INTEGER NOT NULL CHECK (option_order BETWEEN 0 AND 11),
-            option_text TEXT NOT NULL,
-            UNIQUE(template_id, option_order)
-          );
-          CREATE TABLE poll_schedule_config (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
-            send_time TEXT NOT NULL DEFAULT '13:00',
-            timezone TEXT NOT NULL DEFAULT 'America/Santiago'
-              CHECK (timezone = 'America/Santiago'),
-            tolerance_minutes INTEGER NOT NULL DEFAULT 30
-              CHECK (tolerance_minutes BETWEEN 0 AND 180),
-            selection_mode TEXT NOT NULL DEFAULT 'SAME_FOR_ALL'
-              CHECK (selection_mode IN ('SAME_FOR_ALL', 'PER_GROUP')),
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE poll_send_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            deduplication_key TEXT NOT NULL UNIQUE,
-            group_id TEXT NOT NULL,
-            local_date TEXT NOT NULL,
-            template_id INTEGER NOT NULL,
-            source TEXT NOT NULL CHECK (source IN ('scheduled', 'manual')),
-            counts_as_daily INTEGER NOT NULL DEFAULT 1 CHECK (counts_as_daily IN (0, 1)),
-            status TEXT NOT NULL
-              CHECK (status IN ('PENDING', 'SENDING', 'SENT', 'FAILED', 'SKIPPED')),
-            attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 2),
-            scheduled_at TEXT NOT NULL,
-            attempted_at TEXT,
-            sent_at TEXT,
-            failure_code TEXT
-          );
-          CREATE TABLE poll_date_overrides (
-            local_date TEXT PRIMARY KEY,
-            template_id INTEGER NOT NULL REFERENCES poll_templates(id) ON DELETE CASCADE,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE poll_settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE INDEX idx_poll_templates_selection
-            ON poll_templates(enabled, disabled_until, category, last_used_at);
-          CREATE INDEX idx_poll_history_group_date
-            ON poll_send_history(group_id, local_date, status);
-          CREATE INDEX idx_poll_history_template_date
-            ON poll_send_history(template_id, local_date, status);
-          ALTER TABLE technical_events ADD COLUMN template_id INTEGER;
-          ALTER TABLE technical_events ADD COLUMN category TEXT;
-          ALTER TABLE technical_events ADD COLUMN local_date TEXT;
-          ALTER TABLE technical_events ADD COLUMN local_time TEXT;
-          ALTER TABLE technical_events ADD COLUMN attempt INTEGER;
-        `,
-      },
-      {
-        version: 6,
-        sql: `
-          CREATE TABLE assistant_profiles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            profile_key TEXT NOT NULL UNIQUE,
-            internal_name TEXT NOT NULL,
-            organization_name TEXT NOT NULL,
-            bot_name TEXT NOT NULL,
-            activation_alias TEXT NOT NULL,
-            description TEXT NOT NULL,
-            organization_type TEXT NOT NULL,
-            industry TEXT NOT NULL,
-            objective TEXT NOT NULL,
-            allowed_topics TEXT NOT NULL,
-            excluded_topics TEXT NOT NULL,
-            tone TEXT NOT NULL,
-            out_of_scope_message TEXT NOT NULL,
-            no_information_message TEXT NOT NULL,
-            limit_message TEXT NOT NULL,
-            ai_error_message TEXT NOT NULL,
-            medical_message TEXT NOT NULL,
-            mention_prompt_message TEXT NOT NULL,
-            contact_information TEXT NOT NULL,
-            business_hours TEXT NOT NULL,
-            address TEXT,
-            timezone TEXT NOT NULL DEFAULT 'America/Santiago',
-            active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE UNIQUE INDEX idx_assistant_profiles_one_active
-            ON assistant_profiles(active) WHERE active = 1;
-          CREATE TABLE profile_branding (
-            profile_id INTEGER PRIMARY KEY REFERENCES assistant_profiles(id) ON DELETE CASCADE,
-            application_name TEXT NOT NULL DEFAULT 'Panel del Asistente',
-            header_text TEXT NOT NULL DEFAULT 'Panel del Asistente',
-            footer_text TEXT NOT NULL DEFAULT '',
-            support_information TEXT NOT NULL DEFAULT '',
-            logo_path TEXT,
-            primary_color TEXT NOT NULL DEFAULT '#176b61',
-            secondary_color TEXT NOT NULL DEFAULT '#d8a446',
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE assistant_profile_backups (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            profile_id INTEGER NOT NULL,
-            snapshot_json TEXT NOT NULL,
-            reason TEXT NOT NULL,
-            created_at TEXT NOT NULL
-          );
-          CREATE TABLE knowledge_categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            profile_id INTEGER NOT NULL REFERENCES assistant_profiles(id) ON DELETE CASCADE,
-            name TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(profile_id, name)
-          );
-          CREATE TABLE knowledge_entries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            profile_id INTEGER NOT NULL REFERENCES assistant_profiles(id) ON DELETE CASCADE,
-            category_id INTEGER NOT NULL REFERENCES knowledge_categories(id) ON DELETE RESTRICT,
-            legacy_command_id INTEGER UNIQUE,
-            title TEXT NOT NULL,
-            content TEXT NOT NULL,
-            keywords TEXT NOT NULL DEFAULT '[]',
-            synonyms TEXT NOT NULL DEFAULT '[]',
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            priority INTEGER NOT NULL DEFAULT 0,
-            internal_source TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE INDEX idx_knowledge_entries_profile
-            ON knowledge_entries(profile_id, enabled, priority DESC, updated_at DESC);
-          CREATE VIRTUAL TABLE knowledge_entries_fts USING fts5(
-            title, content, keywords, synonyms,
-            content='knowledge_entries', content_rowid='id',
-            tokenize='unicode61 remove_diacritics 2'
-          );
-          CREATE TRIGGER knowledge_entries_ai AFTER INSERT ON knowledge_entries BEGIN
-            INSERT INTO knowledge_entries_fts(rowid, title, content, keywords, synonyms)
-            VALUES (new.id, new.title, new.content, new.keywords, new.synonyms);
-          END;
-          CREATE TRIGGER knowledge_entries_ad AFTER DELETE ON knowledge_entries BEGIN
-            INSERT INTO knowledge_entries_fts(knowledge_entries_fts, rowid, title, content, keywords, synonyms)
-            VALUES ('delete', old.id, old.title, old.content, old.keywords, old.synonyms);
-          END;
-          CREATE TRIGGER knowledge_entries_au AFTER UPDATE ON knowledge_entries BEGIN
-            INSERT INTO knowledge_entries_fts(knowledge_entries_fts, rowid, title, content, keywords, synonyms)
-            VALUES ('delete', old.id, old.title, old.content, old.keywords, old.synonyms);
-            INSERT INTO knowledge_entries_fts(rowid, title, content, keywords, synonyms)
-            VALUES (new.id, new.title, new.content, new.keywords, new.synonyms);
-          END;
-          CREATE TABLE ai_settings (
-            profile_id INTEGER PRIMARY KEY REFERENCES assistant_profiles(id) ON DELETE CASCADE,
-            enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
-            provider TEXT NOT NULL DEFAULT 'groq' CHECK (provider IN ('groq', 'disabled')),
-            question_max_chars INTEGER NOT NULL DEFAULT 300,
-            context_max_tokens INTEGER NOT NULL DEFAULT 700,
-            input_max_tokens INTEGER NOT NULL DEFAULT 1000,
-            response_max_tokens INTEGER NOT NULL DEFAULT 120,
-            response_max_chars INTEGER NOT NULL DEFAULT 600,
-            response_max_lines INTEGER NOT NULL DEFAULT 5,
-            temperature REAL NOT NULL DEFAULT 0.2,
-            user_hourly_limit INTEGER NOT NULL DEFAULT 5,
-            user_daily_limit INTEGER NOT NULL DEFAULT 10,
-            user_cooldown_seconds INTEGER NOT NULL DEFAULT 30,
-            group_hourly_limit INTEGER NOT NULL DEFAULT 20,
-            group_daily_limit INTEGER NOT NULL DEFAULT 100,
-            global_daily_limit INTEGER NOT NULL DEFAULT 50,
-            global_monthly_limit INTEGER NOT NULL DEFAULT 1000,
-            global_daily_token_limit INTEGER NOT NULL DEFAULT 50000,
-            global_monthly_token_limit INTEGER NOT NULL DEFAULT 1000000,
-            timeout_ms INTEGER NOT NULL DEFAULT 15000,
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE ai_usage_daily (
-            profile_id INTEGER NOT NULL,
-            local_date TEXT NOT NULL,
-            requests INTEGER NOT NULL DEFAULT 0,
-            failed_requests INTEGER NOT NULL DEFAULT 0,
-            input_tokens INTEGER NOT NULL DEFAULT 0,
-            output_tokens INTEGER NOT NULL DEFAULT 0,
-            total_tokens INTEGER NOT NULL DEFAULT 0,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(profile_id, local_date)
-          );
-          CREATE TABLE ai_usage_monthly (
-            profile_id INTEGER NOT NULL,
-            local_month TEXT NOT NULL,
-            requests INTEGER NOT NULL DEFAULT 0,
-            failed_requests INTEGER NOT NULL DEFAULT 0,
-            input_tokens INTEGER NOT NULL DEFAULT 0,
-            output_tokens INTEGER NOT NULL DEFAULT 0,
-            total_tokens INTEGER NOT NULL DEFAULT 0,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(profile_id, local_month)
-          );
-          CREATE TABLE ai_usage_by_anonymized_user (
-            profile_id INTEGER NOT NULL,
-            user_hash TEXT NOT NULL,
-            local_date TEXT NOT NULL,
-            hour_bucket TEXT NOT NULL,
-            requests INTEGER NOT NULL DEFAULT 0,
-            input_tokens INTEGER NOT NULL DEFAULT 0,
-            output_tokens INTEGER NOT NULL DEFAULT 0,
-            total_tokens INTEGER NOT NULL DEFAULT 0,
-            last_request_at TEXT NOT NULL,
-            PRIMARY KEY(profile_id, user_hash, local_date, hour_bucket)
-          );
-          CREATE INDEX idx_ai_user_daily ON ai_usage_by_anonymized_user(profile_id, user_hash, local_date);
-          CREATE TABLE ai_usage_by_group (
-            profile_id INTEGER NOT NULL,
-            group_hash TEXT NOT NULL,
-            local_date TEXT NOT NULL,
-            hour_bucket TEXT NOT NULL,
-            requests INTEGER NOT NULL DEFAULT 0,
-            input_tokens INTEGER NOT NULL DEFAULT 0,
-            output_tokens INTEGER NOT NULL DEFAULT 0,
-            total_tokens INTEGER NOT NULL DEFAULT 0,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(profile_id, group_hash, local_date, hour_bucket)
-          );
-          CREATE INDEX idx_ai_group_daily ON ai_usage_by_group(profile_id, group_hash, local_date);
-          CREATE TABLE ai_request_reservations (
-            id TEXT PRIMARY KEY,
-            profile_id INTEGER NOT NULL,
-            user_hash TEXT NOT NULL,
-            group_hash TEXT NOT NULL,
-            local_date TEXT NOT NULL,
-            local_month TEXT NOT NULL,
-            hour_bucket TEXT NOT NULL,
-            estimated_input_tokens INTEGER NOT NULL,
-            reserved_output_tokens INTEGER NOT NULL,
-            status TEXT NOT NULL CHECK (status IN ('PENDING', 'COMPLETED', 'RELEASED')),
-            created_at TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            completed_at TEXT
-          );
-          CREATE INDEX idx_ai_reservations_active ON ai_request_reservations(profile_id, status, expires_at);
-          CREATE TABLE linked_groups (
-            group_id TEXT PRIMARY KEY,
-            profile_id INTEGER NOT NULL REFERENCES assistant_profiles(id) ON DELETE RESTRICT,
-            active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-            first_linked_at TEXT NOT NULL,
-            last_verified_at TEXT NOT NULL,
-            deactivated_at TEXT
-          );
-          CREATE TABLE blocked_groups (
-            group_id TEXT PRIMARY KEY,
-            profile_id INTEGER NOT NULL REFERENCES assistant_profiles(id) ON DELETE RESTRICT,
-            reason TEXT NOT NULL DEFAULT 'MANUAL_BLOCK',
-            created_at TEXT NOT NULL
-          );
-          CREATE TABLE provider_health (
-            profile_id INTEGER PRIMARY KEY REFERENCES assistant_profiles(id) ON DELETE CASCADE,
-            provider TEXT NOT NULL,
-            connection_status TEXT NOT NULL DEFAULT 'not_tested'
-              CHECK (connection_status IN ('not_tested', 'successful', 'failed')),
-            last_checked_at TEXT,
-            last_error_code TEXT,
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE ai_usage_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            profile_id INTEGER NOT NULL,
-            local_date TEXT NOT NULL,
-            local_month TEXT NOT NULL,
-            group_hash TEXT,
-            user_hash TEXT,
-            result TEXT NOT NULL,
-            error_code TEXT,
-            input_tokens INTEGER NOT NULL DEFAULT 0,
-            output_tokens INTEGER NOT NULL DEFAULT 0,
-            total_tokens INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL
-          );
-          CREATE INDEX idx_ai_usage_events_recent ON ai_usage_events(profile_id, created_at DESC);
-        `,
-      },
-      {
-        version: 7,
-        sql: `
-          CREATE TABLE bots (
-            id TEXT PRIMARY KEY,
-            internal_identifier TEXT NOT NULL UNIQUE,
-            client_id TEXT NOT NULL UNIQUE,
-            mode TEXT NOT NULL CHECK (mode IN ('community', 'business', 'mixed')),
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          INSERT INTO bots(id, internal_identifier, client_id, mode, enabled, created_at, updated_at)
-          VALUES ('neurobot', 'neurobot', 'comunidad', 'community', 1, datetime('now'), datetime('now'));
-
-          ALTER TABLE assistant_profiles ADD COLUMN bot_id TEXT NOT NULL DEFAULT 'neurobot'
-            REFERENCES bots(id) ON DELETE CASCADE;
-          DROP INDEX idx_assistant_profiles_one_active;
-          CREATE UNIQUE INDEX idx_assistant_profiles_active_per_bot
-            ON assistant_profiles(bot_id) WHERE active = 1;
-          CREATE INDEX idx_assistant_profiles_bot ON assistant_profiles(bot_id, active);
-          CREATE TABLE bot_profiles (
-            bot_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
-            profile_id INTEGER NOT NULL UNIQUE REFERENCES assistant_profiles(id) ON DELETE CASCADE,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-
-          CREATE TABLE messaging_runtime (
-            bot_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
-            status TEXT NOT NULL DEFAULT 'disconnected',
-            masked_number TEXT,
-            last_connected_at TEXT,
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE bot_channel_settings (
-            bot_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
-            groups_enabled INTEGER NOT NULL DEFAULT 1 CHECK (groups_enabled IN (0, 1)),
-            private_messages_enabled INTEGER NOT NULL DEFAULT 0 CHECK (private_messages_enabled IN (0, 1)),
-            real_mention_required INTEGER NOT NULL DEFAULT 1 CHECK (real_mention_required IN (0, 1)),
-            continued_conversations_enabled INTEGER NOT NULL DEFAULT 0
-              CHECK (continued_conversations_enabled IN (0, 1)),
-            private_initial_menu_id INTEGER,
-            menu_type TEXT NOT NULL DEFAULT 'automatic'
-              CHECK (menu_type IN ('automatic', 'native_buttons', 'native_list', 'numbered')),
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE bot_ai_credentials (
-            bot_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
-            credential_mode TEXT NOT NULL DEFAULT 'global'
-              CHECK (credential_mode IN ('global', 'per_bot')),
-            encrypted_api_key TEXT,
-            key_fingerprint TEXT,
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE global_ai_limits (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            daily_request_limit INTEGER NOT NULL DEFAULT 250,
-            monthly_request_limit INTEGER NOT NULL DEFAULT 5000,
-            daily_token_limit INTEGER NOT NULL DEFAULT 250000,
-            monthly_token_limit INTEGER NOT NULL DEFAULT 5000000,
-            updated_at TEXT NOT NULL
-          );
-          INSERT INTO global_ai_limits(id, updated_at) VALUES (1, datetime('now'));
-
-          ALTER TABLE knowledge_categories ADD COLUMN bot_id TEXT NOT NULL DEFAULT 'neurobot';
-          ALTER TABLE knowledge_entries ADD COLUMN bot_id TEXT NOT NULL DEFAULT 'neurobot';
-          CREATE INDEX idx_knowledge_categories_bot ON knowledge_categories(bot_id, profile_id, enabled);
-          CREATE INDEX idx_knowledge_entries_bot ON knowledge_entries(bot_id, profile_id, enabled, priority DESC);
-          ALTER TABLE ai_settings ADD COLUMN bot_id TEXT NOT NULL DEFAULT 'neurobot';
-          ALTER TABLE ai_usage_daily ADD COLUMN bot_id TEXT NOT NULL DEFAULT 'neurobot';
-          ALTER TABLE ai_usage_monthly ADD COLUMN bot_id TEXT NOT NULL DEFAULT 'neurobot';
-          ALTER TABLE ai_usage_by_anonymized_user ADD COLUMN bot_id TEXT NOT NULL DEFAULT 'neurobot';
-          ALTER TABLE ai_usage_by_group ADD COLUMN bot_id TEXT NOT NULL DEFAULT 'neurobot';
-          ALTER TABLE ai_request_reservations ADD COLUMN bot_id TEXT NOT NULL DEFAULT 'neurobot';
-          ALTER TABLE ai_usage_events ADD COLUMN bot_id TEXT NOT NULL DEFAULT 'neurobot';
-          ALTER TABLE provider_health ADD COLUMN bot_id TEXT NOT NULL DEFAULT 'neurobot';
-          ALTER TABLE poll_templates ADD COLUMN bot_id TEXT NOT NULL DEFAULT 'neurobot';
-          ALTER TABLE poll_schedule_config ADD COLUMN bot_id TEXT NOT NULL DEFAULT 'neurobot';
-          ALTER TABLE automatic_message_tasks ADD COLUMN bot_id TEXT NOT NULL DEFAULT 'neurobot';
-          ALTER TABLE technical_events ADD COLUMN bot_id TEXT;
-          ALTER TABLE audit_events ADD COLUMN bot_id TEXT;
-
-          CREATE TABLE bot_groups (
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            group_id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-            blocked INTEGER NOT NULL DEFAULT 0 CHECK (blocked IN (0, 1)),
-            bot_is_member INTEGER CHECK (bot_is_member IN (0, 1)),
-            status TEXT NOT NULL,
-            first_seen_at TEXT NOT NULL,
-            last_seen_at TEXT NOT NULL,
-            deactivated_at TEXT,
-            PRIMARY KEY(bot_id, group_id)
-          );
-          INSERT INTO bot_groups(
-            bot_id, group_id, name, active, blocked, bot_is_member, status,
-            first_seen_at, last_seen_at, deactivated_at
-          )
-          SELECT 'neurobot', groups.chat_id, groups.name,
-            CASE WHEN groups.status = 'ACTIVE' AND groups.bot_is_member = 1 THEN 1 ELSE 0 END,
-            CASE WHEN blocked_groups.group_id IS NULL THEN 0 ELSE 1 END,
-            groups.bot_is_member, groups.status,
-            COALESCE(groups.first_seen_at, groups.detected_at),
-            COALESCE(groups.last_seen_at, groups.updated_at),
-            CASE WHEN groups.status = 'ACTIVE' AND groups.bot_is_member = 1 THEN NULL ELSE groups.updated_at END
-          FROM groups LEFT JOIN blocked_groups ON blocked_groups.group_id = groups.chat_id;
-
-          CREATE TABLE menu_definitions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            parent_menu_id INTEGER REFERENCES menu_definitions(id) ON DELETE SET NULL,
-            title TEXT NOT NULL,
-            message TEXT NOT NULL,
-            help_text TEXT NOT NULL DEFAULT '',
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            is_initial INTEGER NOT NULL DEFAULT 0 CHECK (is_initial IN (0, 1)),
-            expiration_minutes INTEGER NOT NULL DEFAULT 15 CHECK (expiration_minutes BETWEEN 1 AND 1440),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE UNIQUE INDEX idx_menu_initial_per_bot ON menu_definitions(bot_id) WHERE is_initial = 1;
-          CREATE TABLE menu_options (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            menu_id INTEGER NOT NULL REFERENCES menu_definitions(id) ON DELETE CASCADE,
-            label TEXT NOT NULL,
-            aliases TEXT NOT NULL DEFAULT '[]',
-            option_order INTEGER NOT NULL,
-            action_type TEXT NOT NULL CHECK (action_type IN (
-              'text', 'catalog_item', 'catalog_category', 'media', 'submenu', 'knowledge', 'ai',
-              'hours', 'address', 'payments', 'shipping', 'human_assistance',
-              'reservation_request', 'back', 'exit'
-            )),
-            action_payload TEXT NOT NULL DEFAULT '{}',
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(menu_id, option_order)
-          );
-          CREATE INDEX idx_menu_options_bot ON menu_options(bot_id, menu_id, enabled, option_order);
-          CREATE TABLE conversation_states (
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            chat_hash TEXT NOT NULL,
-            user_hash TEXT NOT NULL,
-            active_flow TEXT NOT NULL,
-            current_menu_id INTEGER REFERENCES menu_definitions(id) ON DELETE CASCADE,
-            previous_menu_id INTEGER REFERENCES menu_definitions(id) ON DELETE SET NULL,
-            current_step TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(bot_id, chat_hash, user_hash)
-          );
-          CREATE INDEX idx_conversation_expiry ON conversation_states(bot_id, expires_at);
-
-          CREATE TABLE catalog_categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            name TEXT NOT NULL,
-            description TEXT NOT NULL DEFAULT '',
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(bot_id, name)
-          );
-          CREATE TABLE catalog_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            category_id INTEGER REFERENCES catalog_categories(id) ON DELETE SET NULL,
-            name TEXT NOT NULL,
-            code TEXT NOT NULL,
-            description TEXT NOT NULL DEFAULT '',
-            price_amount INTEGER,
-            offer_price_amount INTEGER,
-            currency TEXT NOT NULL DEFAULT 'CLP',
-            presentation TEXT NOT NULL DEFAULT '',
-            size TEXT NOT NULL DEFAULT '',
-            variants TEXT NOT NULL DEFAULT '[]',
-            availability TEXT NOT NULL DEFAULT '',
-            informed_stock INTEGER,
-            primary_media_id INTEGER,
-            authorized_link TEXT,
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(bot_id, code)
-          );
-          CREATE INDEX idx_catalog_items_bot ON catalog_items(bot_id, enabled, category_id, name);
-          CREATE TABLE media_assets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            internal_name TEXT NOT NULL UNIQUE,
-            relative_path TEXT NOT NULL UNIQUE,
-            mime_type TEXT NOT NULL CHECK (mime_type IN ('image/png', 'image/jpeg', 'image/webp')),
-            byte_size INTEGER NOT NULL,
-            sha256 TEXT NOT NULL,
-            caption TEXT NOT NULL DEFAULT '',
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE catalog_item_media (
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            item_id INTEGER NOT NULL REFERENCES catalog_items(id) ON DELETE CASCADE,
-            media_id INTEGER NOT NULL REFERENCES media_assets(id) ON DELETE CASCADE,
-            media_order INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY(bot_id, item_id, media_id)
-          );
-
-          CREATE TABLE business_hours (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            weekday INTEGER CHECK (weekday BETWEEN 0 AND 6),
-            local_date TEXT,
-            opening_time TEXT,
-            closing_time TEXT,
-            closed INTEGER NOT NULL DEFAULT 0 CHECK (closed IN (0, 1)),
-            label TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            CHECK (weekday IS NOT NULL OR local_date IS NOT NULL)
-          );
-          CREATE INDEX idx_business_hours_bot ON business_hours(bot_id, weekday, local_date);
-          CREATE TABLE human_assistance_requests (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            chat_hash TEXT NOT NULL,
-            user_hash TEXT NOT NULL,
-            requested_interval TEXT NOT NULL DEFAULT '',
-            local_date TEXT NOT NULL,
-            status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'rejected', 'attended', 'cancelled')),
-            note TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE INDEX idx_human_requests_bot ON human_assistance_requests(bot_id, status, created_at DESC);
-          CREATE TABLE bot_automation_settings (
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            automation_key TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
-            group_hash TEXT,
-            configuration_json TEXT NOT NULL DEFAULT '{}',
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(bot_id, automation_key, group_hash)
-          );
-        `,
-      },
-      {
-        version: 8,
-        sql: `
-          CREATE TABLE bot_automatic_configurations (
-            bot_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
-            configuration_json TEXT NOT NULL,
-            customized_json TEXT NOT NULL DEFAULT '{}',
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE bot_scheduled_message_deliveries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            deduplication_key TEXT NOT NULL,
-            task_type TEXT NOT NULL CHECK (task_type IN ('WELCOME', 'DAILY_GREETING', 'DAILY_RULES')),
-            group_id TEXT NOT NULL,
-            local_date TEXT NOT NULL,
-            source TEXT NOT NULL CHECK (source IN ('scheduled', 'manual')),
-            status TEXT NOT NULL CHECK (status IN ('PENDING', 'SENT', 'SKIPPED', 'FAILED')),
-            attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 2),
-            error_code TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            sent_at TEXT,
-            UNIQUE(bot_id, deduplication_key)
-          );
-          CREATE INDEX idx_bot_scheduled_delivery
-            ON bot_scheduled_message_deliveries(bot_id, group_id, local_date, task_type);
-          CREATE TABLE bot_automatic_group_backoff (
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            group_id TEXT NOT NULL,
-            disabled_until TEXT NOT NULL,
-            error_code TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(bot_id, group_id)
-          );
-
-          CREATE TABLE bot_poll_templates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            default_key TEXT,
-            question TEXT NOT NULL,
-            category TEXT NOT NULL,
-            allow_multiple_answers INTEGER NOT NULL DEFAULT 0 CHECK (allow_multiple_answers IN (0, 1)),
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1)),
-            favorite INTEGER NOT NULL DEFAULT 0 CHECK (favorite IN (0, 1)),
-            disabled_until TEXT,
-            last_used_at TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(bot_id, default_key)
-          );
-          CREATE TABLE bot_poll_options (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            template_id INTEGER NOT NULL REFERENCES bot_poll_templates(id) ON DELETE CASCADE,
-            option_order INTEGER NOT NULL CHECK (option_order BETWEEN 0 AND 11),
-            option_text TEXT NOT NULL,
-            UNIQUE(template_id, option_order)
-          );
-          CREATE TABLE bot_poll_configurations (
-            bot_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
-            enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
-            send_time TEXT NOT NULL DEFAULT '13:00',
-            timezone TEXT NOT NULL,
-            tolerance_minutes INTEGER NOT NULL DEFAULT 30 CHECK (tolerance_minutes BETWEEN 0 AND 180),
-            selection_mode TEXT NOT NULL DEFAULT 'SAME_FOR_ALL' CHECK (selection_mode IN ('SAME_FOR_ALL', 'PER_GROUP')),
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE bot_poll_date_overrides (
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            local_date TEXT NOT NULL,
-            template_id INTEGER NOT NULL REFERENCES bot_poll_templates(id) ON DELETE CASCADE,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(bot_id, local_date)
-          );
-          CREATE TABLE bot_poll_send_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            deduplication_key TEXT NOT NULL,
-            group_id TEXT NOT NULL,
-            local_date TEXT NOT NULL,
-            template_id INTEGER NOT NULL REFERENCES bot_poll_templates(id),
-            source TEXT NOT NULL CHECK (source IN ('scheduled', 'manual')),
-            counts_as_daily INTEGER NOT NULL DEFAULT 1 CHECK (counts_as_daily IN (0, 1)),
-            status TEXT NOT NULL CHECK (status IN ('PENDING', 'SENDING', 'SENT', 'FAILED', 'SKIPPED')),
-            attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 2),
-            scheduled_at TEXT NOT NULL,
-            attempted_at TEXT,
-            sent_at TEXT,
-            failure_code TEXT,
-            UNIQUE(bot_id, deduplication_key)
-          );
-          CREATE INDEX idx_bot_poll_history_group_date
-            ON bot_poll_send_history(bot_id, group_id, local_date, status);
-
-          INSERT INTO bot_poll_configurations(
-            bot_id, enabled, send_time, timezone, tolerance_minutes, selection_mode, updated_at
-          ) SELECT 'neurobot', enabled, send_time, timezone, tolerance_minutes, selection_mode, updated_at
-            FROM poll_schedule_config WHERE id = 1;
-          INSERT INTO bot_poll_templates(
-            id, bot_id, default_key, question, category, allow_multiple_answers, enabled, is_default,
-            favorite, disabled_until, last_used_at, created_at, updated_at
-          ) SELECT id, 'neurobot', default_key, question, category, allow_multiple_answers, enabled, is_default,
-            favorite, disabled_until, last_used_at, created_at, updated_at FROM poll_templates;
-          INSERT INTO bot_poll_options(template_id, option_order, option_text)
-          SELECT source.template_id, source.option_order, source.option_text
-          FROM poll_options source;
-        `,
-      },
-      {
-        version: 9,
-        sql: `
-          UPDATE assistant_profiles
-          SET bot_name = 'Neurobot', activation_alias = '@neurobot', updated_at = datetime('now')
-          WHERE id IN (
-            SELECT profile_id FROM bot_profiles WHERE bot_id = 'neurobot'
-          );
-        `,
-      },
-      {
-        version: 10,
-        sql: `
-          ALTER TABLE bots ADD COLUMN connector_type TEXT NOT NULL DEFAULT 'WHATSAPP_CLOUD_API'
-            CHECK (connector_type IN ('WHATSAPP_CLOUD_API'));
-          ALTER TABLE bots ADD COLUMN operating_mode TEXT NOT NULL DEFAULT 'COMMUNITY_GROUPS'
-            CHECK (operating_mode IN ('COMMUNITY_GROUPS', 'BUSINESS_PRIVATE', 'BUSINESS_MIXED'));
-          ALTER TABLE bots ADD COLUMN connector_migration_locked INTEGER NOT NULL DEFAULT 0
-            CHECK (connector_migration_locked IN (0, 1));
-
-          UPDATE bots SET
-            connector_type = 'WHATSAPP_CLOUD_API',
-            operating_mode = CASE
-              WHEN mode = 'community' THEN 'COMMUNITY_GROUPS'
-              WHEN mode = 'business' THEN 'BUSINESS_PRIVATE'
-              ELSE 'BUSINESS_MIXED'
-            END;
-
-          CREATE TABLE bot_capabilities (
-            bot_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
-            community_single_turn_mode INTEGER NOT NULL DEFAULT 0 CHECK (community_single_turn_mode IN (0, 1)),
-            private_chats_enabled INTEGER NOT NULL DEFAULT 1 CHECK (private_chats_enabled IN (0, 1)),
-            conversation_continuation_enabled INTEGER NOT NULL DEFAULT 1 CHECK (conversation_continuation_enabled IN (0, 1)),
-            interactive_menus_enabled INTEGER NOT NULL DEFAULT 1 CHECK (interactive_menus_enabled IN (0, 1)),
-            numeric_menu_replies_enabled INTEGER NOT NULL DEFAULT 1 CHECK (numeric_menu_replies_enabled IN (0, 1)),
-            polls_as_menus_enabled INTEGER NOT NULL DEFAULT 0 CHECK (polls_as_menus_enabled IN (0, 1)),
-            polls_for_community_engagement_enabled INTEGER NOT NULL DEFAULT 0 CHECK (polls_for_community_engagement_enabled IN (0, 1)),
-            catalog_enabled INTEGER NOT NULL DEFAULT 1 CHECK (catalog_enabled IN (0, 1)),
-            human_assistance_enabled INTEGER NOT NULL DEFAULT 1 CHECK (human_assistance_enabled IN (0, 1)),
-            updated_at TEXT NOT NULL
-          );
-
-          INSERT INTO bot_capabilities(
-            bot_id, community_single_turn_mode, private_chats_enabled,
-            conversation_continuation_enabled, interactive_menus_enabled,
-            numeric_menu_replies_enabled, polls_as_menus_enabled,
-            polls_for_community_engagement_enabled, catalog_enabled,
-            human_assistance_enabled, updated_at
-          )
-          SELECT id,
-            CASE WHEN mode = 'community' THEN 1 ELSE 0 END,
-            CASE WHEN mode = 'community' THEN 0 ELSE 1 END,
-            CASE WHEN mode = 'community' THEN 0 ELSE 1 END,
-            CASE WHEN mode = 'community' THEN 0 ELSE 1 END,
-            CASE WHEN mode = 'community' THEN 0 ELSE 1 END,
-            0,
-            CASE WHEN mode = 'community' THEN 1 ELSE 0 END,
-            CASE WHEN mode = 'community' THEN 0 ELSE 1 END,
-            CASE WHEN mode = 'community' THEN 0 ELSE 1 END,
-            datetime('now')
-          FROM bots;
-
-          CREATE TABLE bot_activation_aliases (
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            alias TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            PRIMARY KEY(bot_id, alias)
-          );
-
-          INSERT INTO bot_activation_aliases(bot_id, alias, created_at)
-          SELECT mapping.bot_id, lower(profiles.activation_alias), datetime('now')
-          FROM bot_profiles mapping
-          JOIN assistant_profiles profiles ON profiles.id = mapping.profile_id;
-
-          UPDATE bots SET connector_type = 'WHATSAPP_CLOUD_API', operating_mode = 'COMMUNITY_GROUPS',
-            connector_migration_locked = 1, mode = 'community', updated_at = datetime('now')
-          WHERE id = 'neurobot';
-          UPDATE bot_channel_settings SET groups_enabled = 1, private_messages_enabled = 0,
-            real_mention_required = 1, continued_conversations_enabled = 0,
-            updated_at = datetime('now') WHERE bot_id = 'neurobot';
-          UPDATE bot_capabilities SET community_single_turn_mode = 1, private_chats_enabled = 0,
-            conversation_continuation_enabled = 0, interactive_menus_enabled = 0,
-            numeric_menu_replies_enabled = 0, polls_as_menus_enabled = 0,
-            polls_for_community_engagement_enabled = 1, catalog_enabled = 0,
-            human_assistance_enabled = 0, updated_at = datetime('now')
-          WHERE bot_id = 'neurobot';
-          UPDATE assistant_profiles SET bot_name = 'Neurobot', activation_alias = '@neurobot',
-            mention_prompt_message = 'Escribe tu pregunta después de llamar a Neurobot.',
-            out_of_scope_message = 'Solo puedo responder consultas relacionadas con esta comunidad.',
-            no_information_message = 'No tengo información confirmada sobre eso. Puedes consultar a la administración.',
-            medical_message = 'Puedo entregar orientación general, pero no diagnósticos ni indicaciones de tratamiento.',
-            timezone = 'America/Santiago', updated_at = datetime('now')
-          WHERE id IN (SELECT profile_id FROM bot_profiles WHERE bot_id = 'neurobot');
-          UPDATE ai_settings SET question_max_chars = 300, context_max_tokens = 700,
-            input_max_tokens = 1000, response_max_tokens = 120, response_max_chars = 600,
-            response_max_lines = 5, temperature = 0.2, user_hourly_limit = 5,
-            user_daily_limit = 10, user_cooldown_seconds = 30, group_hourly_limit = 20,
-            group_daily_limit = 100, global_daily_limit = 50, global_monthly_limit = 1000,
-            global_daily_token_limit = 50000, global_monthly_token_limit = 1000000,
-            updated_at = datetime('now')
-          WHERE profile_id IN (SELECT profile_id FROM bot_profiles WHERE bot_id = 'neurobot');
-          DELETE FROM conversation_states WHERE bot_id = 'neurobot';
-        `,
-      },
-      {
-        version: 11,
-        sql: `
-          ALTER TABLE assistant_profiles ADD COLUMN community_greeting_message TEXT NOT NULL DEFAULT
-            '¡Hola! 👋 Soy Neurobot, el asistente de la Comunidad Neurodivergente – Autismo y TDAH. Puedo ayudarte con las normas, los grupos disponibles, las actividades y el funcionamiento de la comunidad. Llámame escribiendo @neurobot seguido de tu pregunta. Respondo una consulta a la vez y no reemplazo la orientación de profesionales.';
-          ALTER TABLE ai_settings ADD COLUMN interaction_hourly_limit INTEGER NOT NULL DEFAULT 60;
-          ALTER TABLE ai_settings ADD COLUMN interaction_cooldown_seconds INTEGER NOT NULL DEFAULT 3;
-          ALTER TABLE ai_settings ADD COLUMN duplicate_query_window_seconds INTEGER NOT NULL DEFAULT 15;
-
-          CREATE TABLE cached_answers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            canonical_question TEXT NOT NULL,
-            normalized_question_hash TEXT NOT NULL,
-            answer TEXT NOT NULL,
-            category TEXT NOT NULL DEFAULT 'General',
-            knowledge_source_ids TEXT NOT NULL DEFAULT '[]',
-            knowledge_version TEXT NOT NULL DEFAULT '',
-            prompt_version TEXT NOT NULL DEFAULT 'community-v1',
-            status TEXT NOT NULL CHECK (status IN (
-              'AUTO_VERIFIED', 'ADMIN_APPROVED', 'ADMIN_EDITED', 'DISABLED', 'INVALIDATED'
-            )),
-            source_type TEXT NOT NULL CHECK (source_type IN ('AI_GENERATED', 'ADMIN_FAQ', 'MANUAL')),
-            confidence REAL NOT NULL DEFAULT 1 CHECK (confidence BETWEEN 0 AND 1),
-            hit_count INTEGER NOT NULL DEFAULT 0,
-            api_calls_saved INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            last_used_at TEXT,
-            expires_at TEXT,
-            invalidated_at TEXT,
-            invalidation_reason TEXT,
-            UNIQUE(bot_id, normalized_question_hash)
-          );
-          CREATE INDEX idx_cached_answers_lookup
-            ON cached_answers(bot_id, status, normalized_question_hash);
-          CREATE INDEX idx_cached_answers_recent
-            ON cached_answers(bot_id, updated_at DESC);
-          CREATE TABLE cached_answer_variants (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cached_answer_id INTEGER NOT NULL REFERENCES cached_answers(id) ON DELETE CASCADE,
-            variant TEXT NOT NULL,
-            normalized_question_hash TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            UNIQUE(cached_answer_id, normalized_question_hash)
-          );
-          CREATE INDEX idx_cached_answer_variants_lookup
-            ON cached_answer_variants(normalized_question_hash, cached_answer_id);
-          CREATE TABLE bot_interaction_usage (
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            user_hash TEXT NOT NULL,
-            local_date TEXT NOT NULL,
-            hour_bucket TEXT NOT NULL,
-            activations INTEGER NOT NULL DEFAULT 0,
-            last_activation_at TEXT NOT NULL,
-            last_query_hash TEXT NOT NULL,
-            last_query_at TEXT NOT NULL,
-            PRIMARY KEY(bot_id, user_hash, local_date, hour_bucket)
-          );
-          CREATE INDEX idx_bot_interaction_latest
-            ON bot_interaction_usage(bot_id, user_hash, last_activation_at DESC);
-
-          UPDATE assistant_profiles SET
-            community_greeting_message = '¡Hola! 👋 Soy Neurobot, el asistente de la Comunidad Neurodivergente – Autismo y TDAH. Puedo ayudarte con las normas, los grupos disponibles, las actividades y el funcionamiento de la comunidad. Llámame escribiendo @neurobot seguido de tu pregunta. Respondo una consulta a la vez y no reemplazo la orientación de profesionales.',
-            limit_message = 'Has alcanzado el límite temporal de preguntas nuevas que necesitan inteligencia artificial. Las consultas frecuentes y respuestas guardadas seguirán disponibles. Intenta nuevamente más tarde.',
-            updated_at = datetime('now')
-          WHERE id IN (SELECT profile_id FROM bot_profiles WHERE bot_id = 'neurobot');
-          UPDATE ai_settings SET
-            user_hourly_limit = 20, user_daily_limit = 50, user_cooldown_seconds = 0,
-            group_hourly_limit = 150, group_daily_limit = 500,
-            global_daily_limit = 500, global_monthly_limit = 10000,
-            interaction_hourly_limit = 60, interaction_cooldown_seconds = 3,
-            duplicate_query_window_seconds = 15, updated_at = datetime('now')
-          WHERE profile_id IN (SELECT profile_id FROM bot_profiles WHERE bot_id = 'neurobot');
-          UPDATE global_ai_limits SET daily_request_limit = MAX(daily_request_limit, 500),
-            monthly_request_limit = MAX(monthly_request_limit, 10000), updated_at = datetime('now')
-          WHERE id = 1;
-          UPDATE cached_answers SET status = 'INVALIDATED', invalidated_at = datetime('now'),
-            invalidation_reason = 'INCORRECT_TLP_EXPANSION', updated_at = datetime('now')
-          WHERE lower(answer) LIKE '%tlp%'
-            AND (lower(answer) LIKE '%trastorno por deficit de atencion%'
-              OR lower(answer) LIKE '%trastorno por déficit de atención%');
-        `,
-      },
-      {
-        version: 12,
-        sql: `
-          CREATE TABLE bot_welcome_baseline (
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            group_hash TEXT NOT NULL,
-            participant_hash TEXT NOT NULL,
-            seen_at TEXT NOT NULL,
-            PRIMARY KEY(bot_id, group_hash, participant_hash)
-          );
-          CREATE TABLE bot_welcome_deduplication (
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            group_hash TEXT NOT NULL,
-            participant_hash TEXT NOT NULL,
-            source TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            PRIMARY KEY(bot_id, group_hash, participant_hash)
-          );
-          CREATE INDEX idx_bot_welcome_dedup_expiry
-            ON bot_welcome_deduplication(bot_id, expires_at);
-          CREATE TABLE bot_welcome_runtime (
-            bot_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
-            baseline_initialized INTEGER NOT NULL DEFAULT 0 CHECK (baseline_initialized IN (0, 1)),
-            listener_registered INTEGER NOT NULL DEFAULT 0 CHECK (listener_registered IN (0, 1)),
-            last_detected_at TEXT,
-            last_sent_at TEXT,
-            last_error_code TEXT,
-            updated_at TEXT NOT NULL
-          );
-          INSERT INTO bot_welcome_runtime(bot_id, updated_at)
-            SELECT id, datetime('now') FROM bots;
-        `,
-      },
-      {
-        version: 13,
-        sql: `
-          ALTER TABLE bots ADD COLUMN assistant_type TEXT NOT NULL DEFAULT 'COMMUNITY_GROUPS'
-            CHECK (assistant_type IN ('COMMUNITY_GROUPS', 'BUSINESS_PRIVATE', 'BUSINESS_MIXED'));
-          ALTER TABLE bots ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT 'DRAFT'
-            CHECK (lifecycle_status IN ('DRAFT','UNLINKED','LINKING','CONNECTED',
-              'DUPLICATE_CONFIGURATION','DISABLED','ARCHIVED','PENDING_DELETION','DELETED'));
-          ALTER TABLE bots ADD COLUMN deletion_locked INTEGER NOT NULL DEFAULT 0 CHECK (deletion_locked IN (0,1));
-          ALTER TABLE bots ADD COLUMN deleted_at TEXT;
-          ALTER TABLE bots ADD COLUMN scheduled_permanent_deletion_at TEXT;
-          ALTER TABLE bots ADD COLUMN group_channel_enabled INTEGER NOT NULL DEFAULT 0 CHECK (group_channel_enabled IN (0,1));
-          ALTER TABLE bots ADD COLUMN private_channel_enabled INTEGER NOT NULL DEFAULT 0 CHECK (private_channel_enabled IN (0,1));
-          ALTER TABLE bots ADD COLUMN private_business_mode_enabled INTEGER NOT NULL DEFAULT 0 CHECK (private_business_mode_enabled IN (0,1));
-          ALTER TABLE bots ADD COLUMN active_connector_id INTEGER;
-
-          CREATE TABLE assistant_connectors (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            connector_type TEXT NOT NULL CHECK (connector_type IN ('WHATSAPP_CLOUD_API')),
-            meta_phone_number_id TEXT,
-            public_webhook_identifier TEXT,
-            connector_status TEXT NOT NULL DEFAULT 'UNLINKED'
-              CHECK (connector_status IN ('DRAFT','UNLINKED','LINKING','CONNECTED','CONFLICT','DISABLED','ARCHIVED')),
-            conflict_reason TEXT,
-            linked_assistant_id TEXT REFERENCES bots(id),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE UNIQUE INDEX idx_active_connector_per_assistant
-            ON assistant_connectors(assistant_id) WHERE connector_status NOT IN ('ARCHIVED','DISABLED');
-          CREATE UNIQUE INDEX idx_connector_meta_phone_unique
-            ON assistant_connectors(meta_phone_number_id)
-            WHERE meta_phone_number_id IS NOT NULL AND connector_status NOT IN ('ARCHIVED','DISABLED');
-          CREATE UNIQUE INDEX idx_connector_webhook_unique
-            ON assistant_connectors(public_webhook_identifier)
-            WHERE public_webhook_identifier IS NOT NULL AND connector_status NOT IN ('ARCHIVED','DISABLED');
-
-          CREATE TABLE assistant_capability_assignments (
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            capability_key TEXT NOT NULL,
-            enabled INTEGER NOT NULL CHECK (enabled IN (0,1)),
-            source TEXT NOT NULL,
-            reason TEXT,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(assistant_id, capability_key)
-          );
-          CREATE TABLE assistant_modules (
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            module_key TEXT NOT NULL,
-            visible INTEGER NOT NULL CHECK (visible IN (0,1)),
-            enabled INTEGER NOT NULL CHECK (enabled IN (0,1)),
-            hidden_reason TEXT,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(assistant_id, module_key)
-          );
-          CREATE TABLE assistant_deletion_audit (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            assistant_id TEXT NOT NULL,
-            action TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            safe_actor_hash TEXT NOT NULL,
-            backup_reference TEXT,
-            result TEXT NOT NULL
-          );
-
-          UPDATE bots SET
-            assistant_type = operating_mode,
-            lifecycle_status = CASE
-              WHEN id = 'neurobot' THEN 'CONNECTED'
-              WHEN id = 'marqueteria-del-sur' THEN 'DRAFT'
-              WHEN enabled = 0 THEN 'DISABLED'
-              ELSE 'UNLINKED'
-            END,
-            deletion_locked = CASE WHEN id = 'neurobot' THEN 1 ELSE 0 END,
-            group_channel_enabled = CASE WHEN operating_mode IN ('COMMUNITY_GROUPS','BUSINESS_MIXED') THEN 1 ELSE 0 END,
-            private_channel_enabled = CASE WHEN operating_mode IN ('BUSINESS_PRIVATE','BUSINESS_MIXED') THEN 1 ELSE 0 END,
-            private_business_mode_enabled = CASE WHEN operating_mode = 'BUSINESS_MIXED' THEN 1 ELSE 0 END;
-
-          INSERT INTO assistant_connectors(
-            assistant_id,connector_type,connector_status,created_at,updated_at
-          ) SELECT bots.id,bots.connector_type,
-              CASE WHEN runtime.status = 'connected' THEN 'CONNECTED' ELSE 'UNLINKED' END,
-              datetime('now'),datetime('now')
-            FROM bots JOIN messaging_runtime runtime ON runtime.bot_id = bots.id;
-          UPDATE bots SET active_connector_id = (
-            SELECT id FROM assistant_connectors WHERE assistant_id = bots.id
-          );
-        `,
-      },
-      {
-        version: 14,
-        sql: `
-          CREATE TABLE assistant_poll_template_settings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            poll_template_id INTEGER NOT NULL REFERENCES bot_poll_templates(id) ON DELETE CASCADE,
-            status TEXT NOT NULL DEFAULT 'ACTIVE'
-              CHECK (status IN ('ACTIVE','HIDDEN','DISABLED','ARCHIVED')),
-            hidden_at TEXT,
-            restored_at TEXT,
-            safe_actor_hash TEXT NOT NULL,
-            removal_reason TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(assistant_id, poll_template_id)
-          );
-          CREATE INDEX idx_assistant_poll_template_status
-            ON assistant_poll_template_settings(assistant_id, status, poll_template_id);
-        `,
-      },
-      {
-        version: 15,
-        sql: `
-          CREATE TABLE assistant_ai_queue_settings (
-            assistant_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
-            max_concurrent INTEGER NOT NULL DEFAULT 3 CHECK (max_concurrent BETWEEN 1 AND 10),
-            max_queue_size INTEGER NOT NULL DEFAULT 20 CHECK (max_queue_size BETWEEN 1 AND 100),
-            max_queue_wait_seconds INTEGER NOT NULL DEFAULT 60 CHECK (max_queue_wait_seconds BETWEEN 5 AND 300),
-            provider_timeout_seconds INTEGER NOT NULL DEFAULT 25 CHECK (provider_timeout_seconds BETWEEN 5 AND 60),
-            max_retries INTEGER NOT NULL DEFAULT 2 CHECK (max_retries BETWEEN 0 AND 5),
-            initial_retry_delay_seconds INTEGER NOT NULL DEFAULT 2 CHECK (initial_retry_delay_seconds BETWEEN 1 AND 30),
-            maximum_retry_delay_seconds INTEGER NOT NULL DEFAULT 15 CHECK (maximum_retry_delay_seconds BETWEEN 1 AND 60),
-            wait_notice_seconds INTEGER NOT NULL DEFAULT 5 CHECK (wait_notice_seconds BETWEEN 1 AND 60),
-            user_cooldown_seconds INTEGER NOT NULL DEFAULT 10 CHECK (user_cooldown_seconds BETWEEN 0 AND 300),
-            duplicate_window_seconds INTEGER NOT NULL DEFAULT 15 CHECK (duplicate_window_seconds BETWEEN 0 AND 300),
-            single_flight_window_seconds INTEGER NOT NULL DEFAULT 60 CHECK (single_flight_window_seconds BETWEEN 1 AND 300),
-            outbound_message_interval_ms INTEGER NOT NULL DEFAULT 1000 CHECK (outbound_message_interval_ms BETWEEN 0 AND 10000),
-            suggested_retry_seconds INTEGER NOT NULL DEFAULT 60 CHECK (suggested_retry_seconds BETWEEN 5 AND 600),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE assistant_ai_queue_metrics (
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            local_date TEXT NOT NULL,
-            queued_count INTEGER NOT NULL DEFAULT 0,
-            processed_count INTEGER NOT NULL DEFAULT 0,
-            completed_count INTEGER NOT NULL DEFAULT 0,
-            failed_count INTEGER NOT NULL DEFAULT 0,
-            expired_count INTEGER NOT NULL DEFAULT 0,
-            rejected_count INTEGER NOT NULL DEFAULT 0,
-            timeout_count INTEGER NOT NULL DEFAULT 0,
-            rate_limit_count INTEGER NOT NULL DEFAULT 0,
-            retry_count INTEGER NOT NULL DEFAULT 0,
-            coalesced_count INTEGER NOT NULL DEFAULT 0,
-            duplicate_suppressed_count INTEGER NOT NULL DEFAULT 0,
-            cache_bypass_count INTEGER NOT NULL DEFAULT 0,
-            total_wait_ms INTEGER NOT NULL DEFAULT 0,
-            maximum_wait_ms INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(assistant_id, local_date)
-          );
-          CREATE TABLE assistant_ai_provider_health (
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            provider TEXT NOT NULL,
-            state TEXT NOT NULL DEFAULT 'AVAILABLE'
-              CHECK (state IN ('AVAILABLE','BUSY','RATE_LIMITED','DEGRADED','UNAVAILABLE','NOT_CONFIGURED')),
-            consecutive_failures INTEGER NOT NULL DEFAULT 0,
-            circuit_state TEXT NOT NULL DEFAULT 'CLOSED' CHECK (circuit_state IN ('CLOSED','OPEN','HALF_OPEN')),
-            circuit_opened_at TEXT,
-            circuit_retry_at TEXT,
-            last_success_at TEXT,
-            last_failure_at TEXT,
-            last_safe_error_code TEXT,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(assistant_id, provider)
-          );
-          INSERT INTO assistant_ai_queue_settings(assistant_id, created_at, updated_at)
-            SELECT id, datetime('now'), datetime('now') FROM bots;
-          INSERT INTO assistant_ai_provider_health(assistant_id, provider, state, updated_at)
-            SELECT id, 'groq', 'AVAILABLE', datetime('now') FROM bots;
-        `,
-      },
-      {
-        version: 16,
-        sql: `
-          CREATE TABLE assistant_moderation_settings (
-            assistant_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
-            enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
-            default_group_mode TEXT NOT NULL DEFAULT 'INHERIT' CHECK (default_group_mode IN ('INHERIT','ENABLED','DISABLED')),
-            review_threshold INTEGER NOT NULL DEFAULT 3 CHECK (review_threshold BETWEEN 1 AND 20),
-            warning_threshold INTEGER NOT NULL DEFAULT 4 CHECK (warning_threshold BETWEEN 1 AND 20),
-            admin_notification_threshold INTEGER NOT NULL DEFAULT 4 CHECK (admin_notification_threshold BETWEEN 1 AND 20),
-            recurrence_window_days INTEGER NOT NULL DEFAULT 7 CHECK (recurrence_window_days BETWEEN 1 AND 90),
-            warning_cooldown_minutes INTEGER NOT NULL DEFAULT 10 CHECK (warning_cooldown_minutes BETWEEN 1 AND 1440),
-            public_warning_limit INTEGER NOT NULL DEFAULT 3 CHECK (public_warning_limit BETWEEN 1 AND 20),
-            public_warning_window_minutes INTEGER NOT NULL DEFAULT 30 CHECK (public_warning_window_minutes BETWEEN 1 AND 1440),
-            temporary_evidence_enabled INTEGER NOT NULL DEFAULT 1 CHECK (temporary_evidence_enabled IN (0,1)),
-            temporary_evidence_hours INTEGER NOT NULL DEFAULT 72 CHECK (temporary_evidence_hours BETWEEN 1 AND 168),
-            warning_mode TEXT NOT NULL DEFAULT 'GROUP_MENTION' CHECK (warning_mode IN ('GROUP_GENERAL','GROUP_MENTION','ADMIN_ONLY')),
-            automatic_ai_review_enabled INTEGER NOT NULL DEFAULT 0 CHECK (automatic_ai_review_enabled = 0),
-            manual_ai_review_enabled INTEGER NOT NULL DEFAULT 0 CHECK (manual_ai_review_enabled = 0),
-            automatic_ban_enabled INTEGER NOT NULL DEFAULT 0 CHECK (automatic_ban_enabled = 0),
-            automatic_deletion_enabled INTEGER NOT NULL DEFAULT 0 CHECK (automatic_deletion_enabled = 0),
-            first_warning_message TEXT NOT NULL DEFAULT '⚠️ Advertencia automática: este mensaje podría incumplir las normas de esta comunidad. Por favor, revisa las reglas y evita repetir este tipo de contenido. Esta advertencia fue generada automáticamente y puede ser revisada por la administración.',
-            second_warning_message TEXT NOT NULL DEFAULT '⚠️ Segunda advertencia automática: se detectó nuevamente un posible incumplimiento de las normas de la comunidad. La administración será informada para revisar la situación. Esta advertencia fue generada automáticamente y no implica una expulsión automática.',
-            repeated_warning_message TEXT NOT NULL DEFAULT '⚠️ Aviso automático: se han detectado posibles incumplimientos reiterados. La situación será revisada por la administración.',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE assistant_group_moderation_settings (
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            group_hash TEXT NOT NULL,
-            mode TEXT NOT NULL DEFAULT 'INHERIT' CHECK (mode IN ('INHERIT','ENABLED','DISABLED')),
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(assistant_id, group_hash)
-          );
-          CREATE TABLE moderation_rules (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            name TEXT NOT NULL,
-            description TEXT NOT NULL,
-            category TEXT NOT NULL,
-            severity TEXT NOT NULL CHECK (severity IN ('INFORMATIVA','LEVE','MEDIA','ALTA','CRITICA')),
-            detection_type TEXT NOT NULL,
-            score INTEGER NOT NULL DEFAULT 1 CHECK (score BETWEEN 0 AND 20),
-            review_threshold INTEGER NOT NULL DEFAULT 3 CHECK (review_threshold BETWEEN 1 AND 20),
-            warning_threshold INTEGER NOT NULL DEFAULT 4 CHECK (warning_threshold BETWEEN 1 AND 20),
-            admin_notification_threshold INTEGER NOT NULL DEFAULT 4 CHECK (admin_notification_threshold BETWEEN 1 AND 20),
-            enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
-            applies_to_all_groups INTEGER NOT NULL DEFAULT 1 CHECK (applies_to_all_groups IN (0,1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE INDEX idx_moderation_rules_assistant ON moderation_rules(assistant_id, enabled, category);
-          CREATE TABLE moderation_rule_conditions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            rule_id INTEGER NOT NULL REFERENCES moderation_rules(id) ON DELETE CASCADE,
-            condition_type TEXT NOT NULL,
-            operator TEXT NOT NULL DEFAULT 'ANY' CHECK (operator IN ('ALL','ANY','EXCLUDE')),
-            normalized_value TEXT NOT NULL,
-            configuration_json TEXT NOT NULL DEFAULT '{}',
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE INDEX idx_moderation_conditions_rule ON moderation_rule_conditions(rule_id, enabled);
-          CREATE TABLE moderation_rule_exceptions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            rule_id INTEGER NOT NULL REFERENCES moderation_rules(id) ON DELETE CASCADE,
-            exception_type TEXT NOT NULL,
-            normalized_value TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE INDEX idx_moderation_exceptions_rule ON moderation_rule_exceptions(rule_id, enabled);
-          CREATE TABLE moderation_terms (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            rule_id INTEGER REFERENCES moderation_rules(id) ON DELETE SET NULL,
-            term TEXT NOT NULL,
-            normalized_term TEXT NOT NULL,
-            category TEXT NOT NULL,
-            severity TEXT NOT NULL CHECK (severity IN ('INFORMATIVA','LEVE','MEDIA','ALTA','CRITICA')),
-            match_mode TEXT NOT NULL,
-            score INTEGER NOT NULL DEFAULT 1 CHECK (score BETWEEN 0 AND 20),
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(assistant_id, normalized_term, match_mode)
-          );
-          CREATE INDEX idx_moderation_terms_assistant ON moderation_terms(assistant_id, enabled);
-          CREATE TABLE moderation_cases (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            group_hash TEXT NOT NULL,
-            participant_hash TEXT NOT NULL,
-            message_hash TEXT NOT NULL,
-            category TEXT NOT NULL,
-            matched_rule_ids TEXT NOT NULL,
-            score INTEGER NOT NULL,
-            severity TEXT NOT NULL,
-            warning_number INTEGER NOT NULL DEFAULT 0,
-            status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','CONFIRMED','FALSE_POSITIVE','DISMISSED','RESOLVED')),
-            warning_sent_at TEXT,
-            admin_notified_at TEXT,
-            reviewed_at TEXT,
-            decision TEXT,
-            encrypted_temporary_evidence TEXT,
-            evidence_expires_at TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(assistant_id, message_hash)
-          );
-          CREATE INDEX idx_moderation_cases_assistant ON moderation_cases(assistant_id, status, created_at DESC);
-          CREATE INDEX idx_moderation_cases_participant ON moderation_cases(assistant_id, group_hash, participant_hash, created_at DESC);
-          CREATE TABLE moderation_recurrence (
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            group_hash TEXT NOT NULL,
-            participant_hash TEXT NOT NULL,
-            active_count INTEGER NOT NULL DEFAULT 0,
-            window_started_at TEXT NOT NULL,
-            last_warning_at TEXT,
-            expires_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(assistant_id, group_hash, participant_hash)
-          );
-          CREATE TABLE moderation_metrics (
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            local_date TEXT NOT NULL,
-            messages_reviewed INTEGER NOT NULL DEFAULT 0,
-            messages_allowed INTEGER NOT NULL DEFAULT 0,
-            matches_detected INTEGER NOT NULL DEFAULT 0,
-            warnings_sent INTEGER NOT NULL DEFAULT 0,
-            recurrences_detected INTEGER NOT NULL DEFAULT 0,
-            admin_cases_created INTEGER NOT NULL DEFAULT 0,
-            false_positives INTEGER NOT NULL DEFAULT 0,
-            confirmed_cases INTEGER NOT NULL DEFAULT 0,
-            local_errors INTEGER NOT NULL DEFAULT 0,
-            ai_reviews INTEGER NOT NULL DEFAULT 0 CHECK (ai_reviews = 0),
-            ai_tokens INTEGER NOT NULL DEFAULT 0 CHECK (ai_tokens = 0),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(assistant_id, local_date)
-          );
-          INSERT INTO assistant_moderation_settings(assistant_id, created_at, updated_at)
-            SELECT id, datetime('now'), datetime('now') FROM bots;
-        `,
-      },
-      {
-        version: 17,
-        sql: `
-          CREATE TABLE assistant_welcome_settings (
-            assistant_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
-            enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
-            template TEXT NOT NULL,
-            include_public_name INTEGER NOT NULL DEFAULT 1 CHECK (include_public_name IN (0,1)),
-            enable_real_mention INTEGER NOT NULL DEFAULT 1 CHECK (enable_real_mention IN (0,1)),
-            unknown_name_fallback TEXT NOT NULL DEFAULT 'nuevo/a integrante',
-            multiple_join_mode TEXT NOT NULL DEFAULT 'GROUPED' CHECK (multiple_join_mode IN ('INDIVIDUAL','GROUPED')),
-            maximum_grouped_names INTEGER NOT NULL DEFAULT 5 CHECK (maximum_grouped_names BETWEEN 1 AND 5),
-            send_delay_seconds INTEGER NOT NULL DEFAULT 2 CHECK (send_delay_seconds BETWEEN 0 AND 60),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE TABLE assistant_group_welcome_settings (
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            group_hash TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
-            custom_template TEXT,
-            inherit_assistant_template INTEGER NOT NULL DEFAULT 1 CHECK (inherit_assistant_template IN (0,1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(assistant_id, group_hash)
-          );
-          CREATE INDEX idx_group_welcome_assistant ON assistant_group_welcome_settings(assistant_id, enabled);
-          INSERT INTO assistant_welcome_settings(
-            assistant_id, enabled, template, include_public_name, enable_real_mention,
-            unknown_name_fallback, multiple_join_mode, maximum_grouped_names,
-            send_delay_seconds, created_at, updated_at
-          )
-          SELECT b.id,
-            COALESCE(json_extract(c.configuration_json, '$.welcome.enabled'), 0),
-            CASE WHEN COALESCE(json_extract(c.customized_json, '$.WELCOME'), 0) = 1
-              THEN COALESCE(json_extract(c.configuration_json, '$.welcome.template'),
-                '¡Bienvenido/a, {name}! 👋\n\nTe damos la bienvenida a {communityName}. Este es un espacio de respeto, apoyo e inclusión.\n\nPuedes participar cuando te sientas cómodo/a. Para consultar al asistente, escribe {botAlias} seguido de tu pregunta.')
-              ELSE '¡Bienvenido/a, {name}! 👋\n\nTe damos la bienvenida a {communityName}. Este es un espacio de respeto, apoyo e inclusión.\n\nPuedes participar cuando te sientas cómodo/a. Para consultar al asistente, escribe {botAlias} seguido de tu pregunta.' END,
-            1, 1, 'nuevo/a integrante', 'GROUPED', 5, 2, datetime('now'), datetime('now')
-          FROM bots b LEFT JOIN bot_automatic_configurations c ON c.bot_id=b.id;
-        `,
-      },
-      {
-        version: 18,
-        sql: `
-          CREATE TABLE group_moderation_profiles (
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            group_hash TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
-            rules_text TEXT NOT NULL DEFAULT '',
-            rules_hash TEXT NOT NULL DEFAULT '',
-            analysis_status TEXT NOT NULL DEFAULT 'DRAFT'
-              CHECK (analysis_status IN ('DRAFT','ANALYZING','ANALYSIS_FAILED','PENDING_TESTS','READY','ACTIVE','OUTDATED')),
-            test_status TEXT NOT NULL DEFAULT 'PENDING'
-              CHECK (test_status IN ('PENDING','FAILED','APPROVED')),
-            compiled_json TEXT,
-            compiled_summary_json TEXT,
-            provider TEXT,
-            model TEXT,
-            input_tokens INTEGER NOT NULL DEFAULT 0,
-            output_tokens INTEGER NOT NULL DEFAULT 0,
-            first_warning_message TEXT NOT NULL DEFAULT '⚠️ Advertencia automática: este mensaje podría incumplir las reglas de esta comunidad. Por favor, revisa las normas y evita repetir este tipo de contenido. Esta advertencia fue generada automáticamente y puede ser revisada por la administración.',
-            second_warning_message TEXT NOT NULL DEFAULT '⚠️ Segunda advertencia automática: se detectó nuevamente un posible incumplimiento de las reglas. La administración será informada para revisar la situación. Esta advertencia fue generada automáticamente y no implica una expulsión automática.',
-            recurrence_window_days INTEGER NOT NULL DEFAULT 7 CHECK (recurrence_window_days BETWEEN 1 AND 365),
-            last_analyzed_at TEXT,
-            last_tested_at TEXT,
-            activated_at TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (assistant_id, group_hash)
-          );
-          CREATE INDEX idx_group_moderation_profiles_state
-            ON group_moderation_profiles(assistant_id, enabled, analysis_status);
-          CREATE TABLE group_moderation_tests (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            group_hash TEXT NOT NULL,
-            rules_hash TEXT NOT NULL,
-            test_type TEXT NOT NULL CHECK (test_type IN ('AUTOMATIC','MANUAL_ALLOWED','MANUAL_WARNING')),
-            expected_result TEXT NOT NULL CHECK (expected_result IN ('ALLOW','WARNING')),
-            actual_result TEXT NOT NULL CHECK (actual_result IN ('ALLOW','WARNING','ERROR')),
-            category TEXT,
-            passed INTEGER NOT NULL CHECK (passed IN (0,1)),
-            created_at TEXT NOT NULL
-          );
-          CREATE INDEX idx_group_moderation_tests_profile
-            ON group_moderation_tests(assistant_id, group_hash, rules_hash, created_at DESC);
-          CREATE TABLE group_moderation_admin_recipients (
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            group_hash TEXT NOT NULL,
-            administrator_hash TEXT NOT NULL,
-            encrypted_identifier TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (assistant_id, group_hash, administrator_hash)
-          );
-          UPDATE assistant_moderation_settings SET enabled=0, default_group_mode='DISABLED', updated_at=datetime('now');
-          UPDATE assistant_group_moderation_settings SET mode='DISABLED', enabled=0, updated_at=datetime('now');
-        `,
-      },
-      {
-        version: 19,
-        sql: `
-          UPDATE group_moderation_profiles SET
-            recurrence_window_days=7,
-            first_warning_message='⚠️ Advertencia automática: este mensaje podría incumplir las reglas de esta comunidad. Por favor, revisa las normas y evita repetir este tipo de contenido. Esta advertencia fue generada automáticamente y puede ser revisada por la administración.',
-            second_warning_message='⚠️ Segunda advertencia automática: se detectó nuevamente un posible incumplimiento de las reglas. La administración será informada para revisar la situación. Esta advertencia fue generada automáticamente y no implica una expulsión automática.',
-            updated_at=datetime('now')
-          WHERE recurrence_window_days=30;
-        `,
-      },
-      {
-        version: 20,
-        sql: `
-          CREATE TABLE bot_welcome_group_runtime (
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            group_hash TEXT NOT NULL,
-            baseline_initialized INTEGER NOT NULL DEFAULT 0
-              CHECK (baseline_initialized IN (0, 1)),
-            initialized_at TEXT,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (bot_id, group_hash)
-          );
-          INSERT INTO bot_welcome_group_runtime(
-            bot_id, group_hash, baseline_initialized, initialized_at, updated_at
-          )
-          SELECT bot_id, group_hash, 1, MIN(seen_at), datetime('now')
-          FROM bot_welcome_baseline
-          GROUP BY bot_id, group_hash;
-        `,
-      },
-      {
-        version: 21,
-        sql: `
-          DROP TABLE IF EXISTS assistant_profile_backups;
-        `,
-      },
-      {
-        version: 22,
-        sql: `
-          CREATE TABLE meta_webhook_events (
-            event_hash TEXT PRIMARY KEY,
-            phone_number_id TEXT NOT NULL,
-            event_type TEXT NOT NULL CHECK (event_type IN ('message','status')),
-            processing_status TEXT NOT NULL DEFAULT 'ACCEPTED'
-              CHECK (processing_status IN ('ACCEPTED','PROCESSED','FAILED')),
-            delivery_count INTEGER NOT NULL DEFAULT 1 CHECK (delivery_count >= 1),
-            error_code TEXT,
-            first_received_at TEXT NOT NULL,
-            last_received_at TEXT NOT NULL,
-            processed_at TEXT
-          );
-          CREATE INDEX idx_meta_webhook_events_received
-            ON meta_webhook_events(last_received_at, processing_status);
-
-          CREATE TABLE meta_message_statuses (
-            event_hash TEXT PRIMARY KEY,
-            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            message_hash TEXT NOT NULL,
-            phone_number_id TEXT NOT NULL,
-            recipient_hash TEXT,
-            status TEXT NOT NULL CHECK (status IN ('sent','delivered','read','failed','deleted','unknown')),
-            occurred_at TEXT NOT NULL,
-            conversation_hash TEXT,
-            error_code TEXT,
-            created_at TEXT NOT NULL
-          );
-          CREATE INDEX idx_meta_message_statuses_message
-            ON meta_message_statuses(bot_id, message_hash, occurred_at);
-
-          UPDATE bots SET connector_type='WHATSAPP_CLOUD_API';
-          UPDATE assistant_connectors SET connector_type='WHATSAPP_CLOUD_API',
-            connector_status=CASE WHEN connector_status='CONNECTED' THEN 'UNLINKED' ELSE connector_status END,
-            updated_at=datetime('now');
-          UPDATE messaging_runtime SET status='disconnected', masked_number=NULL,
-            last_connected_at=NULL, updated_at=datetime('now');
-        `,
-      },
-      {
-        version: 23,
-        sql: `
-          CREATE TABLE conversations (
-            id TEXT PRIMARY KEY,
-            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            phone_number_id TEXT NOT NULL,
-            wa_id TEXT NOT NULL,
-            contact_name TEXT,
-            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','closed')),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            last_message_at TEXT NOT NULL,
-            UNIQUE(assistant_id, phone_number_id, wa_id)
-          );
-          CREATE INDEX idx_conversations_assistant_activity
-            ON conversations(assistant_id, last_message_at DESC, id DESC);
-          CREATE INDEX idx_conversations_activity
-            ON conversations(last_message_at DESC, id DESC);
-          CREATE INDEX idx_conversations_wa_id
-            ON conversations(wa_id);
-          CREATE INDEX idx_conversations_phone_number
-            ON conversations(phone_number_id);
-          CREATE INDEX idx_conversations_contact_name
-            ON conversations(contact_name COLLATE NOCASE);
-
-          CREATE TABLE conversation_messages (
-            id TEXT PRIMARY KEY,
-            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-            whatsapp_message_id TEXT,
-            direction TEXT NOT NULL CHECK (direction IN ('inbound','outbound')),
-            sender_type TEXT NOT NULL CHECK (sender_type IN ('customer','assistant','system')),
-            message_type TEXT NOT NULL,
-            text_content TEXT,
-            caption TEXT,
-            message_timestamp TEXT NOT NULL,
-            whatsapp_status TEXT NOT NULL
-              CHECK (whatsapp_status IN ('received','accepted','sent','delivered','read','failed','deleted','unknown')),
-            error_code TEXT,
-            error_message TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-          );
-          CREATE UNIQUE INDEX idx_conversation_messages_whatsapp_id
-            ON conversation_messages(whatsapp_message_id)
-            WHERE whatsapp_message_id IS NOT NULL;
-          CREATE INDEX idx_conversation_messages_timeline
-            ON conversation_messages(conversation_id, message_timestamp DESC, created_at DESC, id DESC);
-        `,
-      },
-    ];
-
-    const apply = this.db.transaction((version: number, sql: string) => {
-      this.db.exec(sql);
-      this.db
-        .prepare('INSERT INTO migrations(version, applied_at) VALUES (?, ?)')
-        .run(version, new Date().toISOString());
-    });
-
-    for (const migration of migrations) {
-      if (!applied.has(migration.version)) apply(migration.version, migration.sql);
-    }
-
-    this.seedDefaults();
-    this.seedAutomaticMessages();
-    this.upgradeBriefDefaults();
-    this.seedPolls();
-    this.seedAssistantPlatform();
-    this.seedMultiBotPlatform();
-    this.seedBotScopedAutomationPlatform();
-    if (!applied.has(12)) {
-      const configuration = this.getAutomaticMessageConfiguration('neurobot');
-      const customized = this.getAutomaticTemplateCustomization('neurobot');
-      configuration.welcome.enabled = true;
-      configuration.welcome.groupSimultaneous = true;
-      configuration.welcome.reconciliationIntervalSeconds = 120;
-      if (customized[AUTOMATIC_TEMPLATE_KEYS.welcome] !== true) {
-        configuration.welcome.template = DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.welcome.template;
-      }
-      this.saveAutomaticMessageConfiguration(configuration, 'neurobot');
-    }
-    if (!applied.has(11)) {
-      this.db
-        .prepare(
-          `UPDATE assistant_profiles SET community_greeting_message = ?, limit_message = ?, updated_at = ?
-         WHERE id IN (SELECT profile_id FROM bot_profiles WHERE bot_id = 'neurobot')`,
-        )
-        .run(
-          '¡Hola! 👋 Soy Neurobot, el asistente de la Comunidad Neurodivergente – Autismo y TDAH. Puedo ayudarte con las normas, los grupos disponibles, las actividades y el funcionamiento de la comunidad. Llámame escribiendo @neurobot seguido de tu pregunta. Respondo una consulta a la vez y no reemplazo la orientación de profesionales.',
-          'Has alcanzado el límite temporal de preguntas nuevas que necesitan inteligencia artificial. Las consultas frecuentes y respuestas guardadas seguirán disponibles. Intenta nuevamente más tarde.',
-          new Date().toISOString(),
-        );
-      this.db
-        .prepare(
-          `UPDATE ai_settings SET user_hourly_limit = 20, user_daily_limit = 50,
-           user_cooldown_seconds = 0, group_hourly_limit = 150, group_daily_limit = 500,
-           global_daily_limit = 500, global_monthly_limit = 10000,
-           interaction_hourly_limit = 60, interaction_cooldown_seconds = 3,
-           duplicate_query_window_seconds = 15, updated_at = ?
-         WHERE profile_id IN (SELECT profile_id FROM bot_profiles WHERE bot_id = 'neurobot')`,
-        )
-        .run(new Date().toISOString());
-    }
-  }
-
-  private seedPolls(): void {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `
-        INSERT OR IGNORE INTO poll_schedule_config
-          (id, enabled, send_time, timezone, tolerance_minutes, selection_mode, updated_at)
-        VALUES (1, 0, '13:00', 'America/Santiago', 30, 'SAME_FOR_ALL', ?)
-      `,
-      )
-      .run(now);
-    const insertSetting = this.db.prepare(`
-      INSERT OR IGNORE INTO poll_settings(key, value, updated_at) VALUES (?, ?, ?)
-    `);
-    insertSetting.run('minimum_repeat_days', '30', now);
-    insertSetting.run('maximum_category_streak', '2', now);
-    insertSetting.run('vote_tracking_enabled', 'false', now);
-    const insertTemplate = this.db.prepare(`
-      INSERT OR IGNORE INTO poll_templates
-        (default_key, question, category, allow_multiple_answers, enabled, is_default,
-         favorite, disabled_until, last_used_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 1, 1, 0, NULL, NULL, ?, ?)
-    `);
-    const insertOption = this.db.prepare(`
-      INSERT INTO poll_options(template_id, option_order, option_text) VALUES (?, ?, ?)
-    `);
-    const seed = this.db.transaction(() => {
-      for (const template of DEFAULT_POLL_TEMPLATES) {
-        const result = insertTemplate.run(
-          template.key,
-          template.question,
-          template.category,
-          template.allowMultipleAnswers ? 1 : 0,
-          now,
-          now,
-        );
-        if (result.changes !== 1) continue;
-        const templateId = Number(result.lastInsertRowid);
-        template.options.forEach((option, index) => insertOption.run(templateId, index, option));
-      }
-    });
-    seed();
-  }
-
-  private seedAssistantPlatform(): void {
-    const now = new Date().toISOString();
-    const allowedTopics = [
-      'Comunidad Neurodivergente',
-      'Autismo y TDAH en términos generales y no clínicos',
-      'Normas del grupo',
-      'Grupos disponibles',
-      'Actividades',
-      'Encuestas',
-      'Horarios',
-      'Formas de contacto',
-      'Funcionamiento del chatbot',
-      'Información oficial agregada por la administración',
-    ];
-    const excludedTopics = [
-      'Diagnósticos',
-      'Tratamientos',
-      'Medicamentos',
-      'Cambios de dosis',
-      'Interpretación clínica de síntomas',
-      'Información personal de integrantes',
-      'Asuntos no relacionados con la comunidad',
-      'Acciones administrativas',
-      'Moderación automática',
-    ];
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO assistant_profiles(
-           profile_key, internal_name, organization_name, bot_name, activation_alias,
-           description, organization_type, industry, objective, allowed_topics, excluded_topics,
-           tone, out_of_scope_message, no_information_message, limit_message, ai_error_message,
-           medical_message, mention_prompt_message, contact_information, business_hours, address,
-           timezone, active, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?)`,
-      )
-      .run(
-        'default-neurobot',
-        'Perfil inicial',
-        'Comunidad Neurodivergente – Autismo y TDAH',
-        'Neurobot',
-        '@neurobot',
-        'Comunidad de apoyo e información administrada para personas neurodivergentes.',
-        'Comunidad',
-        'Comunidad y apoyo informativo',
-        'Entregar información oficial sobre la comunidad, sus normas, grupos, actividades, horarios y formas de contacto.',
-        JSON.stringify(allowedTopics),
-        JSON.stringify(excludedTopics),
-        'Amable, claro, inclusivo y breve.',
-        'Solo puedo responder consultas relacionadas con esta comunidad.',
-        'No tengo información confirmada sobre eso. Puedes consultar a la administración.',
-        'Has alcanzado el límite de consultas por ahora. Intenta más tarde.',
-        'El asistente inteligente no está disponible en este momento.',
-        'Puedo entregar orientación general, pero no diagnósticos ni indicaciones de tratamiento.',
-        'Escribe tu pregunta después de llamar a Neurobot.',
-        'Consulta la información oficial de contacto administrada en este panel.',
-        'Consulta los horarios oficiales administrados en este panel.',
-        'America/Santiago',
-        now,
-        now,
-      );
-    const profile = this.db
-      .prepare("SELECT id FROM assistant_profiles WHERE profile_key = 'default-neurobot'")
-      .get() as { id: number };
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO profile_branding(
-           profile_id, application_name, header_text, footer_text, support_information,
-           logo_path, primary_color, secondary_color, updated_at
-         ) VALUES (?, 'Panel del Asistente', 'Panel del Asistente', '', '', NULL, '#176b61', '#d8a446', ?)`,
-      )
-      .run(profile.id, now);
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO ai_settings(profile_id, enabled, provider, updated_at)
-         VALUES (?, 0, 'groq', ?)`,
-      )
-      .run(profile.id, now);
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO provider_health(
-           profile_id, provider, connection_status, last_checked_at, last_error_code, updated_at
-         ) VALUES (?, 'groq', 'not_tested', NULL, NULL, ?)`,
-      )
-      .run(profile.id, now);
-
-    const categoryNames = [
-      'Presentación',
-      'Normas',
-      'Grupos disponibles',
-      'Actividades',
-      'Horarios',
-      'Contacto',
-      'Preguntas frecuentes',
-      'Autismo y TDAH general',
-      'Seguridad',
-      'Funcionamiento del bot',
-    ];
-    const insertCategory = this.db.prepare(
-      `INSERT OR IGNORE INTO knowledge_categories(profile_id, name, enabled, created_at, updated_at)
-       VALUES (?, ?, 1, ?, ?)`,
-    );
-    for (const category of categoryNames) insertCategory.run(profile.id, category, now, now);
-    const categories = new Map(
-      (
-        this.db
-          .prepare('SELECT id, name FROM knowledge_categories WHERE profile_id = ?')
-          .all(profile.id) as Array<{ id: number; name: string }>
-      ).map((category) => [category.name, category.id]),
-    );
-    const presentationCategory = categories.get('Presentación') as number;
-    this.db
-      .prepare(
-        `INSERT INTO knowledge_entries(
-           profile_id, category_id, legacy_command_id, title, content, keywords, synonyms,
-           enabled, priority, internal_source, created_at, updated_at
-         ) SELECT ?, ?, NULL, ?, ?, ?, '[]', 1, 100, 'perfil inicial', ?, ?
-         WHERE NOT EXISTS (
-           SELECT 1 FROM knowledge_entries WHERE profile_id = ? AND internal_source = 'perfil inicial'
-         )`,
-      )
-      .run(
-        profile.id,
-        presentationCategory,
-        'Presentación de la organización',
-        'Comunidad Neurodivergente – Autismo y TDAH. Este asistente entrega únicamente información oficial administrada sobre la comunidad.',
-        JSON.stringify(['comunidad', 'presentación', 'neurobot']),
-        now,
-        now,
-        profile.id,
-      );
-
-    const commandCategory: Record<string, string> = {
-      ayuda: 'Funcionamiento del bot',
-      reglas: 'Normas',
-      bienvenida: 'Presentación',
-      grupos: 'Grupos disponibles',
-      actividades: 'Actividades',
-      contacto: 'Contacto',
-      administrador: 'Contacto',
-      emergencias: 'Seguridad',
-    };
-    const commands = this.db
-      .prepare('SELECT id, name, response, enabled, priority FROM commands ORDER BY id')
-      .all() as Array<{
-      id: number;
-      name: string;
-      response: string;
-      enabled: number;
-      priority: number;
-    }>;
-    const commandKeywords = this.db.prepare(
-      'SELECT term FROM keywords WHERE command_id = ? AND enabled = 1 ORDER BY priority DESC, id',
-    );
-    const insertKnowledge = this.db.prepare(
-      `INSERT OR IGNORE INTO knowledge_entries(
-         profile_id, category_id, legacy_command_id, title, content, keywords, synonyms,
-         enabled, priority, internal_source, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, '[]', 1, ?, 'migración de comando', ?, ?)`,
-    );
-    for (const command of commands) {
-      const categoryName = commandCategory[command.name] ?? 'Preguntas frecuentes';
-      const categoryId = categories.get(categoryName) ?? presentationCategory;
-      const keywords = (commandKeywords.all(command.id) as Array<{ term: string }>).map(
-        (item) => item.term,
-      );
-      insertKnowledge.run(
-        profile.id,
-        categoryId,
-        command.id,
-        `Información: ${command.name}`,
-        command.response,
-        JSON.stringify([command.name, ...keywords]),
-        command.priority,
-        now,
-        now,
-      );
-    }
-    this.db
-      .prepare(
-        `UPDATE commands SET enabled = 0, updated_at = ?
-         WHERE name IN ('ayuda', 'reglas', 'grupos', 'actividades', 'contacto', 'administrador')`,
-      )
-      .run(now);
-    this.setSetting('require_authorized_admin_in_group', false);
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO linked_groups(
-           group_id, profile_id, active, first_linked_at, last_verified_at, deactivated_at
-         ) SELECT chat_id, ?, CASE WHEN status = 'ACTIVE' AND bot_is_member = 1 THEN 1 ELSE 0 END,
-                  COALESCE(first_seen_at, detected_at), COALESCE(last_successful_check_at, updated_at),
-                  CASE WHEN status = 'ACTIVE' AND bot_is_member = 1 THEN NULL ELSE updated_at END
-           FROM groups`,
-      )
-      .run(profile.id);
-    this.db
-      .prepare(
-        `UPDATE groups SET authorized = CASE
-           WHEN status = 'ACTIVE' AND bot_is_member = 1
-             AND NOT EXISTS (SELECT 1 FROM blocked_groups WHERE blocked_groups.group_id = groups.chat_id)
-           THEN 1 ELSE 0 END`,
-      )
-      .run();
-  }
-
-  private seedMultiBotPlatform(): void {
-    const now = new Date().toISOString();
-    const profile = this.db
-      .prepare("SELECT id FROM assistant_profiles WHERE profile_key = 'default-neurobot'")
-      .get() as { id: number };
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO bot_profiles(bot_id, profile_id, created_at, updated_at)
-         VALUES ('neurobot', ?, ?, ?)`,
-      )
-      .run(profile.id, now, now);
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO messaging_runtime(
-           bot_id, status, masked_number, last_connected_at, updated_at
-         ) VALUES ('neurobot', 'disconnected', NULL, NULL, ?)`,
-      )
-      .run(now);
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO assistant_connectors(
-           assistant_id, connector_type, connector_status, created_at, updated_at
-         ) VALUES ('neurobot', 'WHATSAPP_CLOUD_API', 'UNLINKED', ?, ?)`,
-      )
-      .run(now, now);
-    const connector = this.db
-      .prepare(
-        "SELECT id FROM assistant_connectors WHERE assistant_id = 'neurobot' ORDER BY id LIMIT 1",
-      )
-      .get() as { id: number };
-    this.db
-      .prepare(
-        `UPDATE bots SET assistant_type='COMMUNITY_GROUPS',
-           lifecycle_status=CASE WHEN active_connector_id IS NULL THEN 'UNLINKED' ELSE lifecycle_status END,
-           deletion_locked=1, group_channel_enabled=1, private_channel_enabled=0,
-           private_business_mode_enabled=0, active_connector_id=? WHERE id='neurobot'`,
-      )
-      .run(connector.id);
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO bot_channel_settings(
-           bot_id, groups_enabled, private_messages_enabled, real_mention_required,
-           continued_conversations_enabled, private_initial_menu_id, menu_type, updated_at
-         ) VALUES ('neurobot', 1, 0, 1, 0, NULL, 'automatic', ?)`,
-      )
-      .run(now);
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO bot_ai_credentials(
-           bot_id, credential_mode, encrypted_api_key, key_fingerprint, updated_at
-         ) VALUES ('neurobot', 'global', NULL, NULL, ?)`,
-      )
-      .run(now);
-    const initialMenu = this.db
-      .prepare("SELECT id FROM menu_definitions WHERE bot_id = 'neurobot' AND is_initial = 1")
-      .get() as { id: number } | undefined;
-    if (initialMenu === undefined) {
-      const result = this.db
-        .prepare(
-          `INSERT INTO menu_definitions(
-             bot_id, parent_menu_id, title, message, help_text, enabled, is_initial,
-             expiration_minutes, created_at, updated_at
-           ) VALUES ('neurobot', NULL, 'Información',
-             'Puedo ayudarte con normas, grupos, actividades y contacto. ¿Qué deseas consultar?',
-             'Selecciona una opción.', 1, 1, 15, ?, ?)`,
-        )
-        .run(now, now);
-      const menuId = Number(result.lastInsertRowid);
-      const insertOption = this.db.prepare(
-        `INSERT INTO menu_options(
-           bot_id, menu_id, label, aliases, option_order, action_type, action_payload,
-           enabled, created_at, updated_at
-         ) VALUES ('neurobot', ?, ?, ?, ?, 'knowledge', ?, 1, ?, ?)`,
-      );
-      const options = [
-        ['Normas', ['reglas'], 'normas'],
-        ['Grupos disponibles', ['grupos'], 'grupos disponibles'],
-        ['Actividades', ['actividad'], 'actividades'],
-        ['Horarios', ['horario'], 'horarios'],
-        ['Contacto', ['contactar'], 'contacto'],
-        ['Preguntas frecuentes', ['ayuda', 'opciones'], 'preguntas frecuentes'],
-      ] as const;
-      options.forEach(([label, aliases, query], index) =>
-        insertOption.run(
-          menuId,
-          label,
-          JSON.stringify(aliases),
-          index + 1,
-          JSON.stringify({ query }),
-          now,
-          now,
-        ),
-      );
-    }
-  }
-
-  private seedBotScopedAutomationPlatform(): void {
-    const now = new Date().toISOString();
-    const legacyRows = this.db
-      .prepare('SELECT * FROM automatic_message_tasks')
-      .all() as AutomaticTaskRow[];
-    const legacyTasks = new Map(legacyRows.map((row) => [row.task_type, row]));
-    const legacyTemplates = new Map(
-      (
-        this.db
-          .prepare('SELECT template_key, content FROM automatic_message_templates')
-          .all() as Array<{
-          template_key: string;
-          content: string;
-        }>
-      ).map((row) => [row.template_key, row.content]),
-    );
-    for (const bot of this.listBots()) {
-      const configuration =
-        bot.id === 'neurobot'
-          ? automaticConfigurationFromLegacy(legacyTasks, legacyTemplates, bot.timezone)
-          : defaultAutomaticConfiguration(bot.timezone);
-      this.seedBotAutomation(bot.id, configuration, now);
-      this.seedBotPollTemplates(bot.id, bot.timezone, now);
-    }
-  }
-
-  private seedBotAutomation(
-    botId: string,
-    configuration: AutomaticMessageConfiguration,
-    now: string,
-  ): void {
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO bot_automatic_configurations(
-           bot_id, configuration_json, customized_json, updated_at
-         ) VALUES (?, ?, ?, ?)`,
-      )
-      .run(
-        botId,
-        JSON.stringify(configuration),
-        JSON.stringify(automaticCustomization(configuration)),
-        now,
-      );
-  }
-
-  private seedBotPollTemplates(botId: string, timezone: string, now: string): void {
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO assistant_ai_queue_settings(assistant_id, created_at, updated_at)
-      VALUES (?, ?, ?)`,
-      )
-      .run(botId, now, now);
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO assistant_ai_provider_health(assistant_id, provider, state, updated_at)
-      VALUES (?, 'groq', 'AVAILABLE', ?)`,
-      )
-      .run(botId, now);
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO bot_poll_configurations(
-           bot_id, enabled, send_time, timezone, tolerance_minutes, selection_mode, updated_at
-         ) VALUES (?, 0, '13:00', ?, 30, 'SAME_FOR_ALL', ?)`,
-      )
-      .run(botId, timezone, now);
-    const insertTemplate = this.db.prepare(
-      `INSERT OR IGNORE INTO bot_poll_templates(
-         bot_id, default_key, question, category, allow_multiple_answers, enabled, is_default,
-         favorite, disabled_until, last_used_at, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, 1, 1, 0, NULL, NULL, ?, ?)`,
-    );
-    const insertOption = this.db.prepare(
-      'INSERT INTO bot_poll_options(template_id, option_order, option_text) VALUES (?, ?, ?)',
-    );
-    for (const template of DEFAULT_POLL_TEMPLATES) {
-      const result = insertTemplate.run(
-        botId,
-        template.key,
-        template.question,
-        template.category,
-        template.allowMultipleAnswers ? 1 : 0,
-        now,
-        now,
-      );
-      if (result.changes !== 1) continue;
-      const id = Number(result.lastInsertRowid);
-      template.options.forEach((option, index) => insertOption.run(id, index, option));
-    }
-  }
-
-  private seedDefaults(): void {
-    const now = new Date().toISOString();
-    const insertSetting = this.db.prepare(
-      'INSERT OR IGNORE INTO settings(key, value, updated_at) VALUES (?, ?, ?)',
-    );
-    const settings: Record<string, unknown> = {
-      bot_enabled: true,
-      fallback_response:
-        'No encontré una respuesta configurada para esa consulta. Escribe !ayuda para ver las opciones disponibles.',
-      professional_warning:
-        'Esta información es solamente una orientación general y no reemplaza una evaluación médica, psicológica o profesional.',
-      log_level: 'info',
-      user_rate_limit: 3,
-      group_rate_limit: 10,
-      rate_window_seconds: 60,
-      user_cooldown_seconds: 5,
-      repeat_window_seconds: 120,
-      require_authorized_admin_in_group: true,
-      group_archive_after_hours: 24,
-      group_delete_after_days: 30,
-      group_auto_delete_enabled: false,
-      group_sync_interval_minutes: 30,
-    };
-    const insertCommand = this.db.prepare(`
-      INSERT OR IGNORE INTO commands
-        (name, response, enabled, essential, custom, priority, health_related, created_at, updated_at)
-      VALUES (?, ?, 1, 1, 0, ?, 0, ?, ?)
-    `);
-
-    const seed = this.db.transaction(() => {
-      for (const [key, value] of Object.entries(settings)) {
-        insertSetting.run(key, JSON.stringify(value), now);
-      }
-      for (const command of BRIEF_COMMAND_DEFAULTS) {
-        insertCommand.run(command.name, command.response, command.priority, now, now);
-      }
-    });
-    seed();
-  }
-
-  private upgradeBriefDefaults(): void {
-    const now = new Date().toISOString();
-    const updateCommand = this.db.prepare(`
-      UPDATE commands SET response = ?, custom = 0, updated_at = ?
-      WHERE name = ? AND response = ?
-    `);
-    const markCustomCommand = this.db.prepare(`
-      UPDATE commands SET custom = 1, updated_at = ?
-      WHERE name = ? AND custom = 0 AND response <> ? AND response <> ?
-    `);
-    for (const [name, legacyResponse] of Object.entries(LEGACY_COMMAND_RESPONSES)) {
-      const brief = BRIEF_COMMAND_DEFAULTS_BY_NAME.get(name);
-      if (brief === undefined) continue;
-      updateCommand.run(brief.response, now, name, legacyResponse);
-      markCustomCommand.run(now, name, brief.response, legacyResponse);
-    }
-
-    const briefTemplates = new Map<string, string>([
-      [AUTOMATIC_TEMPLATE_KEYS.welcome, DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.welcome.template],
-      [
-        AUTOMATIC_TEMPLATE_KEYS.dailyRules,
-        DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyRules.template,
-      ],
-      [
-        AUTOMATIC_TEMPLATE_KEYS.greetingMonday,
-        DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyGreeting.templates.monday,
-      ],
-      [
-        AUTOMATIC_TEMPLATE_KEYS.greetingWeekday,
-        DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyGreeting.templates.weekday,
-      ],
-      [
-        AUTOMATIC_TEMPLATE_KEYS.greetingFriday,
-        DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyGreeting.templates.friday,
-      ],
-      [
-        AUTOMATIC_TEMPLATE_KEYS.greetingWeekend,
-        DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyGreeting.templates.weekend,
-      ],
-    ]);
-    const updateTemplate = this.db.prepare(`
-      UPDATE automatic_message_templates SET content = ?, customized = 0, updated_at = ?
-      WHERE template_key = ? AND content = ?
-    `);
-    const markCustomTemplate = this.db.prepare(`
-      UPDATE automatic_message_templates SET customized = 1, updated_at = ?
-      WHERE template_key = ? AND customized = 0 AND content <> ? AND content <> ?
-    `);
-    for (const [key, brief] of briefTemplates) {
-      const legacy = LEGACY_AUTOMATIC_TEMPLATES[key as keyof typeof LEGACY_AUTOMATIC_TEMPLATES];
-      updateTemplate.run(brief, now, key, legacy);
-      markCustomTemplate.run(now, key, brief, legacy);
-    }
-  }
-
-  private seedAutomaticMessages(): void {
-    const now = new Date().toISOString();
-    const configuration = DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION;
-    const insertTask = this.db.prepare(`
-      INSERT OR IGNORE INTO automatic_message_tasks
-        (task_type, enabled, send_time, timezone, tolerance_minutes, batch_window_seconds, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-    const insertTemplate = this.db.prepare(`
-      INSERT OR IGNORE INTO automatic_message_templates(template_key, content, updated_at)
-      VALUES (?, ?, ?)
-    `);
-    const seed = this.db.transaction(() => {
-      insertTask.run(
-        'WELCOME',
-        configuration.welcome.enabled ? 1 : 0,
-        null,
-        configuration.timezone,
-        30,
-        configuration.welcome.batchWindowSeconds,
-        now,
-      );
-      insertTask.run(
-        'DAILY_GREETING',
-        configuration.dailyGreeting.enabled ? 1 : 0,
-        configuration.dailyGreeting.sendTime,
-        configuration.timezone,
-        configuration.dailyGreeting.toleranceMinutes,
-        null,
-        now,
-      );
-      insertTask.run(
-        'DAILY_RULES',
-        configuration.dailyRules.enabled ? 1 : 0,
-        configuration.dailyRules.sendTime,
-        configuration.timezone,
-        configuration.dailyRules.toleranceMinutes,
-        null,
-        now,
-      );
-      insertTemplate.run(AUTOMATIC_TEMPLATE_KEYS.welcome, configuration.welcome.template, now);
-      insertTemplate.run(
-        AUTOMATIC_TEMPLATE_KEYS.dailyRules,
-        configuration.dailyRules.template,
-        now,
-      );
-      insertTemplate.run(
-        AUTOMATIC_TEMPLATE_KEYS.greetingMonday,
-        configuration.dailyGreeting.templates.monday,
-        now,
-      );
-      insertTemplate.run(
-        AUTOMATIC_TEMPLATE_KEYS.greetingWeekday,
-        configuration.dailyGreeting.templates.weekday,
-        now,
-      );
-      insertTemplate.run(
-        AUTOMATIC_TEMPLATE_KEYS.greetingFriday,
-        configuration.dailyGreeting.templates.friday,
-        now,
-      );
-      insertTemplate.run(
-        AUTOMATIC_TEMPLATE_KEYS.greetingWeekend,
-        configuration.dailyGreeting.templates.weekend,
-        now,
-      );
-    });
-    seed();
+    migrateBusinessSchema(this.db);
   }
 
   public recordAudit(event: AuditEvent): void {
@@ -2623,1197 +210,76 @@ export class AppDatabase {
     );
   }
 
-  public getSetting<T>(key: string, fallback: T): T {
-    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
-      { value: string } | undefined;
-    if (row === undefined) return fallback;
-    try {
-      return JSON.parse(row.value) as T;
-    } catch {
-      return fallback;
-    }
-  }
-
-  public setSetting(key: string, value: unknown): void {
-    this.db
-      .prepare(
-        `INSERT INTO settings(key, value, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-      )
-      .run(key, JSON.stringify(value), new Date().toISOString());
-  }
-
-  public listSettings(): Record<string, unknown> {
-    const result: Record<string, unknown> = {};
-    for (const row of this.db
-      .prepare('SELECT key, value FROM settings ORDER BY key')
-      .all() as Array<{
-      key: string;
-      value: string;
-    }>) {
-      try {
-        result[row.key] = JSON.parse(row.value) as unknown;
-      } catch {
-        result[row.key] = null;
-      }
-    }
-    return result;
-  }
-
-  public getAutomaticMessageConfiguration(botId = 'neurobot'): AutomaticMessageConfiguration {
-    const row = this.db
-      .prepare('SELECT configuration_json FROM bot_automatic_configurations WHERE bot_id = ?')
-      .get(botId) as { configuration_json: string } | undefined;
-    if (row === undefined)
-      return this.mergeWelcomeSettings(
-        defaultAutomaticConfiguration(this.getBot(botId)?.timezone ?? 'America/Santiago'),
-        botId,
-      );
-    try {
-      const stored = JSON.parse(row.configuration_json) as AutomaticMessageConfiguration;
-      return this.mergeWelcomeSettings(
-        {
-          ...stored,
-          welcome: {
-            ...DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.welcome,
-            ...stored.welcome,
-          },
-        },
-        botId,
-      );
-    } catch {
-      return this.mergeWelcomeSettings(
-        defaultAutomaticConfiguration(this.getBot(botId)?.timezone ?? 'America/Santiago'),
-        botId,
-      );
-    }
-  }
-
-  public saveAutomaticMessageConfiguration(
-    configuration: AutomaticMessageConfiguration,
-    botId = 'neurobot',
-  ): void {
-    const now = new Date().toISOString();
-    const customized = automaticCustomization(configuration);
-    const result = this.db
-      .prepare(
-        `INSERT INTO bot_automatic_configurations(bot_id, configuration_json, customized_json, updated_at)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(bot_id) DO UPDATE SET configuration_json = excluded.configuration_json,
-           customized_json = excluded.customized_json, updated_at = excluded.updated_at`,
-      )
-      .run(botId, JSON.stringify(configuration), JSON.stringify(customized), now);
-    if (result.changes !== 1) throw new Error('No fue posible guardar la automatización.');
-    this.saveAssistantWelcomeSettings(configuration.welcome, botId);
-    if (botId === 'neurobot') {
-      this.db
-        .prepare(
-          `UPDATE commands SET response = ?, custom = 1, updated_at = ? WHERE name = 'reglas'`,
-        )
-        .run(configuration.dailyRules.template, now);
-    }
-  }
-
-  public getWelcomeGroupSetting(
-    groupHash: string,
-    botId = 'neurobot',
-  ): { enabled: boolean; customTemplate: string | null; inheritAssistantTemplate: boolean } | null {
-    const row = this.db
-      .prepare(
-        `SELECT enabled, custom_template, inherit_assistant_template
-      FROM assistant_group_welcome_settings WHERE assistant_id=? AND group_hash=?`,
-      )
-      .get(botId, groupHash) as
-      | { enabled: number; custom_template: string | null; inherit_assistant_template: number }
-      | undefined;
-    return row === undefined
-      ? null
-      : {
-          enabled: row.enabled === 1,
-          customTemplate: row.custom_template,
-          inheritAssistantTemplate: row.inherit_assistant_template === 1,
-        };
-  }
-
-  public listWelcomeGroupSettings(botId = 'neurobot'): Array<{
-    groupHash: string;
-    enabled: boolean;
-    customTemplate: string | null;
-    inheritAssistantTemplate: boolean;
-  }> {
-    return (
-      this.db
-        .prepare(
-          `SELECT group_hash, enabled, custom_template, inherit_assistant_template
-      FROM assistant_group_welcome_settings WHERE assistant_id=? ORDER BY group_hash`,
-        )
-        .all(botId) as Array<{
-        group_hash: string;
-        enabled: number;
-        custom_template: string | null;
-        inherit_assistant_template: number;
-      }>
-    ).map((row) => ({
-      groupHash: row.group_hash,
-      enabled: row.enabled === 1,
-      customTemplate: row.custom_template,
-      inheritAssistantTemplate: row.inherit_assistant_template === 1,
-    }));
-  }
-
-  public saveWelcomeGroupSetting(
-    groupHash: string,
-    setting: { enabled: boolean; customTemplate: string | null; inheritAssistantTemplate: boolean },
-    botId = 'neurobot',
-  ): void {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO assistant_group_welcome_settings(
-      assistant_id,group_hash,enabled,custom_template,inherit_assistant_template,created_at,updated_at
-    ) VALUES(?,?,?,?,?,?,?) ON CONFLICT(assistant_id,group_hash) DO UPDATE SET
-      enabled=excluded.enabled,custom_template=excluded.custom_template,
-      inherit_assistant_template=excluded.inherit_assistant_template,updated_at=excluded.updated_at`,
-      )
-      .run(
-        botId,
-        groupHash,
-        setting.enabled ? 1 : 0,
-        setting.customTemplate,
-        setting.inheritAssistantTemplate ? 1 : 0,
-        now,
-        now,
-      );
-  }
-
-  private mergeWelcomeSettings(
-    configuration: AutomaticMessageConfiguration,
-    botId: string,
-  ): AutomaticMessageConfiguration {
-    const row = this.db
-      .prepare(
-        `SELECT enabled, template, include_public_name, enable_real_mention,
-      unknown_name_fallback, multiple_join_mode, maximum_grouped_names, send_delay_seconds
-      FROM assistant_welcome_settings WHERE assistant_id=?`,
-      )
-      .get(botId) as
-      | {
-          enabled: number;
-          template: string;
-          include_public_name: number;
-          enable_real_mention: number;
-          unknown_name_fallback: string;
-          multiple_join_mode: 'INDIVIDUAL' | 'GROUPED';
-          maximum_grouped_names: number;
-          send_delay_seconds: number;
-        }
-      | undefined;
-    if (row === undefined) return configuration;
-    return {
-      ...configuration,
-      welcome: {
-        ...configuration.welcome,
-        enabled: row.enabled === 1,
-        template: row.template,
-        includePublicName: row.include_public_name === 1,
-        enableRealMention: row.enable_real_mention === 1,
-        unknownNameFallback: row.unknown_name_fallback,
-        multipleJoinMode: row.multiple_join_mode,
-        groupSimultaneous: row.multiple_join_mode === 'GROUPED',
-        maximumGroupedNames: row.maximum_grouped_names,
-        sendDelaySeconds: row.send_delay_seconds,
-      },
-    };
-  }
-
-  private saveAssistantWelcomeSettings(
-    welcome: AutomaticMessageConfiguration['welcome'],
-    botId: string,
-  ): void {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO assistant_welcome_settings(
-      assistant_id,enabled,template,include_public_name,enable_real_mention,unknown_name_fallback,
-      multiple_join_mode,maximum_grouped_names,send_delay_seconds,created_at,updated_at
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(assistant_id) DO UPDATE SET
-      enabled=excluded.enabled,template=excluded.template,include_public_name=excluded.include_public_name,
-      enable_real_mention=excluded.enable_real_mention,unknown_name_fallback=excluded.unknown_name_fallback,
-      multiple_join_mode=excluded.multiple_join_mode,maximum_grouped_names=excluded.maximum_grouped_names,
-      send_delay_seconds=excluded.send_delay_seconds,updated_at=excluded.updated_at`,
-      )
-      .run(
-        botId,
-        welcome.enabled ? 1 : 0,
-        welcome.template,
-        welcome.includePublicName ? 1 : 0,
-        welcome.enableRealMention ? 1 : 0,
-        welcome.unknownNameFallback,
-        welcome.multipleJoinMode,
-        welcome.maximumGroupedNames,
-        welcome.sendDelaySeconds,
-        now,
-        now,
-      );
-  }
-
-  public getWelcomeRuntime(botId = 'neurobot'): {
-    baselineInitialized: boolean;
-    listenerRegistered: boolean;
-    lastDetectedAt: string | null;
-    lastSentAt: string | null;
-    lastErrorCode: string | null;
-  } {
-    const row = this.db
-      .prepare(
-        `SELECT baseline_initialized, listener_registered, last_detected_at, last_sent_at,
-              last_error_code FROM bot_welcome_runtime WHERE bot_id = ?`,
-      )
-      .get(botId) as
-      | {
-          baseline_initialized: number;
-          listener_registered: number;
-          last_detected_at: string | null;
-          last_sent_at: string | null;
-          last_error_code: string | null;
-        }
-      | undefined;
-    return {
-      baselineInitialized: row?.baseline_initialized === 1,
-      listenerRegistered: row?.listener_registered === 1,
-      lastDetectedAt: row?.last_detected_at ?? null,
-      lastSentAt: row?.last_sent_at ?? null,
-      lastErrorCode: row?.last_error_code ?? null,
-    };
-  }
-
-  public updateWelcomeRuntime(
-    changes: Partial<{
-      baselineInitialized: boolean;
-      listenerRegistered: boolean;
-      lastDetectedAt: string | null;
-      lastSentAt: string | null;
-      lastErrorCode: string | null;
-    }>,
-    botId = 'neurobot',
-  ): void {
-    const current = this.getWelcomeRuntime(botId);
-    const next = { ...current, ...changes };
-    this.db
-      .prepare(
-        `INSERT INTO bot_welcome_runtime(
-         bot_id, baseline_initialized, listener_registered, last_detected_at, last_sent_at,
-         last_error_code, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(bot_id) DO UPDATE SET baseline_initialized=excluded.baseline_initialized,
-         listener_registered=excluded.listener_registered, last_detected_at=excluded.last_detected_at,
-         last_sent_at=excluded.last_sent_at, last_error_code=excluded.last_error_code,
-         updated_at=excluded.updated_at`,
-      )
-      .run(
-        botId,
-        next.baselineInitialized ? 1 : 0,
-        next.listenerRegistered ? 1 : 0,
-        next.lastDetectedAt,
-        next.lastSentAt,
-        next.lastErrorCode,
-        new Date().toISOString(),
-      );
-  }
-
-  public hasWelcomeBaselineParticipant(
-    groupHash: string,
-    participantHash: string,
-    botId = 'neurobot',
-  ): boolean {
-    return (
-      this.db
-        .prepare(
-          `SELECT 1 FROM bot_welcome_baseline
-       WHERE bot_id = ? AND group_hash = ? AND participant_hash = ?`,
-        )
-        .get(botId, groupHash, participantHash) !== undefined
-    );
-  }
-
-  public addWelcomeBaselineParticipant(
-    groupHash: string,
-    participantHash: string,
-    botId = 'neurobot',
-  ): void {
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO bot_welcome_baseline(bot_id, group_hash, participant_hash, seen_at)
-       VALUES (?, ?, ?, ?)`,
-      )
-      .run(botId, groupHash, participantHash, new Date().toISOString());
-  }
-
-  public isWelcomeGroupBaselineInitialized(groupHash: string, botId = 'neurobot'): boolean {
-    const row = this.db
-      .prepare(
-        `SELECT baseline_initialized FROM bot_welcome_group_runtime
-       WHERE bot_id = ? AND group_hash = ?`,
-      )
-      .get(botId, groupHash) as { baseline_initialized: number } | undefined;
-    return row?.baseline_initialized === 1;
-  }
-
-  public markWelcomeGroupBaselineInitialized(groupHash: string, botId = 'neurobot'): void {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO bot_welcome_group_runtime(
-         bot_id, group_hash, baseline_initialized, initialized_at, updated_at
-       ) VALUES (?, ?, 1, ?, ?)
-       ON CONFLICT(bot_id, group_hash) DO UPDATE SET
-         baseline_initialized = 1,
-         initialized_at = COALESCE(bot_welcome_group_runtime.initialized_at, excluded.initialized_at),
-         updated_at = excluded.updated_at`,
-      )
-      .run(botId, groupHash, now, now);
-  }
-
-  public claimWelcomeParticipant(
-    groupHash: string,
-    participantHash: string,
-    source: string,
-    expiresAt: Date,
-    botId = 'neurobot',
-  ): boolean {
-    const now = new Date().toISOString();
-    this.db
-      .prepare('DELETE FROM bot_welcome_deduplication WHERE bot_id = ? AND expires_at <= ?')
-      .run(botId, now);
-    const result = this.db
-      .prepare(
-        `INSERT OR IGNORE INTO bot_welcome_deduplication(
-         bot_id, group_hash, participant_hash, source, expires_at, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(botId, groupHash, participantHash, source, expiresAt.toISOString(), now);
-    return result.changes === 1;
-  }
-
-  public getAutomaticTemplateCustomization(botId = 'neurobot'): Record<string, boolean> {
-    const row = this.db
-      .prepare('SELECT customized_json FROM bot_automatic_configurations WHERE bot_id = ?')
-      .get(botId) as { customized_json: string } | undefined;
-    if (row === undefined) return {};
-    try {
-      return JSON.parse(row.customized_json) as Record<string, boolean>;
-    } catch {
-      return {};
-    }
-  }
-
-  public restoreAutomaticTemplate(templateKey: string, botId = 'neurobot'): boolean {
-    const defaults: Record<string, string> = {
-      [AUTOMATIC_TEMPLATE_KEYS.welcome]: DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.welcome.template,
-      [AUTOMATIC_TEMPLATE_KEYS.dailyRules]:
-        DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyRules.template,
-      [AUTOMATIC_TEMPLATE_KEYS.greetingMonday]:
-        DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyGreeting.templates.monday,
-      [AUTOMATIC_TEMPLATE_KEYS.greetingWeekday]:
-        DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyGreeting.templates.weekday,
-      [AUTOMATIC_TEMPLATE_KEYS.greetingFriday]:
-        DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyGreeting.templates.friday,
-      [AUTOMATIC_TEMPLATE_KEYS.greetingWeekend]:
-        DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyGreeting.templates.weekend,
-    };
-    const content = defaults[templateKey];
-    if (content === undefined) return false;
-    const configuration = this.getAutomaticMessageConfiguration(botId);
-    setAutomaticTemplate(configuration, templateKey, content);
-    this.saveAutomaticMessageConfiguration(configuration, botId);
-    return true;
-  }
-
-  public claimScheduledDelivery(
-    taskType: AutomaticMessageType,
-    groupId: string,
-    localDate: string,
-    botId = 'neurobot',
-  ): number | null {
-    const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        `
-        INSERT OR IGNORE INTO bot_scheduled_message_deliveries
-          (bot_id, deduplication_key, task_type, group_id, local_date, source, status, attempts,
-           error_code, created_at, updated_at, sent_at)
-        VALUES (?, ?, ?, ?, ?, 'scheduled', 'PENDING', 0, NULL, ?, ?, NULL)
-      `,
-      )
-      .run(
-        botId,
-        `scheduled:${taskType}:${groupId}:${localDate}`,
-        taskType,
-        groupId,
-        localDate,
-        now,
-        now,
-      );
-    return result.changes === 1 ? Number(result.lastInsertRowid) : null;
-  }
-
-  public createManualDelivery(
-    deduplicationKey: string,
-    taskType: AutomaticMessageType,
-    groupId: string,
-    localDate: string,
-    botId = 'neurobot',
-  ): number {
-    const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        `
-        INSERT INTO bot_scheduled_message_deliveries
-          (bot_id, deduplication_key, task_type, group_id, local_date, source, status, attempts,
-           error_code, created_at, updated_at, sent_at)
-        VALUES (?, ?, ?, ?, ?, 'manual', 'PENDING', 0, NULL, ?, ?, NULL)
-      `,
-      )
-      .run(botId, deduplicationKey, taskType, groupId, localDate, now, now);
-    return Number(result.lastInsertRowid);
-  }
-
-  public createWelcomeDelivery(
-    deduplicationKey: string,
-    groupId: string,
-    localDate: string,
-    botId = 'neurobot',
-  ): number {
-    const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        `
-        INSERT INTO bot_scheduled_message_deliveries
-          (bot_id, deduplication_key, task_type, group_id, local_date, source, status, attempts,
-           error_code, created_at, updated_at, sent_at)
-        VALUES (?, ?, 'WELCOME', ?, ?, 'scheduled', 'PENDING', 0, NULL, ?, ?, NULL)
-      `,
-      )
-      .run(botId, deduplicationKey, groupId, localDate, now, now);
-    return Number(result.lastInsertRowid);
-  }
-
-  public updateScheduledDelivery(
-    id: number,
-    status: ScheduledDeliveryStatus,
-    attempts: number,
-    errorCode: string | null,
-  ): void {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `
-        UPDATE bot_scheduled_message_deliveries
-        SET status = ?, attempts = ?, error_code = ?, updated_at = ?,
-            sent_at = CASE WHEN ? = 'SENT' THEN ? ELSE sent_at END
-        WHERE id = ?
-      `,
-      )
-      .run(status, Math.min(2, Math.max(0, attempts)), errorCode, now, status, now, id);
-  }
-
-  public listScheduledDeliveries(limit = 200, botId = 'neurobot'): ScheduledDeliveryRecord[] {
-    const safeLimit = Math.min(500, Math.max(1, Math.trunc(limit)));
-    return (
-      this.db
-        .prepare(
-          'SELECT * FROM bot_scheduled_message_deliveries WHERE bot_id = ? ORDER BY id DESC LIMIT ?',
-        )
-        .all(botId, safeLimit) as ScheduledDeliveryRow[]
-    ).map(mapScheduledDelivery);
-  }
-
-  public getAutomaticGroupBackoffRemainingMs(
-    groupId: string,
-    now = new Date(),
-    botId = 'neurobot',
-  ): number {
-    const row = this.db
-      .prepare(
-        'SELECT disabled_until FROM bot_automatic_group_backoff WHERE bot_id = ? AND group_id = ?',
-      )
-      .get(botId, groupId) as { disabled_until: string } | undefined;
-    if (row === undefined) return 0;
-    const remaining = new Date(row.disabled_until).getTime() - now.getTime();
-    if (remaining <= 0) {
-      this.db
-        .prepare('DELETE FROM bot_automatic_group_backoff WHERE bot_id = ? AND group_id = ?')
-        .run(botId, groupId);
-      return 0;
-    }
-    return remaining;
-  }
-
-  public setAutomaticGroupBackoff(
-    groupId: string,
-    until: Date,
-    errorCode: string,
-    botId = 'neurobot',
-  ): void {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `
-        INSERT INTO bot_automatic_group_backoff(bot_id, group_id, disabled_until, error_code, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(bot_id, group_id) DO UPDATE SET disabled_until = excluded.disabled_until,
-          error_code = excluded.error_code, updated_at = excluded.updated_at
-      `,
-      )
-      .run(botId, groupId, until.toISOString(), errorCode, now);
-  }
-
-  public getPollConfiguration(botId = 'neurobot'): PollConfiguration {
-    const row = this.db
-      .prepare('SELECT * FROM bot_poll_configurations WHERE bot_id = ?')
-      .get(botId) as
-      | {
-          enabled: number;
-          send_time: string;
-          timezone: 'America/Santiago';
-          tolerance_minutes: number;
-          selection_mode: PollSelectionMode;
-        }
-      | undefined;
-    return {
-      enabled: row?.enabled === 1,
-      sendTime: row?.send_time ?? '13:00',
-      timezone: row?.timezone ?? this.getBot(botId)?.timezone ?? 'America/Santiago',
-      toleranceMinutes: row?.tolerance_minutes ?? 30,
-      selectionMode: row?.selection_mode ?? 'SAME_FOR_ALL',
-    };
-  }
-
-  public savePollConfiguration(configuration: PollConfiguration, botId = 'neurobot'): void {
-    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(configuration.sendTime)) {
-      throw new Error('La hora de la encuesta no es válida.');
-    }
-    if (
-      !Number.isInteger(configuration.toleranceMinutes) ||
-      configuration.toleranceMinutes < 0 ||
-      configuration.toleranceMinutes > 180
-    ) {
-      throw new Error('La tolerancia de la encuesta no es válida.');
-    }
-    this.db
-      .prepare(
-        `
-        UPDATE bot_poll_configurations SET enabled = ?, send_time = ?, timezone = ?,
-          tolerance_minutes = ?, selection_mode = ?, updated_at = ? WHERE bot_id = ?
-      `,
-      )
-      .run(
-        configuration.enabled ? 1 : 0,
-        configuration.sendTime,
-        configuration.timezone,
-        configuration.toleranceMinutes,
-        configuration.selectionMode,
-        new Date().toISOString(),
-        botId,
-      );
-  }
-
-  public getPollSetting<T>(key: string, fallback: T): T {
-    const row = this.db.prepare('SELECT value FROM poll_settings WHERE key = ?').get(key) as
-      { value: string } | undefined;
-    if (row === undefined) return fallback;
-    try {
-      return JSON.parse(row.value) as T;
-    } catch {
-      return fallback;
-    }
-  }
-
-  public listPollTemplates(botId = 'neurobot'): PollTemplate[] {
-    const rows = this.db
-      .prepare(
-        `SELECT templates.* FROM bot_poll_templates templates
-        LEFT JOIN assistant_poll_template_settings settings
-          ON settings.assistant_id = templates.bot_id AND settings.poll_template_id = templates.id
-        WHERE templates.bot_id = ? AND COALESCE(settings.status, 'ACTIVE') != 'HIDDEN'
-        ORDER BY templates.is_default DESC, templates.id`,
-      )
-      .all(botId) as PollTemplateRow[];
-    const optionRows = this.db
-      .prepare(
-        `SELECT options.template_id, options.option_text FROM bot_poll_options options
-        JOIN bot_poll_templates templates ON templates.id = options.template_id
-        WHERE templates.bot_id = ? ORDER BY options.option_order`,
-      )
-      .all(botId) as Array<{ template_id: number; option_text: string }>;
-    const options = new Map<number, string[]>();
-    for (const row of optionRows) {
-      const values = options.get(row.template_id) ?? [];
-      values.push(row.option_text);
-      options.set(row.template_id, values);
-    }
-    return rows.map((row) => mapPollTemplate(row, options.get(row.id) ?? []));
-  }
-
-  public listHiddenPollTemplates(botId = 'neurobot'): HiddenPollTemplate[] {
-    const rows = this.db
-      .prepare(
-        `SELECT templates.*, settings.hidden_at, settings.removal_reason
-      FROM bot_poll_templates templates
-      JOIN assistant_poll_template_settings settings
-        ON settings.assistant_id = templates.bot_id AND settings.poll_template_id = templates.id
-      WHERE templates.bot_id = ? AND templates.is_default = 1 AND settings.status = 'HIDDEN'
-      ORDER BY settings.hidden_at DESC`,
-      )
-      .all(botId) as Array<
-      PollTemplateRow & {
-        hidden_at: string;
-        removal_reason: string | null;
-      }
-    >;
-    const optionRows = this.db
-      .prepare(
-        `SELECT options.template_id, options.option_text
-      FROM bot_poll_options options JOIN bot_poll_templates templates ON templates.id = options.template_id
-      WHERE templates.bot_id = ? ORDER BY options.option_order`,
-      )
-      .all(botId) as Array<{
-      template_id: number;
-      option_text: string;
-    }>;
-    const options = new Map<number, string[]>();
-    for (const row of optionRows)
-      options.set(row.template_id, [...(options.get(row.template_id) ?? []), row.option_text]);
-    return rows.map((row) => ({
-      ...mapPollTemplate(row, options.get(row.id) ?? []),
-      hiddenAt: row.hidden_at,
-      removalReason: row.removal_reason,
-    }));
-  }
-
-  public hidePollTemplateForAssistant(
-    botId: string,
-    templateId: number,
-    safeActorHash: string,
-    removalReason: string | null = null,
-  ): { hidden: boolean; cancelledOverrides: number; cancelledDeliveries: number } {
-    const template = this.db
-      .prepare('SELECT id, is_default FROM bot_poll_templates WHERE id = ? AND bot_id = ?')
-      .get(templateId, botId) as { id: number; is_default: number } | undefined;
-    if (template === undefined || template.is_default !== 1)
-      throw new Error('POLL_ASSISTANT_MISMATCH');
-    const existing = this.db
-      .prepare(
-        `SELECT status FROM assistant_poll_template_settings
-      WHERE assistant_id = ? AND poll_template_id = ?`,
-      )
-      .get(botId, templateId) as { status: string } | undefined;
-    if (existing?.status === 'HIDDEN')
-      return { hidden: false, cancelledOverrides: 0, cancelledDeliveries: 0 };
-    const now = new Date().toISOString();
-    return this.db.transaction(() => {
-      this.db
-        .prepare(
-          `INSERT INTO assistant_poll_template_settings(
-        assistant_id, poll_template_id, status, hidden_at, restored_at, safe_actor_hash,
-        removal_reason, created_at, updated_at
-      ) VALUES (?, ?, 'HIDDEN', ?, NULL, ?, ?, ?, ?)
-      ON CONFLICT(assistant_id, poll_template_id) DO UPDATE SET status = 'HIDDEN',
-        hidden_at = excluded.hidden_at, restored_at = NULL, safe_actor_hash = excluded.safe_actor_hash,
-        removal_reason = excluded.removal_reason, updated_at = excluded.updated_at`,
-        )
-        .run(botId, templateId, now, safeActorHash, removalReason, now, now);
-      const cancelledOverrides = this.db
-        .prepare(
-          'DELETE FROM bot_poll_date_overrides WHERE bot_id = ? AND template_id = ? AND local_date > date(?)',
-        )
-        .run(botId, templateId, now).changes;
-      const cancelledDeliveries = this.db
-        .prepare(
-          `UPDATE bot_poll_send_history
-        SET status = 'SKIPPED', failure_code = 'POLL_TEMPLATE_HIDDEN', attempted_at = ?,
-          attempts = CASE WHEN attempts = 0 THEN 1 ELSE attempts END
-        WHERE bot_id = ? AND template_id = ? AND status = 'PENDING'`,
-        )
-        .run(now, botId, templateId).changes;
-      return { hidden: true, cancelledOverrides, cancelledDeliveries };
-    })();
-  }
-
-  public restorePollTemplateForAssistant(
-    botId: string,
-    templateId: number,
-    safeActorHash: string,
-  ): boolean {
-    const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        `UPDATE assistant_poll_template_settings
-      SET status = 'ACTIVE', hidden_at = NULL, restored_at = ?, safe_actor_hash = ?, updated_at = ?
-      WHERE assistant_id = ? AND poll_template_id = ? AND status = 'HIDDEN'
-        AND EXISTS (SELECT 1 FROM bot_poll_templates templates
-          WHERE templates.id = poll_template_id AND templates.bot_id = assistant_id AND templates.is_default = 1)`,
-      )
-      .run(now, safeActorHash, now, botId, templateId);
-    return result.changes === 1;
-  }
-
-  public restoreAllDefaultPollsForAssistant(botId: string, safeActorHash: string): number {
-    const now = new Date().toISOString();
-    return this.db
-      .prepare(
-        `UPDATE assistant_poll_template_settings
-      SET status = 'ACTIVE', hidden_at = NULL, restored_at = ?, safe_actor_hash = ?, updated_at = ?
-      WHERE assistant_id = ? AND status = 'HIDDEN' AND poll_template_id IN (
-        SELECT id FROM bot_poll_templates WHERE bot_id = ? AND is_default = 1
-      )`,
-      )
-      .run(now, safeActorHash, now, botId, botId).changes;
-  }
-
-  public getPollTemplate(id: number, botId = 'neurobot'): PollTemplate | null {
-    return this.listPollTemplates(botId).find((template) => template.id === id) ?? null;
-  }
-
-  public savePollTemplate(
-    input: {
-      id?: number;
-      question: string;
-      category: string;
-      options: string[];
-      allowMultipleAnswers: boolean;
-      enabled: boolean;
-      favorite: boolean;
-      disabledUntil: string | null;
-    },
-    botId = 'neurobot',
-  ): PollTemplate {
-    const content = validatePollTemplateContent(input.question, input.category, input.options);
-    if (input.disabledUntil !== null && !Number.isFinite(Date.parse(input.disabledUntil))) {
-      throw new Error('La fecha de exclusión temporal no es válida.');
-    }
-    const now = new Date().toISOString();
-    const save = this.db.transaction(() => {
-      let id = input.id;
-      if (id === undefined) {
-        const result = this.db
-          .prepare(
-            `
-            INSERT INTO bot_poll_templates
-              (bot_id, default_key, question, category, allow_multiple_answers, enabled, is_default,
-               favorite, disabled_until, last_used_at, created_at, updated_at)
-            VALUES (?, NULL, ?, ?, ?, ?, 0, ?, ?, NULL, ?, ?)
-          `,
-          )
-          .run(
-            botId,
-            content.question,
-            content.category,
-            input.allowMultipleAnswers ? 1 : 0,
-            input.enabled ? 1 : 0,
-            input.favorite ? 1 : 0,
-            input.disabledUntil,
-            now,
-            now,
-          );
-        id = Number(result.lastInsertRowid);
-      } else {
-        const result = this.db
-          .prepare(
-            `
-            UPDATE bot_poll_templates SET question = ?, category = ?, allow_multiple_answers = ?,
-              enabled = ?, favorite = ?, disabled_until = ?, updated_at = ? WHERE id = ? AND bot_id = ?
-          `,
-          )
-          .run(
-            content.question,
-            content.category,
-            input.allowMultipleAnswers ? 1 : 0,
-            input.enabled ? 1 : 0,
-            input.favorite ? 1 : 0,
-            input.disabledUntil,
-            now,
-            id,
-            botId,
-          );
-        if (result.changes !== 1) throw new Error('La plantilla de encuesta no existe.');
-        this.db.prepare('DELETE FROM bot_poll_options WHERE template_id = ?').run(id);
-      }
-      const insertOption = this.db.prepare(`
-        INSERT INTO bot_poll_options(template_id, option_order, option_text) VALUES (?, ?, ?)
-      `);
-      content.options.forEach((option, index) => insertOption.run(id, index, option));
-      return id;
-    });
-    return this.getPollTemplate(save(), botId) as PollTemplate;
-  }
-
-  public deletePollTemplate(id: number, botId = 'neurobot'): boolean {
-    const template = this.getPollTemplate(id, botId);
-    if (template === null) return false;
-    if (template.isDefault) throw new Error('Las encuestas predeterminadas no se pueden eliminar.');
-    return (
-      this.db.prepare('DELETE FROM bot_poll_templates WHERE id = ? AND bot_id = ?').run(id, botId)
-        .changes === 1
-    );
-  }
-
-  public restoreDefaultPollTemplates(botId = 'neurobot', safeActorHash = 'system'): number {
-    const hiddenRestored = this.restoreAllDefaultPollsForAssistant(botId, safeActorHash);
-    const now = new Date().toISOString();
-    let restored = hiddenRestored;
-    const restore = this.db.transaction(() => {
-      for (const template of DEFAULT_POLL_TEMPLATES) {
-        const existing = this.db
-          .prepare('SELECT id FROM bot_poll_templates WHERE bot_id = ? AND default_key = ?')
-          .get(botId, template.key) as { id: number } | undefined;
-        let id: number;
-        if (existing === undefined) {
-          const result = this.db
-            .prepare(
-              `
-              INSERT INTO bot_poll_templates
-                (bot_id, default_key, question, category, allow_multiple_answers, enabled, is_default,
-                 favorite, disabled_until, last_used_at, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, 1, 1, 0, NULL, NULL, ?, ?)
-            `,
-            )
-            .run(
-              botId,
-              template.key,
-              template.question,
-              template.category,
-              template.allowMultipleAnswers ? 1 : 0,
-              now,
-              now,
-            );
-          id = Number(result.lastInsertRowid);
-        } else {
-          continue;
-        }
-        const insert = this.db.prepare(`
-          INSERT INTO bot_poll_options(template_id, option_order, option_text) VALUES (?, ?, ?)
-        `);
-        template.options.forEach((option, index) => insert.run(id, index, option));
-        restored += 1;
-      }
-    });
-    restore();
-    return restored;
-  }
-
-  public getPollDateOverride(localDate: string, botId = 'neurobot'): PollDateOverride | null {
-    const row = this.db
-      .prepare('SELECT * FROM bot_poll_date_overrides WHERE bot_id = ? AND local_date = ?')
-      .get(botId, localDate) as
-      | { local_date: string; template_id: number; created_at: string; updated_at: string }
-      | undefined;
-    return row === undefined
-      ? null
-      : {
-          localDate: row.local_date,
-          templateId: row.template_id,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-        };
-  }
-
-  public listPollDateOverrides(botId = 'neurobot'): PollDateOverride[] {
-    return (
-      this.db
-        .prepare('SELECT * FROM bot_poll_date_overrides WHERE bot_id = ? ORDER BY local_date')
-        .all(botId) as Array<{
-        local_date: string;
-        template_id: number;
-        created_at: string;
-        updated_at: string;
-      }>
-    ).map((row) => ({
-      localDate: row.local_date,
-      templateId: row.template_id,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
-  }
-
-  public savePollDateOverride(
-    localDate: string,
-    templateId: number,
-    botId = 'neurobot',
-  ): PollDateOverride {
-    const template = this.getPollTemplate(templateId, botId);
-    if (template === null) throw new Error('La encuesta seleccionada no existe.');
-    if (!template.enabled) throw new Error('La encuesta seleccionada está desactivada.');
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `
-        INSERT INTO bot_poll_date_overrides(bot_id, local_date, template_id, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(bot_id, local_date) DO UPDATE SET template_id = excluded.template_id,
-          updated_at = excluded.updated_at
-      `,
-      )
-      .run(botId, localDate, templateId, now, now);
-    return this.getPollDateOverride(localDate, botId) as PollDateOverride;
-  }
-
-  public deletePollDateOverride(localDate: string, botId = 'neurobot'): boolean {
-    return (
-      this.db
-        .prepare('DELETE FROM bot_poll_date_overrides WHERE bot_id = ? AND local_date = ?')
-        .run(botId, localDate).changes === 1
-    );
-  }
-
-  public claimPollDelivery(
-    input: {
-      deduplicationKey: string;
-      groupId: string;
-      localDate: string;
-      templateId: number;
-      source: PollDeliverySource;
-      countsAsDaily: boolean;
-      scheduledAt: Date;
-    },
-    botId = 'neurobot',
-  ): PollSendHistoryRecord | null {
-    const claim = this.db.transaction(() => {
-      const existing = this.db
-        .prepare('SELECT * FROM bot_poll_send_history WHERE bot_id = ? AND deduplication_key = ?')
-        .get(botId, input.deduplicationKey) as PollHistoryRow | undefined;
-      if (existing !== undefined) {
-        if (
-          existing.status === 'SENT' ||
-          existing.status === 'SENDING' ||
-          existing.status === 'SKIPPED' ||
-          existing.attempts >= 2
-        ) {
-          return null;
-        }
-        return mapPollHistory(existing);
-      }
-      const result = this.db
-        .prepare(
-          `
-          INSERT INTO bot_poll_send_history
-            (bot_id, deduplication_key, group_id, local_date, template_id, source, counts_as_daily,
-             status, attempts, scheduled_at, attempted_at, sent_at, failure_code)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', 0, ?, NULL, NULL, NULL)
-        `,
-        )
-        .run(
-          botId,
-          input.deduplicationKey,
-          input.groupId,
-          input.localDate,
-          input.templateId,
-          input.source,
-          input.countsAsDaily ? 1 : 0,
-          input.scheduledAt.toISOString(),
-        );
-      return mapPollHistory(
-        this.db
-          .prepare('SELECT * FROM bot_poll_send_history WHERE id = ?')
-          .get(Number(result.lastInsertRowid)) as PollHistoryRow,
-      );
-    });
-    return claim();
-  }
-
-  public getPollDelivery(
-    deduplicationKey: string,
-    botId = 'neurobot',
-  ): PollSendHistoryRecord | null {
-    const row = this.db
-      .prepare('SELECT * FROM bot_poll_send_history WHERE bot_id = ? AND deduplication_key = ?')
-      .get(botId, deduplicationKey) as PollHistoryRow | undefined;
-    return row === undefined ? null : mapPollHistory(row);
-  }
-
-  public getPollTemplateIdForLocalDate(localDate: string, botId = 'neurobot'): number | null {
-    const row = this.db
-      .prepare(
-        `SELECT template_id FROM bot_poll_send_history
-         WHERE bot_id = ? AND local_date = ? AND counts_as_daily = 1 ORDER BY id LIMIT 1`,
-      )
-      .get(botId, localDate) as { template_id: number } | undefined;
-    return row?.template_id ?? null;
-  }
-
-  public beginPollAttempt(id: number, attemptedAt: Date): number | null {
-    const result = this.db
-      .prepare(
-        `
-        UPDATE bot_poll_send_history SET status = 'SENDING', attempts = attempts + 1,
-          attempted_at = ?, failure_code = NULL
-        WHERE id = ? AND status IN ('PENDING', 'FAILED') AND attempts < 2
-      `,
-      )
-      .run(attemptedAt.toISOString(), id);
-    if (result.changes !== 1) return null;
-    return (
-      this.db.prepare('SELECT attempts FROM bot_poll_send_history WHERE id = ?').get(id) as {
-        attempts: number;
-      }
-    ).attempts;
-  }
-
-  public completePollAttempt(
-    id: number,
-    status: 'SENT' | 'FAILED' | 'SKIPPED',
-    completedAt: Date,
-    failureCode: string | null,
-  ): void {
-    const complete = this.db.transaction(() => {
-      this.db
-        .prepare(
-          `
-          UPDATE bot_poll_send_history SET status = ?, sent_at = CASE WHEN ? = 'SENT' THEN ? ELSE sent_at END,
-            failure_code = ? WHERE id = ?
-        `,
-        )
-        .run(status, status, completedAt.toISOString(), failureCode, id);
-      if (status === 'SENT') {
-        this.db
-          .prepare(
-            `
-            UPDATE bot_poll_templates SET last_used_at = ?, updated_at = ?
-            WHERE id = (SELECT template_id FROM bot_poll_send_history WHERE id = ?)
-          `,
-          )
-          .run(completedAt.toISOString(), completedAt.toISOString(), id);
-      }
-    });
-    complete();
-  }
-
-  public listPollSendHistory(limit = 200, botId = 'neurobot'): PollSendHistoryRecord[] {
-    const safeLimit = Math.min(1000, Math.max(1, Math.trunc(limit)));
-    return (
-      this.db
-        .prepare('SELECT * FROM bot_poll_send_history WHERE bot_id = ? ORDER BY id DESC LIMIT ?')
-        .all(botId, safeLimit) as PollHistoryRow[]
-    ).map(mapPollHistory);
-  }
-
-  public listPollUsage(
-    sinceLocalDate: string,
-    groupId: string | null,
-    botId = 'neurobot',
-  ): Array<{ templateId: number; category: string; localDate: string }> {
-    const whereGroup = groupId === null ? '' : ' AND history.group_id = ?';
-    const parameters: Array<string> = [botId, sinceLocalDate];
-    if (groupId !== null) parameters.push(groupId);
-    return this.db
-      .prepare(
-        `
-        SELECT history.template_id AS templateId, templates.category, history.local_date AS localDate
-        FROM bot_poll_send_history history
-        JOIN bot_poll_templates templates ON templates.id = history.template_id
-        WHERE history.bot_id = ? AND history.status = 'SENT' AND history.counts_as_daily = 1
-          AND history.local_date >= ?${whereGroup}
-        ORDER BY history.local_date DESC, history.id DESC
-      `,
-      )
-      .all(...parameters) as Array<{ templateId: number; category: string; localDate: string }>;
-  }
-
   public listBots(): BotRecord[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT bots.*, profiles.id AS profile_id, profiles.organization_name,
-             profiles.bot_name, profiles.organization_type, profiles.timezone,
-             runtime.status AS whatsapp_status,
-             runtime.masked_number, runtime.last_connected_at,
-             channels.groups_enabled, channels.private_messages_enabled,
-             channels.real_mention_required, channels.continued_conversations_enabled,
-             channels.menu_type, credentials.credential_mode,
-             capabilities.community_single_turn_mode, capabilities.private_chats_enabled,
-             capabilities.conversation_continuation_enabled,
-             capabilities.interactive_menus_enabled, capabilities.numeric_menu_replies_enabled,
-             capabilities.polls_as_menus_enabled,
-             capabilities.polls_for_community_engagement_enabled,
-             capabilities.catalog_enabled, capabilities.human_assistance_enabled,
-             CASE WHEN credentials.encrypted_api_key IS NULL THEN 0 ELSE 1 END AS key_configured
-           FROM bots
-           JOIN bot_profiles mapping ON mapping.bot_id = bots.id
-           JOIN assistant_profiles profiles ON profiles.id = mapping.profile_id
-           JOIN messaging_runtime runtime ON runtime.bot_id = bots.id
-           JOIN bot_channel_settings channels ON channels.bot_id = bots.id
-           JOIN bot_ai_credentials credentials ON credentials.bot_id = bots.id
-           JOIN bot_capabilities capabilities ON capabilities.bot_id = bots.id
-           ORDER BY bots.created_at, bots.internal_identifier`,
-        )
-        .all() as Array<{
-        id: string;
-        internal_identifier: string;
-        client_id: string;
-        mode: BotMode;
-        connector_type: ConnectorType;
-        operating_mode: BotOperatingMode;
-        lifecycle_status: AssistantLifecycleStatus;
-        deletion_locked: number;
-        deleted_at: string | null;
-        scheduled_permanent_deletion_at: string | null;
-        group_channel_enabled: number;
-        private_channel_enabled: number;
-        private_business_mode_enabled: number;
-        active_connector_id: number | null;
-        connector_migration_locked: number;
-        enabled: number;
-        profile_id: number;
-        organization_name: string;
-        bot_name: string;
-        organization_type: OrganizationType;
-        timezone: string;
-        whatsapp_status: string;
-        masked_number: string | null;
-        last_connected_at: string | null;
-        groups_enabled: number;
-        private_messages_enabled: number;
-        real_mention_required: number;
-        continued_conversations_enabled: number;
-        menu_type: MenuType;
-        credential_mode: 'global' | 'per_bot';
-        key_configured: number;
-        community_single_turn_mode: number;
-        private_chats_enabled: number;
-        conversation_continuation_enabled: number;
-        interactive_menus_enabled: number;
-        numeric_menu_replies_enabled: number;
-        polls_as_menus_enabled: number;
-        polls_for_community_engagement_enabled: number;
-        catalog_enabled: number;
-        human_assistance_enabled: number;
-        created_at: string;
-        updated_at: string;
-      }>
-    ).map((row) => ({
+    const rows = this.db
+      .prepare(
+        `SELECT bots.*, profiles.id AS profile_id, profiles.organization_name,
+           profiles.bot_name, profiles.organization_type, profiles.timezone,
+           runtime.status AS whatsapp_status, runtime.masked_number, runtime.last_connected_at,
+           channels.continued_conversations_enabled, channels.menu_type,
+           credentials.credential_mode,
+           capabilities.private_chats_enabled,
+           capabilities.conversation_continuation_enabled,
+           capabilities.interactive_menus_enabled,
+           capabilities.numeric_menu_replies_enabled,
+           capabilities.catalog_enabled, capabilities.human_assistance_enabled,
+           CASE WHEN credentials.encrypted_api_key IS NULL THEN 0 ELSE 1 END AS key_configured
+         FROM bots
+         JOIN bot_profiles mapping ON mapping.bot_id=bots.id
+         JOIN assistant_profiles profiles ON profiles.id=mapping.profile_id
+         JOIN messaging_runtime runtime ON runtime.bot_id=bots.id
+         JOIN bot_channel_settings channels ON channels.bot_id=bots.id
+         JOIN bot_ai_credentials credentials ON credentials.bot_id=bots.id
+         JOIN bot_capabilities capabilities ON capabilities.bot_id=bots.id
+         ORDER BY bots.created_at,bots.internal_identifier`,
+      )
+      .all() as Array<{
+      id: string;
+      internal_identifier: string;
+      client_id: string;
+      connector_type: ConnectorType;
+      lifecycle_status: AssistantLifecycleStatus;
+      deletion_locked: number;
+      deleted_at: string | null;
+      scheduled_permanent_deletion_at: string | null;
+      active_connector_id: number | null;
+      enabled: number;
+      profile_id: number;
+      organization_name: string;
+      bot_name: string;
+      organization_type: OrganizationType;
+      timezone: string;
+      whatsapp_status: string;
+      masked_number: string | null;
+      last_connected_at: string | null;
+      continued_conversations_enabled: number;
+      menu_type: MenuType;
+      credential_mode: 'global' | 'per_bot';
+      key_configured: number;
+      private_chats_enabled: number;
+      conversation_continuation_enabled: number;
+      interactive_menus_enabled: number;
+      numeric_menu_replies_enabled: number;
+      catalog_enabled: number;
+      human_assistance_enabled: number;
+      created_at: string;
+      updated_at: string;
+    }>;
+    return rows.map((row) => ({
       id: row.id,
       internalIdentifier: row.internal_identifier,
       clientId: row.client_id,
-      mode: row.mode,
       connectorType: row.connector_type,
-      operatingMode: row.operating_mode,
       lifecycleStatus: row.lifecycle_status,
       deletionLocked: row.deletion_locked === 1,
       deletedAt: row.deleted_at,
       scheduledPermanentDeletionAt: row.scheduled_permanent_deletion_at,
-      groupChannelEnabled: row.group_channel_enabled === 1,
-      privateChannelEnabled: row.private_channel_enabled === 1,
-      privateBusinessModeEnabled: row.private_business_mode_enabled === 1,
       activeConnectorId: row.active_connector_id,
-      connectorMigrationLocked: row.connector_migration_locked === 1,
       capabilities: {
-        communitySingleTurnMode: row.community_single_turn_mode === 1,
         privateChatsEnabled: row.private_chats_enabled === 1,
         conversationContinuationEnabled: row.conversation_continuation_enabled === 1,
         interactiveMenusEnabled: row.interactive_menus_enabled === 1,
         numericMenuRepliesEnabled: row.numeric_menu_replies_enabled === 1,
-        pollsAsMenusEnabled: row.polls_as_menus_enabled === 1,
-        pollsForCommunityEngagementEnabled: row.polls_for_community_engagement_enabled === 1,
         catalogEnabled: row.catalog_enabled === 1,
         humanAssistanceEnabled: row.human_assistance_enabled === 1,
       },
@@ -3826,9 +292,6 @@ export class AppDatabase {
       whatsappStatus: row.whatsapp_status,
       maskedNumber: row.masked_number,
       lastConnectedAt: row.last_connected_at,
-      groupsEnabled: row.groups_enabled === 1,
-      privateMessagesEnabled: row.private_messages_enabled === 1,
-      realMentionRequired: row.real_mention_required === 1,
       continuedConversationsEnabled: row.continued_conversations_enabled === 1,
       menuType: row.menu_type,
       aiCredentialMode: row.credential_mode,
@@ -3837,7 +300,6 @@ export class AppDatabase {
       updatedAt: row.updated_at,
     }));
   }
-
   public getBot(botId: string): BotRecord | null {
     return this.listBots().find((bot) => bot.id === botId) ?? null;
   }
@@ -3863,12 +325,7 @@ export class AppDatabase {
         )
         .run(phoneNumberId, now, connector.id);
       this.db
-        .prepare(
-          `UPDATE bots SET connector_type='WHATSAPP_CLOUD_API', mode='business',
-             operating_mode='BUSINESS_PRIVATE', assistant_type='BUSINESS_PRIVATE',
-             group_channel_enabled=0, private_channel_enabled=1,
-             private_business_mode_enabled=0, updated_at=? WHERE id=?`,
-        )
+        .prepare(`UPDATE bots SET connector_type='WHATSAPP_CLOUD_API', updated_at=? WHERE id=?`)
         .run(now, botId);
     });
     try {
@@ -4199,220 +656,8 @@ export class AppDatabase {
     operation();
   }
 
-  public transferCommercialConfigurationToNeurobot(
-    sourceBotId: string,
-    actorHash: string,
-  ): { menus: number; catalogItems: number; mediaAssets: number; businessHours: number } {
-    if (sourceBotId === 'neurobot') throw new Error('INVALID_TRANSFER_SOURCE');
-    const source = this.getBot(sourceBotId);
-    const target = this.getBot('neurobot');
-    if (source === null || target === null) throw new Error('ASSISTANT_NOT_FOUND');
-    if (source.mode === 'community' || source.lifecycleStatus === 'ARCHIVED') {
-      throw new Error('COMMERCIAL_TRANSFER_NOT_AVAILABLE');
-    }
-    const operation = this.db.transaction(() => {
-      const mediaMap = new Map<number, number>();
-      for (const asset of this.listMediaAssets(sourceBotId)) {
-        const copy = this.createMediaAsset({
-          botId: 'neurobot',
-          internalName: asset.internalName,
-          relativePath: asset.relativePath,
-          mimeType: asset.mimeType,
-          byteSize: asset.byteSize,
-          sha256: asset.sha256,
-          caption: asset.caption,
-        });
-        mediaMap.set(asset.id, copy.id);
-      }
-
-      const categoryMap = new Map<number, number>();
-      for (const category of this.listCatalogCategories(sourceBotId)) {
-        const copy = this.saveCatalogCategory({
-          botId: 'neurobot',
-          name: category.name,
-          description: category.description,
-          enabled: category.enabled,
-        });
-        categoryMap.set(category.id, copy.id);
-      }
-
-      const itemMap = new Map<number, number>();
-      for (const item of this.listCatalogItems(sourceBotId)) {
-        const copy = this.saveCatalogItem({
-          ...item,
-          id: 0,
-          botId: 'neurobot',
-          categoryId: item.categoryId === null ? null : (categoryMap.get(item.categoryId) ?? null),
-          primaryMediaId:
-            item.primaryMediaId === null ? null : (mediaMap.get(item.primaryMediaId) ?? null),
-        });
-        itemMap.set(item.id, copy.id);
-      }
-
-      const sourceMenus = this.listMenus(sourceBotId);
-      const menuMap = new Map<number, number>();
-      const pending = [...sourceMenus];
-      while (pending.length > 0) {
-        const index = pending.findIndex(
-          (menu) => menu.parentMenuId === null || menuMap.has(menu.parentMenuId),
-        );
-        if (index < 0) throw new Error('INVALID_MENU_HIERARCHY');
-        const [menu] = pending.splice(index, 1);
-        if (menu === undefined) throw new Error('INVALID_MENU_HIERARCHY');
-        const copy = this.saveMenu({
-          botId: 'neurobot',
-          parentMenuId:
-            menu.parentMenuId === null ? null : (menuMap.get(menu.parentMenuId) ?? null),
-          title: menu.title,
-          message: menu.message,
-          helpText: menu.helpText,
-          enabled: menu.enabled,
-          isInitial: menu.isInitial,
-          expirationMinutes: menu.expirationMinutes,
-        });
-        menuMap.set(menu.id, copy.id);
-      }
-      for (const option of this.listMenuOptions(sourceBotId)) {
-        let actionType = option.actionType;
-        let actionPayload = { ...option.actionPayload };
-        if (typeof actionPayload.id === 'number') {
-          if (option.actionType === 'submenu')
-            actionPayload.id = menuMap.get(actionPayload.id) ?? actionPayload.id;
-          if (option.actionType === 'catalog_category')
-            actionPayload.id = categoryMap.get(actionPayload.id) ?? actionPayload.id;
-          if (option.actionType === 'catalog_item')
-            actionPayload.id = itemMap.get(actionPayload.id) ?? actionPayload.id;
-          if (option.actionType === 'media')
-            actionPayload.id = mediaMap.get(actionPayload.id) ?? actionPayload.id;
-        }
-        if (
-          ['catalog_category', 'catalog_item', 'media', 'submenu'].includes(actionType) &&
-          !Number.isInteger(actionPayload.id)
-        ) {
-          actionType = 'knowledge';
-          actionPayload = { query: option.label };
-        }
-        this.saveMenuOption({
-          botId: 'neurobot',
-          menuId: menuMap.get(option.menuId) as number,
-          label: option.label,
-          aliases: option.aliases,
-          order: option.order,
-          actionType,
-          actionPayload,
-          enabled: option.enabled,
-        });
-      }
-
-      const hours = this.listBusinessHours(sourceBotId).map(
-        ({ weekday, localDate, openingTime, closingTime, closed, label }) => ({
-          weekday,
-          localDate,
-          openingTime,
-          closingTime,
-          closed,
-          label,
-        }),
-      );
-      this.replaceBusinessHours('neurobot', hours);
-      const initialMenuId =
-        [...menuMap.entries()].find(
-          ([sourceId]) => sourceMenus.find((menu) => menu.id === sourceId)?.isInitial,
-        )?.[1] ?? null;
-      const mixedCapabilities = capabilitiesFor('mixed');
-      const now = new Date().toISOString();
-      this.db
-        .prepare(
-          `UPDATE bots SET mode='mixed', operating_mode='BUSINESS_MIXED', assistant_type='BUSINESS_MIXED',
-          group_channel_enabled=1, private_channel_enabled=1, private_business_mode_enabled=1, updated_at=?
-         WHERE id='neurobot'`,
-        )
-        .run(now);
-      this.db
-        .prepare(
-          `UPDATE bot_channel_settings SET groups_enabled=1, private_messages_enabled=1,
-          real_mention_required=1, continued_conversations_enabled=1,
-          private_initial_menu_id=?, menu_type=?, updated_at=? WHERE bot_id='neurobot'`,
-        )
-        .run(initialMenuId, source.menuType, now);
-      this.db
-        .prepare(
-          `UPDATE bot_capabilities SET community_single_turn_mode=?, private_chats_enabled=?,
-          conversation_continuation_enabled=?, interactive_menus_enabled=?, numeric_menu_replies_enabled=?,
-          polls_as_menus_enabled=?, polls_for_community_engagement_enabled=?, catalog_enabled=?,
-          human_assistance_enabled=?, updated_at=? WHERE bot_id='neurobot'`,
-        )
-        .run(
-          mixedCapabilities.communitySingleTurnMode ? 1 : 0,
-          mixedCapabilities.privateChatsEnabled ? 1 : 0,
-          mixedCapabilities.conversationContinuationEnabled ? 1 : 0,
-          mixedCapabilities.interactiveMenusEnabled ? 1 : 0,
-          mixedCapabilities.numericMenuRepliesEnabled ? 1 : 0,
-          mixedCapabilities.pollsAsMenusEnabled ? 1 : 0,
-          mixedCapabilities.pollsForCommunityEngagementEnabled ? 1 : 0,
-          mixedCapabilities.catalogEnabled ? 1 : 0,
-          mixedCapabilities.humanAssistanceEnabled ? 1 : 0,
-          now,
-        );
-      this.sendBotToTrash(sourceBotId, actorHash);
-      this.recordTechnicalEvent({
-        botId: 'neurobot',
-        eventType: 'PRIVATE_BUSINESS_CHANNEL_ENABLED',
-        result: 'enabled',
-      });
-      this.recordTechnicalEvent({
-        botId: sourceBotId,
-        eventType: 'DRAFT_CONFIGURATION_TRANSFERRED',
-        result: 'transferred',
-      });
-      return {
-        menus: sourceMenus.length,
-        catalogItems: itemMap.size,
-        mediaAssets: mediaMap.size,
-        businessHours: hours.length,
-      };
-    });
-    return operation();
-  }
-
-  public listBotActivationAliases(botId: string): string[] {
-    const aliases = (
-      this.db
-        .prepare('SELECT alias FROM bot_activation_aliases WHERE bot_id = ? ORDER BY alias')
-        .all(botId) as Array<{ alias: string }>
-    ).map((row) => row.alias);
-    if (aliases.length > 0) return aliases;
-    const profile = this.db
-      .prepare(
-        `SELECT profiles.activation_alias AS alias FROM bot_profiles mapping
-         JOIN assistant_profiles profiles ON profiles.id = mapping.profile_id
-         WHERE mapping.bot_id = ?`,
-      )
-      .get(botId) as { alias: string } | undefined;
-    return profile === undefined ? [] : [profile.alias.toLocaleLowerCase('es')];
-  }
-
-  public saveBotActivationAliases(botId: string, aliases: string[]): string[] {
-    if (this.getBot(botId) === null) throw new Error('El asistente no existe.');
-    this.replaceBotActivationAliases(botId, aliases, new Date().toISOString());
-    return this.listBotActivationAliases(botId);
-  }
-
-  private replaceBotActivationAliases(botId: string, aliases: string[], now: string): void {
-    const normalized = [...new Set(aliases.map(normalizeActivationAlias))];
-    if (normalized.length === 0) throw new Error('Debe existir al menos un alias de activación.');
-    if (normalized.length > 10)
-      throw new Error('Se permiten como máximo diez alias de activación.');
-    this.db.prepare('DELETE FROM bot_activation_aliases WHERE bot_id = ?').run(botId);
-    const insert = this.db.prepare(
-      'INSERT INTO bot_activation_aliases(bot_id, alias, created_at) VALUES (?, ?, ?)',
-    );
-    for (const alias of normalized) insert.run(botId, alias, now);
-  }
-
   public createBot(input: {
     id: string;
-    mode: BotMode;
     connectorType?: ConnectorType;
     profile: Omit<AssistantProfile, 'id' | 'active' | 'createdAt' | 'updatedAt'>;
     menuType?: MenuType;
@@ -4422,40 +667,20 @@ export class AppDatabase {
       throw new Error('Ya existe un asistente con ese identificador.');
     const now = new Date().toISOString();
     const connectorType: ConnectorType = input.connectorType ?? 'WHATSAPP_CLOUD_API';
-    const operatingMode = operatingModeFor(input.mode);
-    const capabilities = capabilitiesFor(input.mode);
     const create = this.db.transaction(() => {
       this.db
         .prepare(
           `INSERT INTO bots(
-             id, internal_identifier, client_id, mode, connector_type, operating_mode,
-             assistant_type, lifecycle_status, deletion_locked, group_channel_enabled,
-             private_channel_enabled, private_business_mode_enabled,
-             connector_migration_locked, enabled, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, 1, ?, ?)`,
+             id,internal_identifier,client_id,connector_type,lifecycle_status,deletion_locked,
+             enabled,created_at,updated_at
+           ) VALUES (?, ?, ?, ?, 'DRAFT', 0, 0, ?, ?)`,
         )
-        .run(
-          botId,
-          botId,
-          botId,
-          input.mode,
-          connectorType,
-          operatingMode,
-          operatingMode,
-          'DRAFT',
-          input.mode === 'business' ? 0 : 1,
-          input.mode === 'community' ? 0 : 1,
-          input.mode === 'mixed' ? 1 : 0,
-          now,
-          now,
-        );
+        .run(botId, botId, botId, connectorType, now, now);
       const profile = this.createAssistantProfile(input.profile, botId);
       this.activateAssistantProfile(profile.id);
       this.db
         .prepare(
-          `INSERT INTO messaging_runtime(
-             bot_id, status, masked_number, last_connected_at, updated_at
-           ) VALUES (?, 'disconnected', NULL, NULL, ?)`,
+          "INSERT INTO messaging_runtime(bot_id,status,updated_at) VALUES (?, 'disconnected', ?)",
         )
         .run(botId, now);
       const connector = this.db
@@ -4466,90 +691,50 @@ export class AppDatabase {
         )
         .run(botId, connectorType, now, now);
       this.db
-        .prepare('UPDATE bots SET active_connector_id = ? WHERE id = ?')
+        .prepare('UPDATE bots SET active_connector_id=? WHERE id=?')
         .run(Number(connector.lastInsertRowid), botId);
-      const privateMessages = capabilities.privateChatsEnabled ? 1 : 0;
-      const groupsEnabled = input.mode === 'business' ? 0 : 1;
       this.db
         .prepare(
           `INSERT INTO bot_channel_settings(
-             bot_id, groups_enabled, private_messages_enabled, real_mention_required,
-             continued_conversations_enabled, private_initial_menu_id, menu_type, updated_at
-           ) VALUES (?, ?, ?, 1, ?, NULL, ?, ?)`,
+             bot_id,continued_conversations_enabled,private_initial_menu_id,menu_type,updated_at
+           ) VALUES (?, 1, NULL, ?, ?)`,
         )
-        .run(
-          botId,
-          groupsEnabled,
-          privateMessages,
-          capabilities.conversationContinuationEnabled ? 1 : 0,
-          input.menuType ?? 'automatic',
-          now,
-        );
+        .run(botId, input.menuType ?? 'automatic', now);
       this.db
         .prepare(
           `INSERT INTO bot_capabilities(
-             bot_id, community_single_turn_mode, private_chats_enabled,
-             conversation_continuation_enabled, interactive_menus_enabled,
-             numeric_menu_replies_enabled, polls_as_menus_enabled,
-             polls_for_community_engagement_enabled, catalog_enabled,
-             human_assistance_enabled, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          botId,
-          capabilities.communitySingleTurnMode ? 1 : 0,
-          capabilities.privateChatsEnabled ? 1 : 0,
-          capabilities.conversationContinuationEnabled ? 1 : 0,
-          capabilities.interactiveMenusEnabled ? 1 : 0,
-          capabilities.numericMenuRepliesEnabled ? 1 : 0,
-          capabilities.pollsAsMenusEnabled ? 1 : 0,
-          capabilities.pollsForCommunityEngagementEnabled ? 1 : 0,
-          capabilities.catalogEnabled ? 1 : 0,
-          capabilities.humanAssistanceEnabled ? 1 : 0,
-          now,
-        );
-      this.db
-        .prepare(
-          `INSERT INTO bot_ai_credentials(
-             bot_id, credential_mode, encrypted_api_key, key_fingerprint, updated_at
-           ) VALUES (?, 'global', NULL, NULL, ?)`,
+             bot_id,private_chats_enabled,conversation_continuation_enabled,
+             interactive_menus_enabled,numeric_menu_replies_enabled,catalog_enabled,
+             human_assistance_enabled,updated_at
+           ) VALUES (?, 1, 1, 1, 1, 1, 1, ?)`,
         )
         .run(botId, now);
-      this.seedBotKnowledgeCategories(botId, profile.id, input.mode, now);
-      this.seedBotInitialMenu(botId, input.mode, now);
-      this.seedBotAutomation(botId, defaultAutomaticConfiguration(input.profile.timezone), now);
-      this.seedBotPollTemplates(botId, input.profile.timezone, now);
-      this.replaceBotActivationAliases(botId, [input.profile.activationAlias], now);
       this.db
         .prepare(
-          `UPDATE bot_channel_settings SET private_initial_menu_id = (
-             SELECT id FROM menu_definitions WHERE bot_id = ? AND is_initial = 1
-           ) WHERE bot_id = ?`,
+          "INSERT INTO bot_ai_credentials(bot_id,credential_mode,updated_at) VALUES (?, 'global', ?)",
         )
-        .run(botId, botId);
+        .run(botId, now);
+      this.db
+        .prepare(
+          'INSERT INTO assistant_ai_queue_settings(assistant_id,created_at,updated_at) VALUES (?, ?, ?)',
+        )
+        .run(botId, now, now);
+      this.db
+        .prepare(
+          `INSERT INTO assistant_ai_provider_health(assistant_id,provider,state,updated_at)
+           VALUES (?, 'groq', 'NOT_CONFIGURED', ?)`,
+        )
+        .run(botId, now);
+      this.seedBotKnowledgeCategories(botId, profile.id, now);
+      this.seedBotInitialMenu(botId, now);
       this.recordTechnicalEvent({ eventType: 'BOT_CREATED', result: 'created', botId });
     });
     create();
     return this.getBot(botId) as BotRecord;
   }
 
-  private seedBotKnowledgeCategories(
-    botId: string,
-    profileId: number,
-    mode: BotMode,
-    now: string,
-  ): void {
-    const community = [
-      'Presentación',
-      'Normas',
-      'Grupos',
-      'Actividades',
-      'Horarios',
-      'Contacto',
-      'Seguridad',
-      'Preguntas frecuentes',
-    ];
-    const business = [
+  private seedBotKnowledgeCategories(botId: string, profileId: number, now: string): void {
+    const categories = [
       'Productos',
       'Servicios',
       'Precios',
@@ -4563,83 +748,61 @@ export class AppDatabase {
       'Contacto',
       'Preguntas frecuentes',
     ];
-    const categories = mode === 'community' ? community : business;
     const insert = this.db.prepare(
       `INSERT OR IGNORE INTO knowledge_categories(
-         profile_id, bot_id, name, enabled, created_at, updated_at
+         profile_id,bot_id,name,enabled,created_at,updated_at
        ) VALUES (?, ?, ?, 1, ?, ?)`,
     );
     for (const category of categories) insert.run(profileId, botId, category, now, now);
   }
 
-  private seedBotInitialMenu(botId: string, mode: BotMode, now: string): void {
-    const commercial = mode !== 'community';
+  private seedBotInitialMenu(botId: string, now: string): void {
     const result = this.db
       .prepare(
         `INSERT INTO menu_definitions(
-           bot_id, parent_menu_id, title, message, help_text, enabled, is_initial,
-           expiration_minutes, created_at, updated_at
-         ) VALUES (?, NULL, ?, ?, 'Selecciona una opción.', 1, 1, 15, ?, ?)`,
+           bot_id,parent_menu_id,title,message,help_text,enabled,is_initial,
+           expiration_minutes,created_at,updated_at
+         ) VALUES (?, NULL, 'Atención', '¡Hola! ¿En qué podemos ayudarte?',
+           'Selecciona una opción.', 1, 1, 15, ?, ?)`,
       )
-      .run(
-        botId,
-        commercial ? 'Atención' : 'Información',
-        commercial
-          ? '¡Hola! ¿En qué podemos ayudarte?'
-          : 'Puedo ayudarte con información oficial. ¿Qué deseas consultar?',
-        now,
-        now,
-      );
+      .run(botId, now, now);
     const menuId = Number(result.lastInsertRowid);
-    const assistanceMenuId = commercial
-      ? Number(
-          this.db
-            .prepare(
-              `INSERT INTO menu_definitions(
-                 bot_id, parent_menu_id, title, message, help_text, enabled, is_initial,
-                 expiration_minutes, created_at, updated_at
-               ) VALUES (?, ?, 'Atención humana',
-                 'Selecciona un horario para que una persona del equipo pueda contactarte.',
-                 'La disponibilidad debe ser confirmada por el equipo.', 1, 0, 15, ?, ?)`,
-            )
-            .run(botId, menuId, now, now).lastInsertRowid,
+    const assistanceMenuId = Number(
+      this.db
+        .prepare(
+          `INSERT INTO menu_definitions(
+             bot_id,parent_menu_id,title,message,help_text,enabled,is_initial,
+             expiration_minutes,created_at,updated_at
+           ) VALUES (?, ?, 'Atención humana',
+             'Selecciona un horario para que una persona del equipo pueda contactarte.',
+             'La disponibilidad debe ser confirmada por el equipo.', 1, 0, 15, ?, ?)`,
         )
-      : null;
-    const labels = commercial
-      ? [
-          'Productos o servicios',
-          'Precios',
-          'Horarios',
-          'Dirección',
-          'Despachos',
-          'Formas de pago',
-          'Promociones',
-          'Hablar con una persona',
-        ]
-      : [
-          'Normas',
-          'Grupos disponibles',
-          'Actividades',
-          'Horarios',
-          'Contacto',
-          'Preguntas frecuentes',
-        ];
-    const actions: MenuActionType[] = commercial
-      ? [
-          'catalog_category',
-          'knowledge',
-          'hours',
-          'address',
-          'shipping',
-          'payments',
-          'knowledge',
-          'submenu',
-        ]
-      : ['knowledge', 'knowledge', 'knowledge', 'hours', 'knowledge', 'knowledge'];
+        .run(botId, menuId, now, now).lastInsertRowid,
+    );
+    const labels = [
+      'Productos o servicios',
+      'Precios',
+      'Horarios',
+      'Dirección',
+      'Despachos',
+      'Formas de pago',
+      'Promociones',
+      'Hablar con una persona',
+    ];
+    const actions: MenuActionType[] = [
+      'catalog_category',
+      'knowledge',
+      'hours',
+      'address',
+      'shipping',
+      'payments',
+      'knowledge',
+      'submenu',
+    ];
     const insert = this.db.prepare(
       `INSERT INTO menu_options(
-         bot_id, menu_id, label, aliases, option_order, action_type, action_payload,
-         enabled, created_at, updated_at
+         bot_id,menu_id,label,aliases,option_order,action_type,action_payload,
+         enabled,created_at,updated_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
     );
     labels.forEach((label, index) =>
@@ -4650,124 +813,74 @@ export class AppDatabase {
         JSON.stringify([normalizeMenuAlias(label)]),
         index + 1,
         actions[index],
-        JSON.stringify(
-          commercial && index === labels.length - 1 ? { id: assistanceMenuId } : { query: label },
-        ),
+        JSON.stringify(index === labels.length - 1 ? { id: assistanceMenuId } : { query: label }),
         now,
         now,
       ),
     );
-    if (assistanceMenuId !== null) {
-      ['08:00 a 12:00', '12:00 a 16:00', '16:00 a 20:00'].forEach((interval, index) => {
-        insert.run(
-          botId,
-          assistanceMenuId,
-          interval,
-          JSON.stringify([normalizeMenuAlias(interval)]),
-          index + 1,
-          'human_assistance',
-          JSON.stringify({ interval }),
-          now,
-          now,
-        );
-      });
+    ['08:00 a 12:00', '12:00 a 16:00', '16:00 a 20:00'].forEach((interval, index) => {
       insert.run(
         botId,
         assistanceMenuId,
-        'Volver',
-        JSON.stringify(['volver']),
-        4,
-        'back',
-        '{}',
+        interval,
+        JSON.stringify([normalizeMenuAlias(interval)]),
+        index + 1,
+        'human_assistance',
+        JSON.stringify({ interval }),
         now,
         now,
       );
-    }
+    });
+    insert.run(
+      botId,
+      assistanceMenuId,
+      'Volver',
+      JSON.stringify(['volver']),
+      4,
+      'back',
+      '{}',
+      now,
+      now,
+    );
+    this.db
+      .prepare('UPDATE bot_channel_settings SET private_initial_menu_id=? WHERE bot_id=?')
+      .run(menuId, botId);
   }
 
   public updateBotConfiguration(input: {
     botId: string;
-    mode: BotMode;
     enabled: boolean;
-    groupsEnabled: boolean;
-    privateMessagesEnabled: boolean;
-    realMentionRequired: boolean;
     continuedConversationsEnabled: boolean;
     menuType: MenuType;
   }): BotRecord {
-    const existing = this.getBot(input.botId);
-    if (existing === null) throw new Error('El asistente no existe.');
-    const locked = existing.connectorMigrationLocked;
-    const fixedCommunityMode = locked && !existing.privateBusinessModeEnabled;
-    const mode: BotMode = fixedCommunityMode ? 'community' : input.mode;
-    const capabilities = fixedCommunityMode ? capabilitiesFor('community') : capabilitiesFor(mode);
+    if (this.getBot(input.botId) === null) throw new Error('El asistente no existe.');
     const now = new Date().toISOString();
-    const update = this.db.transaction(() => {
+    this.db.transaction(() => {
       const changed = this.db
         .prepare(
-          'UPDATE bots SET mode = ?, operating_mode = ?, enabled = ?, updated_at = ? WHERE id = ?',
+          `UPDATE bots SET enabled=?,lifecycle_status=CASE
+             WHEN ?=0 THEN 'DISABLED'
+             WHEN lifecycle_status='DISABLED' THEN 'UNLINKED'
+             ELSE lifecycle_status END,
+             updated_at=? WHERE id=?`,
         )
-        .run(mode, operatingModeFor(mode), input.enabled ? 1 : 0, now, input.botId);
+        .run(input.enabled ? 1 : 0, input.enabled ? 1 : 0, now, input.botId);
       if (changed.changes !== 1) throw new Error('El asistente no existe.');
       this.db
         .prepare(
-          `UPDATE bots SET assistant_type=?, group_channel_enabled=?, private_channel_enabled=?,
-             private_business_mode_enabled=?, lifecycle_status=CASE
-               WHEN ?=0 THEN 'DISABLED'
-               WHEN lifecycle_status='DISABLED' THEN 'UNLINKED'
-               ELSE lifecycle_status END
-           WHERE id=?`,
+          `UPDATE bot_channel_settings SET continued_conversations_enabled=?,menu_type=?,updated_at=?
+           WHERE bot_id=?`,
         )
-        .run(
-          operatingModeFor(mode),
-          mode === 'business' ? 0 : 1,
-          mode === 'community' ? 0 : 1,
-          mode === 'mixed' ? 1 : 0,
-          input.enabled ? 1 : 0,
-          input.botId,
-        );
+        .run(input.continuedConversationsEnabled ? 1 : 0, input.menuType, now, input.botId);
       this.db
         .prepare(
-          `UPDATE bot_channel_settings SET groups_enabled = ?, private_messages_enabled = ?,
-             real_mention_required = ?, continued_conversations_enabled = ?, menu_type = ?,
-             updated_at = ? WHERE bot_id = ?`,
+          `UPDATE bot_capabilities SET conversation_continuation_enabled=?,updated_at=?
+           WHERE bot_id=?`,
         )
-        .run(
-          fixedCommunityMode ? 1 : input.groupsEnabled ? 1 : 0,
-          fixedCommunityMode ? 0 : input.privateMessagesEnabled ? 1 : 0,
-          input.realMentionRequired ? 1 : 0,
-          fixedCommunityMode ? 0 : input.continuedConversationsEnabled ? 1 : 0,
-          input.menuType,
-          now,
-          input.botId,
-        );
-      this.db
-        .prepare(
-          `UPDATE bot_capabilities SET community_single_turn_mode = ?,
-             private_chats_enabled = ?, conversation_continuation_enabled = ?,
-             interactive_menus_enabled = ?, numeric_menu_replies_enabled = ?,
-             polls_as_menus_enabled = ?, polls_for_community_engagement_enabled = ?,
-             catalog_enabled = ?, human_assistance_enabled = ?, updated_at = ?
-           WHERE bot_id = ?`,
-        )
-        .run(
-          capabilities.communitySingleTurnMode ? 1 : 0,
-          fixedCommunityMode ? 0 : input.privateMessagesEnabled ? 1 : 0,
-          fixedCommunityMode ? 0 : input.continuedConversationsEnabled ? 1 : 0,
-          capabilities.interactiveMenusEnabled ? 1 : 0,
-          capabilities.numericMenuRepliesEnabled ? 1 : 0,
-          capabilities.pollsAsMenusEnabled ? 1 : 0,
-          capabilities.pollsForCommunityEngagementEnabled ? 1 : 0,
-          capabilities.catalogEnabled ? 1 : 0,
-          capabilities.humanAssistanceEnabled ? 1 : 0,
-          now,
-          input.botId,
-        );
-    });
-    update();
+        .run(input.continuedConversationsEnabled ? 1 : 0, now, input.botId);
+    })();
     return this.getBot(input.botId) as BotRecord;
   }
-
   public updateBotWhatsAppStatus(
     botId: string,
     status: string,
@@ -5602,12 +1715,12 @@ export class AppDatabase {
       const result = this.db
         .prepare(
           `INSERT INTO assistant_profiles(
-             profile_key, bot_id, internal_name, organization_name, bot_name, activation_alias,
+             profile_key, bot_id, internal_name, organization_name, bot_name,
              description, organization_type, industry, objective, allowed_topics, excluded_topics,
              tone, out_of_scope_message, no_information_message, limit_message, ai_error_message,
-             medical_message, mention_prompt_message, contact_information, business_hours, address,
+             medical_message, contact_information, business_hours, address,
              timezone, active, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
         )
         .run(
           `profile-${randomUUID()}`,
@@ -5615,7 +1728,6 @@ export class AppDatabase {
           values.internalName,
           values.organizationName,
           values.botName,
-          values.activationAlias,
           values.description,
           values.organizationType,
           values.industry,
@@ -5628,7 +1740,6 @@ export class AppDatabase {
           values.limitMessage,
           values.aiErrorMessage,
           values.medicalMessage,
-          values.mentionPromptMessage,
           values.contactInformation,
           values.businessHours,
           values.address,
@@ -5644,17 +1755,6 @@ export class AppDatabase {
            VALUES (?, 0, 'groq', ?, ?)`,
         )
         .run(profileId, now, botId);
-      if (botId === 'neurobot') {
-        this.db
-          .prepare(
-            `UPDATE ai_settings SET user_hourly_limit = 20, user_daily_limit = 50,
-             user_cooldown_seconds = 0, group_hourly_limit = 150, group_daily_limit = 500,
-             global_daily_limit = 500, global_monthly_limit = 10000,
-             interaction_hourly_limit = 60, interaction_cooldown_seconds = 3,
-             duplicate_query_window_seconds = 15 WHERE profile_id = ?`,
-          )
-          .run(profileId);
-      }
       this.db
         .prepare(
           `INSERT INTO provider_health(profile_id, provider, connection_status, updated_at, bot_id)
@@ -5674,11 +1774,11 @@ export class AppDatabase {
       this.db
         .prepare(
           `UPDATE assistant_profiles SET
-             internal_name = ?, organization_name = ?, bot_name = ?, activation_alias = ?,
+             internal_name = ?, organization_name = ?, bot_name = ?,
              description = ?, organization_type = ?, industry = ?, objective = ?,
              allowed_topics = ?, excluded_topics = ?, tone = ?, out_of_scope_message = ?,
              no_information_message = ?, limit_message = ?, ai_error_message = ?,
-             medical_message = ?, mention_prompt_message = ?, community_greeting_message = ?, contact_information = ?,
+             medical_message = ?, contact_information = ?,
              business_hours = ?, address = ?, timezone = ?, updated_at = ?
            WHERE id = ?`,
         )
@@ -5686,7 +1786,6 @@ export class AppDatabase {
           values.internalName,
           values.organizationName,
           values.botName,
-          values.activationAlias,
           values.description,
           values.organizationType,
           values.industry,
@@ -5699,8 +1798,6 @@ export class AppDatabase {
           values.limitMessage,
           values.aiErrorMessage,
           values.medicalMessage,
-          values.mentionPromptMessage,
-          values.communityGreetingMessage,
           values.contactInformation,
           values.businessHours,
           values.address,
@@ -5766,8 +1863,6 @@ export class AppDatabase {
       this.db
         .prepare('UPDATE assistant_profiles SET active = 1, updated_at = ? WHERE id = ?')
         .run(now, id);
-      if (owner.bot_id === 'neurobot')
-        this.db.prepare('UPDATE linked_groups SET profile_id = ?').run(id);
       this.db
         .prepare(
           `INSERT INTO bot_profiles(bot_id, profile_id, created_at, updated_at)
@@ -6247,88 +2342,6 @@ export class AppDatabase {
       .run(now, now, owner.bot_id, entryId).changes;
   }
 
-  public registerCommunityInteraction(input: {
-    botId: string;
-    profileId: number;
-    userHash: string;
-    queryHash: string;
-    localDate: string;
-    hourBucket: string;
-    now?: Date;
-  }):
-    | { allowed: true }
-    | {
-        allowed: false;
-        reason: 'DUPLICATE_QUERY' | 'INTERACTION_COOLDOWN' | 'INTERACTION_HOURLY_LIMIT';
-      } {
-    const register = this.db.transaction(() => {
-      const now = input.now ?? new Date();
-      const nowIso = now.toISOString();
-      const settings = this.getAISettings(input.profileId);
-      this.db
-        .prepare('DELETE FROM bot_interaction_usage WHERE last_activation_at < ?')
-        .run(new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString());
-      const latest = this.db
-        .prepare(
-          `SELECT last_activation_at, last_query_at, last_query_hash FROM bot_interaction_usage
-         WHERE bot_id = ? AND user_hash = ? ORDER BY last_activation_at DESC LIMIT 1`,
-        )
-        .get(input.botId, input.userHash) as
-        | {
-            last_activation_at: string;
-            last_query_at: string;
-            last_query_hash: string;
-          }
-        | undefined;
-      if (
-        latest !== undefined &&
-        latest.last_query_hash === input.queryHash &&
-        now.getTime() - new Date(latest.last_query_at).getTime() <
-          settings.duplicateQueryWindowSeconds * 1000
-      ) {
-        return { allowed: false as const, reason: 'DUPLICATE_QUERY' as const };
-      }
-      if (
-        latest !== undefined &&
-        now.getTime() - new Date(latest.last_activation_at).getTime() <
-          settings.interactionCooldownSeconds * 1000
-      ) {
-        return { allowed: false as const, reason: 'INTERACTION_COOLDOWN' as const };
-      }
-      const hourly = this.db
-        .prepare(
-          `SELECT activations FROM bot_interaction_usage
-         WHERE bot_id = ? AND user_hash = ? AND local_date = ? AND hour_bucket = ?`,
-        )
-        .get(input.botId, input.userHash, input.localDate, input.hourBucket) as
-        { activations: number } | undefined;
-      if ((hourly?.activations ?? 0) >= settings.interactionHourlyLimit) {
-        return { allowed: false as const, reason: 'INTERACTION_HOURLY_LIMIT' as const };
-      }
-      this.db
-        .prepare(
-          `INSERT INTO bot_interaction_usage(
-           bot_id, user_hash, local_date, hour_bucket, activations,
-           last_activation_at, last_query_hash, last_query_at
-         ) VALUES (?, ?, ?, ?, 1, ?, ?, ?)
-         ON CONFLICT(bot_id, user_hash, local_date, hour_bucket) DO UPDATE SET
-           activations = activations + 1, last_activation_at = excluded.last_activation_at,
-           last_query_hash = excluded.last_query_hash, last_query_at = excluded.last_query_at`,
-        )
-        .run(
-          input.botId,
-          input.userHash,
-          input.localDate,
-          input.hourBucket,
-          nowIso,
-          input.queryHash,
-          nowIso,
-        );
-      return { allowed: true as const };
-    });
-    return register();
-  }
-
   public getAISettings(profileId: number): AISettings {
     const row = this.db.prepare('SELECT * FROM ai_settings WHERE profile_id = ?').get(profileId) as
       Record<string, number | string> | undefined;
@@ -6346,7 +2359,7 @@ export class AppDatabase {
            response_max_chars = ?, response_max_lines = ?, temperature = ?,
            user_hourly_limit = ?, user_daily_limit = ?, user_cooldown_seconds = ?,
            interaction_hourly_limit = ?, interaction_cooldown_seconds = ?,
-           duplicate_query_window_seconds = ?, group_hourly_limit = ?, group_daily_limit = ?, global_daily_limit = ?,
+           duplicate_query_window_seconds = ?, conversation_hourly_limit = ?, conversation_daily_limit = ?, global_daily_limit = ?,
            global_monthly_limit = ?, global_daily_token_limit = ?,
            global_monthly_token_limit = ?, timeout_ms = ?, updated_at = ? WHERE profile_id = ?`,
       )
@@ -6366,8 +2379,8 @@ export class AppDatabase {
         settings.interactionHourlyLimit,
         settings.interactionCooldownSeconds,
         settings.duplicateQueryWindowSeconds,
-        settings.groupHourlyLimit,
-        settings.groupDailyLimit,
+        settings.conversationHourlyLimit,
+        settings.conversationDailyLimit,
         settings.globalDailyLimit,
         settings.globalMonthlyLimit,
         settings.globalDailyTokenLimit,
@@ -6660,7 +2673,7 @@ export class AppDatabase {
     botId?: string;
     profileId: number;
     userHash: string;
-    groupHash: string;
+    conversationHash: string;
     localDate: string;
     localMonth: string;
     hourBucket: string;
@@ -6724,33 +2737,39 @@ export class AppDatabase {
         return { allowed: false, code: 'AI_LIMIT_USER_HOURLY_REACHED' };
       if (user.daily + pendingUser.daily >= settings.userDailyLimit)
         return { allowed: false, code: 'AI_LIMIT_USER_DAILY_REACHED' };
-      const group = this.db
+      const conversation = this.db
         .prepare(
           `SELECT COALESCE(SUM(requests), 0) AS daily,
              COALESCE(SUM(CASE WHEN hour_bucket = ? THEN requests ELSE 0 END), 0) AS hourly
-           FROM ai_usage_by_group
-           WHERE profile_id = ? AND group_hash = ? AND local_date = ?`,
+           FROM ai_usage_by_conversation
+           WHERE profile_id = ? AND conversation_hash = ? AND local_date = ?`,
         )
-        .get(input.hourBucket, input.profileId, input.groupHash, input.localDate) as {
+        .get(input.hourBucket, input.profileId, input.conversationHash, input.localDate) as {
         daily: number;
         hourly: number;
       };
-      const pendingGroup = this.db
+      const pendingConversation = this.db
         .prepare(
           `SELECT COUNT(*) AS daily,
              COALESCE(SUM(CASE WHEN hour_bucket = ? THEN 1 ELSE 0 END), 0) AS hourly
            FROM ai_request_reservations
-           WHERE profile_id = ? AND group_hash = ? AND local_date = ?
+           WHERE profile_id = ? AND conversation_hash = ? AND local_date = ?
              AND status = 'PENDING' AND expires_at > ?`,
         )
-        .get(input.hourBucket, input.profileId, input.groupHash, input.localDate, nowIso) as {
+        .get(
+          input.hourBucket,
+          input.profileId,
+          input.conversationHash,
+          input.localDate,
+          nowIso,
+        ) as {
         daily: number;
         hourly: number;
       };
-      if (group.hourly + pendingGroup.hourly >= settings.groupHourlyLimit)
-        return { allowed: false, code: 'AI_LIMIT_GROUP_HOURLY_REACHED' };
-      if (group.daily + pendingGroup.daily >= settings.groupDailyLimit)
-        return { allowed: false, code: 'AI_LIMIT_GROUP_DAILY_REACHED' };
+      if (conversation.hourly + pendingConversation.hourly >= settings.conversationHourlyLimit)
+        return { allowed: false, code: 'AI_LIMIT_CONVERSATION_HOURLY_REACHED' };
+      if (conversation.daily + pendingConversation.daily >= settings.conversationDailyLimit)
+        return { allowed: false, code: 'AI_LIMIT_CONVERSATION_DAILY_REACHED' };
       const daily = this.db
         .prepare(
           'SELECT requests, total_tokens FROM ai_usage_daily WHERE profile_id = ? AND local_date = ?',
@@ -6812,7 +2831,7 @@ export class AppDatabase {
       this.db
         .prepare(
           `INSERT INTO ai_request_reservations(
-             id, profile_id, user_hash, group_hash, local_date, local_month, hour_bucket,
+             id, profile_id, user_hash, conversation_hash, local_date, local_month, hour_bucket,
              bot_id,
              estimated_input_tokens, reserved_output_tokens, status, created_at, expires_at
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
@@ -6821,7 +2840,7 @@ export class AppDatabase {
           id,
           input.profileId,
           input.userHash,
-          input.groupHash,
+          input.conversationHash,
           input.localDate,
           input.localMonth,
           input.hourBucket,
@@ -6858,7 +2877,7 @@ export class AppDatabase {
         | {
             profile_id: number;
             user_hash: string;
-            group_hash: string;
+            conversation_hash: string;
             local_date: string;
             local_month: string;
             bot_id: string;
@@ -6870,7 +2889,7 @@ export class AppDatabase {
         this.db
           .prepare(
             `INSERT INTO ai_usage_events(
-             profile_id, local_date, local_month, group_hash, user_hash, result, error_code,
+             profile_id, local_date, local_month, conversation_hash, user_hash, result, error_code,
              input_tokens, output_tokens, total_tokens, created_at, bot_id
            ) VALUES (?, ?, ?, ?, ?, 'failed', ?, 0, 0, 0, ?, ?)`,
           )
@@ -6878,7 +2897,7 @@ export class AppDatabase {
             row.profile_id,
             row.local_date,
             row.local_month,
-            row.group_hash,
+            row.conversation_hash,
             row.user_hash,
             errorCode,
             now,
@@ -6936,18 +2955,18 @@ export class AppDatabase {
         );
       this.db
         .prepare(
-          `INSERT INTO ai_usage_by_group(
-             profile_id, group_hash, local_date, hour_bucket, requests, input_tokens,
+          `INSERT INTO ai_usage_by_conversation(
+             profile_id, conversation_hash, local_date, hour_bucket, requests, input_tokens,
              output_tokens, total_tokens, updated_at, bot_id
            ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
-           ON CONFLICT(profile_id, group_hash, local_date, hour_bucket) DO UPDATE SET
+           ON CONFLICT(profile_id, conversation_hash, local_date, hour_bucket) DO UPDATE SET
              requests = requests + 1, input_tokens = input_tokens + excluded.input_tokens,
              output_tokens = output_tokens + excluded.output_tokens,
              total_tokens = total_tokens + excluded.total_tokens, updated_at = excluded.updated_at`,
         )
         .run(
           row.profile_id,
-          row.group_hash,
+          row.conversation_hash,
           row.local_date,
           hourBucket,
           usage.inputTokens,
@@ -6959,7 +2978,7 @@ export class AppDatabase {
       this.db
         .prepare(
           `INSERT INTO ai_usage_events(
-             profile_id, local_date, local_month, group_hash, user_hash, result, error_code,
+             profile_id, local_date, local_month, conversation_hash, user_hash, result, error_code,
              input_tokens, output_tokens, total_tokens, created_at, bot_id
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
@@ -6967,7 +2986,7 @@ export class AppDatabase {
           row.profile_id,
           row.local_date,
           row.local_month,
-          row.group_hash,
+          row.conversation_hash,
           row.user_hash,
           result,
           errorCode,
@@ -7097,15 +3116,12 @@ export class AppDatabase {
       .all(botId) as Array<{ event_type: string; count: number }>;
     const count = new Map(rows.map((row) => [row.event_type, row.count]));
     const value = (event: string): number => count.get(event) ?? 0;
-    const greetings = value('COMMUNITY_GREETING_LOCAL_RESPONSE');
     const faqs = value('LOCAL_FAQ_RESPONSE');
     const knowledge = value('KNOWLEDGE_DIRECT_RESPONSE');
     const exact = value('ANSWER_CACHE_EXACT_HIT');
     const equivalent = value('ANSWER_CACHE_EQUIVALENT_HIT');
     return {
-      activations: value('REAL_MENTION_RECEIVED') + value('TEXT_ALIAS_RECEIVED'),
-      localResponses: greetings + faqs + knowledge + exact + equivalent,
-      greetings,
+      localResponses: faqs + knowledge + exact + equivalent,
       faqs,
       cacheHits: exact + equivalent,
       directKnowledge: knowledge,
@@ -7115,713 +3131,55 @@ export class AppDatabase {
       quotaRejections: value('AI_LIMIT_REACHED'),
       outOfScope: value('OUT_OF_SCOPE_LOCAL_RESPONSE'),
       noInformation: value('KNOWLEDGE_NOT_FOUND'),
-      avoidedAICalls: greetings + faqs + knowledge + exact + equivalent,
+      avoidedAICalls: faqs + knowledge + exact + equivalent,
       duplicateQueries: value('DUPLICATE_QUERY_SUPPRESSED'),
       coalescedQueries: value('CONCURRENT_QUERY_COALESCED'),
     };
   }
 
   public resetAIUsageForDevelopment(profileId: number): void {
-    const owner = this.db
-      .prepare('SELECT bot_id FROM assistant_profiles WHERE id = ?')
-      .get(profileId) as { bot_id: string } | undefined;
     const reset = this.db.transaction(() => {
       for (const table of [
         'ai_usage_daily',
         'ai_usage_monthly',
         'ai_usage_by_anonymized_user',
-        'ai_usage_by_group',
+        'ai_usage_by_conversation',
         'ai_request_reservations',
         'ai_usage_events',
       ]) {
         this.db.prepare(`DELETE FROM ${table} WHERE profile_id = ?`).run(profileId);
       }
-      if (owner !== undefined) {
-        this.db.prepare('DELETE FROM bot_interaction_usage WHERE bot_id = ?').run(owner.bot_id);
-        this.db
-          .prepare(
-            `DELETE FROM technical_events WHERE bot_id = ? AND event_type IN (
-             'REAL_MENTION_RECEIVED', 'TEXT_ALIAS_RECEIVED', 'COMMUNITY_GREETING_LOCAL_RESPONSE',
-             'LOCAL_FAQ_RESPONSE', 'KNOWLEDGE_DIRECT_RESPONSE', 'ANSWER_CACHE_EXACT_HIT',
-             'ANSWER_CACHE_EQUIVALENT_HIT', 'ANSWER_CACHE_MISS', 'AI_CALL_SUCCESS',
-             'AI_CALL_FAILED', 'AI_LIMIT_REACHED', 'OUT_OF_SCOPE_LOCAL_RESPONSE',
-             'KNOWLEDGE_NOT_FOUND', 'DUPLICATE_QUERY_SUPPRESSED', 'CONCURRENT_QUERY_COALESCED'
-           )`,
-          )
-          .run(owner.bot_id);
-      }
+      this.db
+        .prepare(
+          'DELETE FROM technical_events WHERE bot_id = (SELECT bot_id FROM assistant_profiles WHERE id = ?)',
+        )
+        .run(profileId);
     });
     reset();
   }
 
-  public listLinkedGroups(anonymize: (identifier: string) => string): LinkedGroupRecord[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT linked.group_id, linked.active, linked.last_verified_at,
-             groups.name, groups.bot_is_member, groups.status,
-             CASE WHEN blocked.group_id IS NULL THEN 0 ELSE 1 END AS blocked
-           FROM linked_groups linked
-           JOIN groups ON groups.chat_id = linked.group_id
-           LEFT JOIN blocked_groups blocked ON blocked.group_id = linked.group_id
-           ORDER BY groups.name COLLATE NOCASE`,
-        )
-        .all() as Array<{
-        group_id: string;
-        active: number;
-        last_verified_at: string;
-        name: string;
-        bot_is_member: number | null;
-        status: GroupStatus;
-        blocked: number;
-      }>
-    ).map((row) => ({
-      groupHash: anonymize(row.group_id),
-      name: row.name,
-      active: row.active === 1,
-      blocked: row.blocked === 1,
-      botIsMember: nullableBoolean(row.bot_is_member),
-      status: row.status,
-      lastVerifiedAt: row.last_verified_at,
-    }));
-  }
-
-  public setGroupBlocked(groupId: string, blocked: boolean): boolean {
-    const group = this.getGroupById(groupId);
-    if (group === null) return false;
-    const profile = this.getActiveAssistantProfile();
-    const now = new Date().toISOString();
-    const update = this.db.transaction(() => {
-      if (blocked) {
-        this.db
-          .prepare(
-            `INSERT OR REPLACE INTO blocked_groups(group_id, profile_id, reason, created_at)
-             VALUES (?, ?, 'MANUAL_BLOCK', ?)`,
-          )
-          .run(groupId, profile.id, now);
-        this.db
-          .prepare('UPDATE groups SET authorized = 0, updated_at = ? WHERE chat_id = ?')
-          .run(now, groupId);
-      } else {
-        this.db.prepare('DELETE FROM blocked_groups WHERE group_id = ?').run(groupId);
-        if (group.status === 'ACTIVE' && group.botIsMember === true) {
-          this.db
-            .prepare('UPDATE groups SET authorized = 1, updated_at = ? WHERE chat_id = ?')
-            .run(now, groupId);
-        }
-      }
-    });
-    update();
-    this.setBotGroupBlocked('neurobot', groupId, blocked);
-    return true;
-  }
-
-  public isGroupBlocked(groupId: string): boolean {
-    return (
-      this.db.prepare('SELECT 1 FROM blocked_groups WHERE group_id = ?').get(groupId) !== undefined
-    );
-  }
-
-  public synchronizeBotGroup(
-    botId: string,
-    group: DetectedGroup,
-    now = new Date(),
-  ): { discovered: boolean; autoActivated: boolean; autoDeactivated: boolean } {
-    const existing = this.db
-      .prepare('SELECT active, blocked, status FROM bot_groups WHERE bot_id = ? AND group_id = ?')
-      .get(botId, group.id) as { active: number; blocked: number; status: string } | undefined;
-    const botIsMember = group.botIsMember ?? true;
-    const active = botIsMember && existing?.blocked !== 1;
-    const timestamp = now.toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO bot_groups(
-           bot_id, group_id, name, active, blocked, bot_is_member, status,
-           first_seen_at, last_seen_at, deactivated_at
-         ) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
-         ON CONFLICT(bot_id, group_id) DO UPDATE SET name = excluded.name,
-           active = CASE WHEN bot_groups.blocked = 1 THEN 0 ELSE excluded.active END,
-           bot_is_member = excluded.bot_is_member, status = excluded.status,
-           last_seen_at = excluded.last_seen_at, deactivated_at = excluded.deactivated_at`,
-      )
-      .run(
-        botId,
-        group.id,
-        group.name,
-        active ? 1 : 0,
-        botIsMember ? 1 : 0,
-        botIsMember ? 'ACTIVE' : 'BOT_NOT_MEMBER',
-        timestamp,
-        timestamp,
-        botIsMember ? null : timestamp,
-      );
-    return {
-      discovered: existing === undefined,
-      autoActivated: active && existing?.active !== 1,
-      autoDeactivated: !active && existing?.active === 1,
-    };
-  }
-
-  public markMissingBotGroups(botId: string, seen: Set<string>, now = new Date()): string[] {
-    const rows = this.db
-      .prepare('SELECT group_id, active, last_seen_at FROM bot_groups WHERE bot_id = ?')
-      .all(botId) as Array<{ group_id: string; active: number; last_seen_at: string }>;
-    const deactivated: string[] = [];
-    const confirmationMs = this.getSetting('group_archive_after_hours', 24) * 60 * 60 * 1000;
-    for (const row of rows) {
-      if (seen.has(row.group_id) || row.active !== 1) continue;
-      if (now.getTime() - new Date(row.last_seen_at).getTime() < confirmationMs) continue;
-      this.db
-        .prepare(
-          `UPDATE bot_groups SET active = 0, bot_is_member = 0, status = 'NOT_FOUND',
-             deactivated_at = ? WHERE bot_id = ? AND group_id = ?`,
-        )
-        .run(now.toISOString(), botId, row.group_id);
-      deactivated.push(row.group_id);
-    }
-    return deactivated;
-  }
-
-  public markBotGroupNotMember(botId: string, groupId: string, now = new Date()): boolean {
-    return (
-      this.db
-        .prepare(
-          `UPDATE bot_groups SET active = 0, bot_is_member = 0, status = 'BOT_NOT_MEMBER',
-           deactivated_at = ?, last_seen_at = ? WHERE bot_id = ? AND group_id = ?`,
-        )
-        .run(now.toISOString(), now.toISOString(), botId, groupId).changes === 1
-    );
-  }
-
-  public canBotSendToGroup(botId: string, groupId: string): boolean {
-    const row = this.db
-      .prepare(
-        'SELECT active, blocked, bot_is_member FROM bot_groups WHERE bot_id = ? AND group_id = ?',
-      )
-      .get(botId, groupId) as
-      { active: number; blocked: number; bot_is_member: number | null } | undefined;
-    return row?.active === 1 && row.blocked === 0 && row.bot_is_member === 1;
-  }
-
-  public listActiveBotGroupIds(botId: string): string[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT group_id FROM bot_groups
-           WHERE bot_id = ? AND active = 1 AND blocked = 0 AND bot_is_member = 1
-           ORDER BY name COLLATE NOCASE`,
-        )
-        .all(botId) as Array<{ group_id: string }>
-    ).map((row) => row.group_id);
-  }
-
-  public setBotGroupBlocked(botId: string, groupId: string, blocked: boolean): boolean {
+  public addAdministrator(phoneNumber: string): boolean {
+    const normalized = requireAdministratorPhoneNumber(phoneNumber);
     const result = this.db
-      .prepare(
-        `UPDATE bot_groups SET blocked = ?, active = CASE WHEN ? = 1 THEN 0
-             WHEN bot_is_member = 1 THEN 1 ELSE 0 END
-         WHERE bot_id = ? AND group_id = ?`,
-      )
-      .run(blocked ? 1 : 0, blocked ? 1 : 0, botId, groupId);
-    return result.changes === 1;
-  }
-
-  public listBotGroups(
-    botId: string,
-    anonymize: (identifier: string) => string,
-  ): LinkedGroupRecord[] {
-    return (
-      this.db
-        .prepare('SELECT * FROM bot_groups WHERE bot_id = ? ORDER BY name COLLATE NOCASE')
-        .all(botId) as Array<{
-        group_id: string;
-        name: string;
-        active: number;
-        blocked: number;
-        bot_is_member: number | null;
-        status: GroupStatus;
-        last_seen_at: string;
-      }>
-    ).map((row) => ({
-      groupHash: anonymize(row.group_id),
-      name: row.name,
-      active: row.active === 1,
-      blocked: row.blocked === 1,
-      botIsMember: nullableBoolean(row.bot_is_member),
-      status: row.status,
-      lastVerifiedAt: row.last_seen_at,
-    }));
-  }
-
-  public resolveBotGroupKey(
-    botId: string,
-    key: string,
-    anonymize: (identifier: string) => string,
-  ): string | null {
-    const rows = this.db
-      .prepare('SELECT group_id FROM bot_groups WHERE bot_id = ?')
-      .all(botId) as Array<{ group_id: string }>;
-    return rows.find((row) => anonymize(row.group_id) === key)?.group_id ?? null;
-  }
-
-  public upsertDetectedGroup(id: string, name: string): void {
-    this.synchronizeDetectedGroup({ id, name, botIsMember: true }, true, new Date());
-  }
-
-  public synchronizeDetectedGroup(
-    group: DetectedGroup,
-    hasAuthorizedAdmin: boolean | null,
-    now: Date,
-  ): {
-    discovered: boolean;
-    status: GroupStatus;
-    authorizationRevoked: boolean;
-    autoActivated: boolean;
-    autoDeactivated: boolean;
-  } {
-    const timestamp = now.toISOString();
-    const existing = this.getGroupById(group.id);
-    const botIsMember = group.botIsMember ?? true;
-    const status: GroupStatus = !botIsMember
-      ? 'BOT_NOT_MEMBER'
-      : hasAuthorizedAdmin === false
-        ? 'NO_AUTHORIZED_ADMIN'
-        : 'ACTIVE';
-    const revokeAuthorization = status === 'BOT_NOT_MEMBER';
-    const blocked = this.isGroupBlocked(group.id);
-    const profile = this.getActiveAssistantProfile();
-    const synchronize = this.db.transaction(() => {
-      this.db
-        .prepare(
-          `INSERT INTO groups(
-             chat_id, name, public_name, listed_publicly, authorized, status, bot_is_member,
-             has_authorized_admin, first_seen_at, last_seen_at, last_successful_check_at,
-             missing_since, archived_at, failure_count, last_failure_code, detected_at, updated_at
-           ) VALUES (?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, NULL, ?, ?)
-           ON CONFLICT(chat_id) DO UPDATE SET
-             name = excluded.name,
-             authorized = CASE
-               WHEN excluded.status = 'BOT_NOT_MEMBER' THEN 0
-               WHEN EXISTS(SELECT 1 FROM blocked_groups WHERE group_id = excluded.chat_id) THEN 0
-               ELSE 1 END,
-             status = excluded.status,
-             bot_is_member = excluded.bot_is_member,
-             has_authorized_admin = excluded.has_authorized_admin,
-             last_seen_at = excluded.last_seen_at,
-             last_successful_check_at = excluded.last_successful_check_at,
-             missing_since = NULL,
-             archived_at = NULL,
-             failure_count = 0,
-             last_failure_code = NULL,
-             updated_at = excluded.updated_at`,
-        )
-        .run(
-          group.id,
-          group.name,
-          botIsMember && !blocked ? 1 : 0,
-          status,
-          botIsMember ? 1 : 0,
-          hasAuthorizedAdmin === null ? null : hasAuthorizedAdmin ? 1 : 0,
-          timestamp,
-          timestamp,
-          timestamp,
-          timestamp,
-          timestamp,
-        );
-      this.db
-        .prepare(
-          `INSERT INTO linked_groups(
-             group_id, profile_id, active, first_linked_at, last_verified_at, deactivated_at
-           ) VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT(group_id) DO UPDATE SET profile_id = excluded.profile_id,
-             active = excluded.active, last_verified_at = excluded.last_verified_at,
-             deactivated_at = excluded.deactivated_at`,
-        )
-        .run(
-          group.id,
-          profile.id,
-          botIsMember ? 1 : 0,
-          timestamp,
-          timestamp,
-          botIsMember ? null : timestamp,
-        );
-    });
-    synchronize();
-    this.synchronizeBotGroup('neurobot', group, now);
-    return {
-      discovered: existing === null,
-      status,
-      authorizationRevoked: revokeAuthorization && existing?.authorized === true,
-      autoActivated:
-        botIsMember &&
-        !blocked &&
-        (existing === null || existing.status !== 'ACTIVE' || !existing.authorized),
-      autoDeactivated: !botIsMember && existing?.status === 'ACTIVE',
-    };
-  }
-
-  public listGroups(): GroupRecord[] {
-    return (
-      this.db.prepare('SELECT * FROM groups ORDER BY name COLLATE NOCASE').all() as GroupRow[]
-    ).map(mapGroup);
-  }
-
-  public getGroupById(id: string): GroupRecord | null {
-    const row = this.db.prepare('SELECT * FROM groups WHERE chat_id = ?').get(id) as
-      GroupRow | undefined;
-    return row === undefined ? null : mapGroup(row);
-  }
-
-  public listGroupsByStatus(statuses: GroupStatus[]): GroupRecord[] {
-    if (statuses.length === 0) return [];
-    const placeholders = statuses.map(() => '?').join(',');
-    return (
-      this.db
-        .prepare(
-          `SELECT * FROM groups WHERE status IN (${placeholders}) ORDER BY name COLLATE NOCASE`,
-        )
-        .all(...statuses) as GroupRow[]
-    ).map(mapGroup);
-  }
-
-  public markMissingGroups(
-    seenGroupIds: Set<string>,
-    now: Date,
-  ): {
-    missing: number;
-    archived: number;
-    revoked: number;
-    pendingGroupIds: string[];
-    archivedGroupIds: string[];
-    revokedGroupIds: string[];
-  } {
-    const archiveAfterMs = this.getSetting('group_archive_after_hours', 24) * 60 * 60 * 1000;
-    let missing = 0;
-    let archived = 0;
-    let revoked = 0;
-    const pendingGroupIds: string[] = [];
-    const archivedGroupIds: string[] = [];
-    const revokedGroupIds: string[] = [];
-    const updatePending = this.db.prepare(`
-      UPDATE groups SET status = 'PENDING_RECHECK', missing_since = COALESCE(missing_since, ?),
-        failure_count = failure_count + 1, last_failure_code = 'GROUP_MISSING', updated_at = ?
-      WHERE chat_id = ?
-    `);
-    const updateArchived = this.db.prepare(`
-      UPDATE groups SET status = 'ARCHIVED', authorized = 0, archived_at = ?,
-        failure_count = failure_count + 1, last_failure_code = 'GROUP_NOT_FOUND', updated_at = ?
-      WHERE chat_id = ?
-    `);
-    const operation = this.db.transaction(() => {
-      for (const group of this.listGroups()) {
-        if (
-          seenGroupIds.has(group.id) ||
-          group.status === 'ARCHIVED' ||
-          group.status === 'BOT_NOT_MEMBER'
-        ) {
-          continue;
-        }
-        const missingSince = group.missingSince === null ? now : new Date(group.missingSince);
-        if (now.getTime() - missingSince.getTime() >= archiveAfterMs) {
-          updateArchived.run(now.toISOString(), now.toISOString(), group.id);
-          this.db
-            .prepare(
-              'UPDATE linked_groups SET active = 0, deactivated_at = ?, last_verified_at = ? WHERE group_id = ?',
-            )
-            .run(now.toISOString(), now.toISOString(), group.id);
-          archived += 1;
-          archivedGroupIds.push(group.id);
-          if (group.authorized) {
-            revoked += 1;
-            revokedGroupIds.push(group.id);
-          }
-        } else {
-          updatePending.run(now.toISOString(), now.toISOString(), group.id);
-          this.db
-            .prepare(
-              `UPDATE bot_groups SET active = 0, bot_is_member = NULL,
-                 status = 'PENDING_RECHECK', deactivated_at = ?
-               WHERE bot_id = 'neurobot' AND group_id = ?`,
-            )
-            .run(now.toISOString(), group.id);
-          missing += 1;
-          pendingGroupIds.push(group.id);
-        }
-      }
-    });
-    operation();
-    return {
-      missing,
-      archived,
-      revoked,
-      pendingGroupIds,
-      archivedGroupIds,
-      revokedGroupIds,
-    };
-  }
-
-  public markGroupBotNotMember(id: string, now = new Date()): boolean {
-    const mark = this.db.transaction(() => {
-      const result = this.db
-        .prepare(
-          `UPDATE groups SET status = 'BOT_NOT_MEMBER', bot_is_member = 0, authorized = 0,
-            archived_at = COALESCE(archived_at, ?), last_failure_code = 'BOT_NOT_MEMBER', updated_at = ?
-           WHERE chat_id = ?`,
-        )
-        .run(now.toISOString(), now.toISOString(), id);
-      this.db
-        .prepare(
-          'UPDATE linked_groups SET active = 0, deactivated_at = ?, last_verified_at = ? WHERE group_id = ?',
-        )
-        .run(now.toISOString(), now.toISOString(), id);
-      this.markBotGroupNotMember('neurobot', id, now);
-      return result.changes === 1;
-    });
-    return mark();
-  }
-
-  public archiveGroup(id: string, now = new Date()): boolean {
-    const archive = this.db.transaction(() => {
-      const changed =
-        this.db
-          .prepare(
-            `
-          UPDATE groups SET status = 'ARCHIVED', authorized = 0,
-            archived_at = COALESCE(archived_at, ?), updated_at = ? WHERE chat_id = ?
-        `,
-          )
-          .run(now.toISOString(), now.toISOString(), id).changes === 1;
-      this.db
-        .prepare(
-          'UPDATE linked_groups SET active = 0, deactivated_at = ?, last_verified_at = ? WHERE group_id = ?',
-        )
-        .run(now.toISOString(), now.toISOString(), id);
-      this.db
-        .prepare(
-          `UPDATE bot_groups SET active = 0, status = 'ARCHIVED', deactivated_at = ?
-           WHERE bot_id = 'neurobot' AND group_id = ?`,
-        )
-        .run(now.toISOString(), id);
-      return changed;
-    });
-    return archive();
-  }
-
-  public restoreGroup(id: string, now = new Date()): boolean {
-    return (
-      this.db
-        .prepare(
-          `
-          UPDATE groups SET status = 'PENDING_RECHECK', archived_at = NULL,
-            missing_since = NULL, failure_count = 0, last_failure_code = NULL, updated_at = ?
-          WHERE chat_id = ? AND status = 'ARCHIVED'
-        `,
-        )
-        .run(now.toISOString(), id).changes === 1
-    );
-  }
-
-  public deleteGroupRecord(id: string): boolean {
-    const remove = this.db.transaction(() => {
-      this.db.prepare('DELETE FROM silences WHERE group_id = ?').run(id);
-      this.db.prepare('DELETE FROM automatic_group_backoff WHERE group_id = ?').run(id);
-      this.db.prepare('DELETE FROM scheduled_message_deliveries WHERE group_id = ?').run(id);
-      this.db.prepare('DELETE FROM poll_send_history WHERE group_id = ?').run(id);
-      this.db
-        .prepare(
-          "DELETE FROM bot_automatic_group_backoff WHERE bot_id = 'neurobot' AND group_id = ?",
-        )
-        .run(id);
-      this.db
-        .prepare(
-          "DELETE FROM bot_scheduled_message_deliveries WHERE bot_id = 'neurobot' AND group_id = ?",
-        )
-        .run(id);
-      this.db
-        .prepare("DELETE FROM bot_poll_send_history WHERE bot_id = 'neurobot' AND group_id = ?")
-        .run(id);
-      this.db.prepare("DELETE FROM bot_groups WHERE bot_id = 'neurobot' AND group_id = ?").run(id);
-      this.db.prepare('DELETE FROM blocked_groups WHERE group_id = ?').run(id);
-      this.db.prepare('DELETE FROM linked_groups WHERE group_id = ?').run(id);
-      return this.db.prepare('DELETE FROM groups WHERE chat_id = ?').run(id).changes === 1;
-    });
-    return remove();
-  }
-
-  public deleteBotGroupRecord(botId: string, groupId: string): boolean {
-    if (botId === 'neurobot' && this.getGroupById(groupId) !== null) {
-      return this.deleteGroupRecord(groupId);
-    }
-    const remove = this.db.transaction(() => {
-      this.db
-        .prepare('DELETE FROM bot_automatic_group_backoff WHERE bot_id = ? AND group_id = ?')
-        .run(botId, groupId);
-      this.db
-        .prepare('DELETE FROM bot_scheduled_message_deliveries WHERE bot_id = ? AND group_id = ?')
-        .run(botId, groupId);
-      this.db
-        .prepare('DELETE FROM bot_poll_send_history WHERE bot_id = ? AND group_id = ?')
-        .run(botId, groupId);
-      return (
-        this.db
-          .prepare('DELETE FROM bot_groups WHERE bot_id = ? AND group_id = ?')
-          .run(botId, groupId).changes === 1
-      );
-    });
-    return remove();
-  }
-
-  public removeInactiveBotGroupsMissingFromScan(botId: string, seen: Set<string>): string[] {
-    const candidates = this.db
-      .prepare(
-        `SELECT group_id FROM bot_groups
-         WHERE bot_id = ? AND active = 0
-           AND status IN ('PENDING_RECHECK', 'NOT_FOUND', 'BOT_NOT_MEMBER')`,
-      )
-      .all(botId) as Array<{ group_id: string }>;
-    const removed: string[] = [];
-    for (const candidate of candidates) {
-      if (seen.has(candidate.group_id)) continue;
-      if (this.deleteBotGroupRecord(botId, candidate.group_id)) removed.push(candidate.group_id);
-    }
-    return removed;
-  }
-
-  public setGroupPublicListing(id: string, listed: boolean, publicName: string | null): boolean {
-    const result = this.db
-      .prepare(
-        `
-        UPDATE groups SET listed_publicly = ?, public_name = ?, updated_at = ? WHERE chat_id = ?
-      `,
-      )
-      .run(listed ? 1 : 0, publicName, new Date().toISOString(), id);
-    return result.changes === 1;
-  }
-
-  public listPublicOperationalGroups(): GroupRecord[] {
-    return this.listGroups().filter(
-      (group) => group.listedPublicly && group.status === 'ACTIVE' && group.botIsMember === true,
-    );
-  }
-
-  public canAuthorizeGroup(id: string): boolean {
-    const group = this.getGroupById(id);
-    return (
-      group !== null &&
-      group.status === 'ACTIVE' &&
-      group.botIsMember === true &&
-      !this.isGroupBlocked(id)
-    );
-  }
-
-  public canSendToGroup(id: string): boolean {
-    const group = this.getGroupById(id);
-    return (
-      group !== null &&
-      group.authorized &&
-      group.status === 'ACTIVE' &&
-      group.botIsMember === true &&
-      !this.isGroupBlocked(id)
-    );
-  }
-
-  public setGroupAuthorized(id: string, authorized: boolean): boolean {
-    if (authorized && !this.canAuthorizeGroup(id)) return false;
-    const result = this.db
-      .prepare('UPDATE groups SET authorized = ?, updated_at = ? WHERE chat_id = ?')
-      .run(authorized ? 1 : 0, new Date().toISOString(), id);
-    return result.changes === 1;
-  }
-
-  public isGroupAuthorized(id: string): boolean {
-    const row = this.db.prepare('SELECT authorized FROM groups WHERE chat_id = ?').get(id) as
-      { authorized: number } | undefined;
-    return row?.authorized === 1;
-  }
-
-  public previewGroupCleanup(now = new Date()): {
-    archiveCandidates: GroupRecord[];
-    deleteCandidates: GroupRecord[];
-  } {
-    const archiveBefore =
-      now.getTime() - this.getSetting('group_archive_after_hours', 24) * 60 * 60 * 1000;
-    const deleteBefore =
-      now.getTime() - this.getSetting('group_delete_after_days', 30) * 24 * 60 * 60 * 1000;
-    const groups = this.listGroups();
-    return {
-      archiveCandidates: groups.filter(
-        (group) =>
-          group.status === 'PENDING_RECHECK' &&
-          group.missingSince !== null &&
-          new Date(group.missingSince).getTime() <= archiveBefore,
-      ),
-      deleteCandidates: groups.filter(
-        (group) =>
-          group.status === 'ARCHIVED' &&
-          group.archivedAt !== null &&
-          new Date(group.archivedAt).getTime() <= deleteBefore,
-      ),
-    };
-  }
-
-  public cleanupInactiveGroups(
-    now = new Date(),
-    deleteExpired = this.getSetting('group_auto_delete_enabled', false),
-  ): { archived: number; deleted: number; orphanedSchedules: number } {
-    const preview = this.previewGroupCleanup(now);
-    let archived = 0;
-    let deleted = 0;
-    const cleanup = this.db.transaction(() => {
-      for (const group of preview.archiveCandidates) {
-        if (this.archiveGroup(group.id, now)) archived += 1;
-      }
-      if (deleteExpired) {
-        for (const group of preview.deleteCandidates) {
-          if (this.deleteGroupRecord(group.id)) deleted += 1;
-        }
-      }
-      const result = this.db
-        .prepare(
-          `
-        DELETE FROM scheduled_message_deliveries
-        WHERE group_id NOT IN (SELECT chat_id FROM groups)
-      `,
-        )
-        .run();
-      this.db
-        .prepare(
-          `DELETE FROM bot_scheduled_message_deliveries
-           WHERE bot_id = 'neurobot' AND group_id NOT IN (SELECT chat_id FROM groups)`,
-        )
-        .run();
-      return result.changes;
-    });
-    const orphanedSchedules = cleanup();
-    return { archived, deleted, orphanedSchedules };
-  }
-
-  public addAdministrator(participantId: string): boolean {
-    const normalized = requireAdministratorId(participantId);
-    const result = this.db
-      .prepare('INSERT OR IGNORE INTO administrators(participant_id, created_at) VALUES (?, ?)')
+      .prepare('INSERT OR IGNORE INTO administrators(phone_number, created_at) VALUES (?, ?)')
       .run(normalized, new Date().toISOString());
     return result.changes === 1;
   }
 
-  public removeAdministrator(participantId: string): boolean {
-    const normalized = canonicalPhoneIdentity(participantId);
+  public removeAdministrator(phoneNumber: string): boolean {
+    const normalized = canonicalPhoneIdentity(phoneNumber);
     if (normalized === null) return false;
     return (
-      this.db.prepare('DELETE FROM administrators WHERE participant_id = ?').run(normalized)
+      this.db.prepare('DELETE FROM administrators WHERE phone_number = ?').run(normalized)
         .changes === 1
     );
   }
 
-  public isAdministrator(participantId: string): boolean {
-    const normalized = canonicalPhoneIdentity(participantId);
+  public isAdministrator(phoneNumber: string): boolean {
+    const normalized = canonicalPhoneIdentity(phoneNumber);
     if (normalized === null) return false;
     return (
-      this.db.prepare('SELECT 1 FROM administrators WHERE participant_id = ?').get(normalized) !==
+      this.db.prepare('SELECT 1 FROM administrators WHERE phone_number = ?').get(normalized) !==
       undefined
     );
   }
@@ -7836,171 +3194,11 @@ export class AppDatabase {
   public listAdministrators(): string[] {
     return (
       this.db
-        .prepare('SELECT participant_id FROM administrators ORDER BY created_at')
+        .prepare('SELECT phone_number FROM administrators ORDER BY created_at')
         .all() as Array<{
-        participant_id: string;
+        phone_number: string;
       }>
-    ).map((row) => row.participant_id);
-  }
-
-  public listCommands(): CommandRecord[] {
-    return (
-      this.db.prepare('SELECT * FROM commands ORDER BY priority DESC, name').all() as CommandRow[]
-    ).map(mapCommand);
-  }
-
-  public getCommand(name: string): CommandRecord | null {
-    const row = this.db.prepare('SELECT * FROM commands WHERE name = ?').get(name) as
-      CommandRow | undefined;
-    return row === undefined ? null : mapCommand(row);
-  }
-
-  public getDefaultCommandResponse(name: string): string | null {
-    return BRIEF_COMMAND_DEFAULTS_BY_NAME.get(name)?.response ?? null;
-  }
-
-  public restoreCommandDefault(name: string): CommandRecord | null {
-    const defaultCommand = BRIEF_COMMAND_DEFAULTS_BY_NAME.get(name);
-    if (defaultCommand === undefined) return null;
-    const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        `
-        UPDATE commands SET response = ?, enabled = 1, custom = 0, updated_at = ? WHERE name = ?
-      `,
-      )
-      .run(defaultCommand.response, now, name);
-    if (result.changes !== 1) return null;
-    if (name === 'reglas') {
-      this.db
-        .prepare(
-          `
-          UPDATE automatic_message_templates
-          SET content = ?, customized = 0, updated_at = ? WHERE template_key = ?
-        `,
-        )
-        .run(defaultCommand.response, now, AUTOMATIC_TEMPLATE_KEYS.dailyRules);
-    }
-    return this.getCommand(name);
-  }
-
-  public getCommandById(id: number): CommandRecord | null {
-    const row = this.db.prepare('SELECT * FROM commands WHERE id = ?').get(id) as
-      CommandRow | undefined;
-    return row === undefined ? null : mapCommand(row);
-  }
-
-  public saveCommand(input: {
-    id?: number;
-    name: string;
-    response: string;
-    enabled: boolean;
-    priority: number;
-    healthRelated: boolean;
-  }): CommandRecord {
-    const now = new Date().toISOString();
-    if (input.id === undefined) {
-      const result = this.db
-        .prepare(
-          `
-          INSERT INTO commands
-            (name, response, enabled, essential, custom, priority, health_related, created_at, updated_at)
-          VALUES (?, ?, ?, 0, 1, ?, ?, ?, ?)
-        `,
-        )
-        .run(
-          input.name,
-          input.response,
-          input.enabled ? 1 : 0,
-          input.priority,
-          input.healthRelated ? 1 : 0,
-          now,
-          now,
-        );
-      return this.getCommandById(Number(result.lastInsertRowid)) as CommandRecord;
-    }
-
-    const result = this.db
-      .prepare(
-        `
-        UPDATE commands
-        SET name = ?, response = ?, enabled = ?, priority = ?, health_related = ?, custom = 1,
-            updated_at = ?
-        WHERE id = ?
-      `,
-      )
-      .run(
-        input.name,
-        input.response,
-        input.enabled ? 1 : 0,
-        input.priority,
-        input.healthRelated ? 1 : 0,
-        now,
-        input.id,
-      );
-    if (result.changes !== 1) throw new Error('El comando no existe.');
-    if (input.name === 'reglas') {
-      this.db
-        .prepare(
-          `
-          UPDATE automatic_message_templates
-          SET content = ?, customized = 1, updated_at = ? WHERE template_key = ?
-        `,
-        )
-        .run(input.response, now, AUTOMATIC_TEMPLATE_KEYS.dailyRules);
-    }
-    return this.getCommandById(input.id) as CommandRecord;
-  }
-
-  public deleteCommand(id: number): boolean {
-    const command = this.getCommandById(id);
-    if (command === null) return false;
-    if (command.essential) throw new Error('Los comandos esenciales no se pueden eliminar.');
-    return this.db.prepare('DELETE FROM commands WHERE id = ?').run(id).changes === 1;
-  }
-
-  public listKeywords(): KeywordRecord[] {
-    return (
-      this.db.prepare('SELECT * FROM keywords ORDER BY priority DESC, term').all() as KeywordRow[]
-    ).map(mapKeyword);
-  }
-
-  public replaceKeywords(
-    commandId: number,
-    values: Array<{ term: string; priority: number; enabled: boolean }>,
-  ): void {
-    const replace = this.db.transaction(() => {
-      this.db.prepare('DELETE FROM keywords WHERE command_id = ?').run(commandId);
-      const insert = this.db.prepare(
-        'INSERT INTO keywords(command_id, term, priority, enabled) VALUES (?, ?, ?, ?)',
-      );
-      for (const value of values) {
-        insert.run(commandId, value.term, value.priority, value.enabled ? 1 : 0);
-      }
-    });
-    replace();
-  }
-
-  public setSilence(groupId: string, until: Date): void {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO silences(group_id, until_at, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT(group_id) DO UPDATE SET until_at = excluded.until_at, updated_at = excluded.updated_at`,
-      )
-      .run(groupId, until.toISOString(), now);
-  }
-
-  public getSilenceRemainingMs(groupId: string, now = new Date()): number {
-    const row = this.db.prepare('SELECT until_at FROM silences WHERE group_id = ?').get(groupId) as
-      { until_at: string } | undefined;
-    if (row === undefined) return 0;
-    const remaining = new Date(row.until_at).getTime() - now.getTime();
-    if (remaining <= 0) {
-      this.db.prepare('DELETE FROM silences WHERE group_id = ?').run(groupId);
-      return 0;
-    }
-    return remaining;
+    ).map((row) => row.phone_number);
   }
 
   public recordTechnicalEvent(event: TechnicalEvent): void {
@@ -8008,30 +3206,23 @@ export class AppDatabase {
       .prepare(
         `
         INSERT INTO technical_events
-          (created_at, event_type, activation_type, command_name, group_hash, user_hash, result,
-           duration_ms, error_code, item_count, source, template_id, category, local_date, local_time,
-           attempt, bot_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (bot_id, event_type, source, activation_type, conversation_hash, customer_hash,
+           result, duration_ms, error_code, item_count, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       )
       .run(
-        new Date().toISOString(),
+        event.botId ?? null,
         event.eventType,
+        event.source ?? null,
         event.activationType ?? null,
-        event.commandName ?? null,
-        event.groupHash ?? null,
-        event.userHash ?? null,
+        event.conversationHash ?? null,
+        event.customerHash ?? null,
         event.result,
         event.durationMs ?? null,
         event.errorCode ?? null,
         event.itemCount ?? null,
-        event.source ?? null,
-        event.templateId ?? null,
-        event.category ?? null,
-        event.localDate ?? null,
-        event.localTime ?? null,
-        event.attempt ?? null,
-        event.botId ?? null,
+        new Date().toISOString(),
       );
   }
 
@@ -8045,7 +3236,7 @@ export class AppDatabase {
     const boundedLimit = Math.min(500, Math.max(1, Math.trunc(limit)));
     const rows = this.db
       .prepare(
-        `SELECT id, created_at, event_type, source, user_hash, group_hash, result, error_code,
+        `SELECT id, created_at, event_type, source, customer_hash, conversation_hash, result, error_code,
                 duration_ms
          FROM technical_events
          WHERE bot_id = ?
@@ -8057,8 +3248,8 @@ export class AppDatabase {
       created_at: string;
       event_type: string;
       source: string | null;
-      user_hash: string | null;
-      group_hash: string | null;
+      customer_hash: string | null;
+      conversation_hash: string | null;
       result: string;
       error_code: string | null;
       duration_ms: number | null;
@@ -8068,8 +3259,8 @@ export class AppDatabase {
       occurredAt: row.created_at,
       eventType: row.event_type,
       source: row.source,
-      userHash: row.user_hash,
-      groupHash: row.group_hash,
+      customerHash: row.customer_hash,
+      conversationHash: row.conversation_hash,
       result: row.result,
       errorCode: row.error_code,
       durationMs: row.duration_ms,
@@ -8098,974 +3289,6 @@ export class AppDatabase {
       )
       .run(username, passwordHash, now, now);
   }
-
-  public getGroupModerationProfile(assistantId: string, groupHash: string): GroupModerationProfile {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO group_moderation_profiles(assistant_id,group_hash,created_at,updated_at)
-      VALUES(?,?,?,?)`,
-      )
-      .run(assistantId, groupHash, now, now);
-    const row = this.db
-      .prepare('SELECT * FROM group_moderation_profiles WHERE assistant_id=? AND group_hash=?')
-      .get(assistantId, groupHash) as Record<string, unknown>;
-    return mapGroupModerationProfile(row);
-  }
-
-  public listGroupModerationProfiles(assistantId: string): GroupModerationProfile[] {
-    return (
-      this.db
-        .prepare(
-          'SELECT * FROM group_moderation_profiles WHERE assistant_id=? ORDER BY updated_at DESC',
-        )
-        .all(assistantId) as Array<Record<string, unknown>>
-    ).map(mapGroupModerationProfile);
-  }
-
-  public saveGroupModerationDraft(
-    assistantId: string,
-    groupHash: string,
-    rulesText: string,
-    rulesHash: string,
-  ): GroupModerationProfile {
-    const current = this.getGroupModerationProfile(assistantId, groupHash);
-    const changed = current.rulesHash !== rulesHash;
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `UPDATE group_moderation_profiles SET rules_text=?,rules_hash=?,enabled=CASE WHEN ? THEN 0 ELSE enabled END,
-      analysis_status=CASE WHEN ? THEN 'OUTDATED' ELSE analysis_status END,test_status=CASE WHEN ? THEN 'PENDING' ELSE test_status END,
-      activated_at=CASE WHEN ? THEN NULL ELSE activated_at END,updated_at=? WHERE assistant_id=? AND group_hash=?`,
-      )
-      .run(
-        rulesText,
-        rulesHash,
-        changed ? 1 : 0,
-        changed ? 1 : 0,
-        changed ? 1 : 0,
-        changed ? 1 : 0,
-        now,
-        assistantId,
-        groupHash,
-      );
-    return this.getGroupModerationProfile(assistantId, groupHash);
-  }
-
-  public markGroupModerationAnalyzing(assistantId: string, groupHash: string): void {
-    this.getGroupModerationProfile(assistantId, groupHash);
-    this.db
-      .prepare(
-        `UPDATE group_moderation_profiles SET enabled=0,analysis_status='ANALYZING',test_status='PENDING',updated_at=?
-      WHERE assistant_id=? AND group_hash=?`,
-      )
-      .run(new Date().toISOString(), assistantId, groupHash);
-  }
-
-  public failGroupModerationAnalysis(assistantId: string, groupHash: string): void {
-    this.db
-      .prepare(
-        `UPDATE group_moderation_profiles SET enabled=0,analysis_status='ANALYSIS_FAILED',test_status='FAILED',updated_at=?
-      WHERE assistant_id=? AND group_hash=?`,
-      )
-      .run(new Date().toISOString(), assistantId, groupHash);
-  }
-
-  public saveCompiledGroupModeration(input: {
-    assistantId: string;
-    groupHash: string;
-    rulesHash: string;
-    compiled: Record<string, unknown>;
-    summary: Record<string, unknown>;
-    provider: string;
-    model: string;
-    inputTokens: number;
-    outputTokens: number;
-  }): GroupModerationProfile {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `UPDATE group_moderation_profiles SET enabled=0,rules_hash=?,compiled_json=?,compiled_summary_json=?,provider=?,model=?,
-      input_tokens=?,output_tokens=?,analysis_status='PENDING_TESTS',test_status='PENDING',last_analyzed_at=?,last_tested_at=NULL,activated_at=NULL,updated_at=?
-      WHERE assistant_id=? AND group_hash=?`,
-      )
-      .run(
-        input.rulesHash,
-        JSON.stringify(input.compiled),
-        JSON.stringify(input.summary),
-        input.provider,
-        input.model,
-        input.inputTokens,
-        input.outputTokens,
-        now,
-        now,
-        input.assistantId,
-        input.groupHash,
-      );
-    this.db
-      .prepare('DELETE FROM group_moderation_tests WHERE assistant_id=? AND group_hash=?')
-      .run(input.assistantId, input.groupHash);
-    return this.getGroupModerationProfile(input.assistantId, input.groupHash);
-  }
-
-  public recordGroupModerationTest(input: {
-    assistantId: string;
-    groupHash: string;
-    rulesHash: string;
-    testType: 'AUTOMATIC' | 'MANUAL_ALLOWED' | 'MANUAL_WARNING';
-    expected: 'ALLOW' | 'WARNING';
-    actual: 'ALLOW' | 'WARNING' | 'ERROR';
-    category?: string | null;
-    passed: boolean;
-  }): void {
-    this.db
-      .prepare(
-        `INSERT INTO group_moderation_tests(assistant_id,group_hash,rules_hash,test_type,expected_result,actual_result,category,passed,created_at)
-      VALUES(?,?,?,?,?,?,?,?,?)`,
-      )
-      .run(
-        input.assistantId,
-        input.groupHash,
-        input.rulesHash,
-        input.testType,
-        input.expected,
-        input.actual,
-        input.category ?? null,
-        input.passed ? 1 : 0,
-        new Date().toISOString(),
-      );
-  }
-
-  public listGroupModerationTests(
-    assistantId: string,
-    groupHash: string,
-    rulesHash: string,
-  ): Array<Record<string, unknown>> {
-    return this.db
-      .prepare(
-        `SELECT test_type AS testType,expected_result AS expected,actual_result AS actual,category,passed,created_at AS createdAt
-      FROM group_moderation_tests WHERE assistant_id=? AND group_hash=? AND rules_hash=? ORDER BY id`,
-      )
-      .all(assistantId, groupHash, rulesHash) as Array<Record<string, unknown>>;
-  }
-
-  public updateGroupModerationTestStatus(
-    assistantId: string,
-    groupHash: string,
-    approved: boolean,
-  ): GroupModerationProfile {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `UPDATE group_moderation_profiles SET enabled=0,test_status=?,analysis_status=?,last_tested_at=?,updated_at=?
-      WHERE assistant_id=? AND group_hash=?`,
-      )
-      .run(
-        approved ? 'APPROVED' : 'FAILED',
-        approved ? 'READY' : 'PENDING_TESTS',
-        now,
-        now,
-        assistantId,
-        groupHash,
-      );
-    return this.getGroupModerationProfile(assistantId, groupHash);
-  }
-
-  public setGroupModerationEnabled(
-    assistantId: string,
-    groupHash: string,
-    enabled: boolean,
-  ): GroupModerationProfile {
-    const profile = this.getGroupModerationProfile(assistantId, groupHash);
-    if (
-      enabled &&
-      (profile.analysisStatus !== 'READY' ||
-        profile.testStatus !== 'APPROVED' ||
-        profile.compiled === null)
-    )
-      throw new Error('MODERATION_TESTS_REQUIRED');
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `UPDATE group_moderation_profiles SET enabled=?,analysis_status=?,activated_at=?,updated_at=? WHERE assistant_id=? AND group_hash=?`,
-      )
-      .run(
-        enabled ? 1 : 0,
-        enabled ? 'ACTIVE' : profile.compiled === null ? 'DRAFT' : 'READY',
-        enabled ? now : null,
-        now,
-        assistantId,
-        groupHash,
-      );
-    return this.getGroupModerationProfile(assistantId, groupHash);
-  }
-
-  public replaceGroupModerationRecipients(
-    assistantId: string,
-    groupHash: string,
-    recipients: Array<{ administratorHash: string; encryptedIdentifier: string }>,
-  ): void {
-    const now = new Date().toISOString();
-    const replace = this.db.transaction(() => {
-      this.db
-        .prepare(
-          'DELETE FROM group_moderation_admin_recipients WHERE assistant_id=? AND group_hash=?',
-        )
-        .run(assistantId, groupHash);
-      const statement = this.db.prepare(
-        `INSERT INTO group_moderation_admin_recipients(assistant_id,group_hash,administrator_hash,encrypted_identifier,enabled,created_at,updated_at) VALUES(?,?,?,?,1,?,?)`,
-      );
-      for (const recipient of recipients)
-        statement.run(
-          assistantId,
-          groupHash,
-          recipient.administratorHash,
-          recipient.encryptedIdentifier,
-          now,
-          now,
-        );
-    });
-    replace();
-  }
-
-  public listGroupModerationRecipients(
-    assistantId: string,
-    groupHash: string,
-  ): Array<{ administratorHash: string; encryptedIdentifier: string }> {
-    return this.db
-      .prepare(
-        `SELECT administrator_hash AS administratorHash,encrypted_identifier AS encryptedIdentifier FROM group_moderation_admin_recipients
-      WHERE assistant_id=? AND group_hash=? AND enabled=1 ORDER BY created_at`,
-      )
-      .all(assistantId, groupHash) as Array<{
-      administratorHash: string;
-      encryptedIdentifier: string;
-    }>;
-  }
-
-  public getModerationSettings(assistantId: string): ModerationSettings {
-    this.ensureModerationSettings(assistantId);
-    const row = this.db
-      .prepare('SELECT * FROM assistant_moderation_settings WHERE assistant_id=?')
-      .get(assistantId) as Record<string, unknown>;
-    return {
-      enabled: row.enabled === 1,
-      defaultGroupMode: String(row.default_group_mode) as ModerationGroupMode,
-      reviewThreshold: Number(row.review_threshold),
-      warningThreshold: Number(row.warning_threshold),
-      adminNotificationThreshold: Number(row.admin_notification_threshold),
-      recurrenceWindowDays: Number(row.recurrence_window_days),
-      warningCooldownMinutes: Number(row.warning_cooldown_minutes),
-      publicWarningLimit: Number(row.public_warning_limit),
-      publicWarningWindowMinutes: Number(row.public_warning_window_minutes),
-      temporaryEvidenceEnabled: row.temporary_evidence_enabled === 1,
-      temporaryEvidenceHours: Number(row.temporary_evidence_hours),
-      warningMode: String(row.warning_mode) as ModerationSettings['warningMode'],
-      automaticAIReviewEnabled: false,
-      manualAIReviewEnabled: false,
-      automaticBanEnabled: false,
-      automaticDeletionEnabled: false,
-      firstWarningMessage: String(row.first_warning_message),
-      secondWarningMessage: String(row.second_warning_message),
-      repeatedWarningMessage: String(row.repeated_warning_message),
-    };
-  }
-
-  public saveModerationSettings(
-    assistantId: string,
-    settings: ModerationSettings,
-  ): ModerationSettings {
-    this.ensureModerationSettings(assistantId);
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `UPDATE assistant_moderation_settings SET enabled=?,default_group_mode=?,review_threshold=?,warning_threshold=?,
-      admin_notification_threshold=?,recurrence_window_days=?,warning_cooldown_minutes=?,public_warning_limit=?,
-      public_warning_window_minutes=?,temporary_evidence_enabled=?,temporary_evidence_hours=?,warning_mode=?,
-      automatic_ai_review_enabled=0,manual_ai_review_enabled=0,automatic_ban_enabled=0,automatic_deletion_enabled=0,
-      first_warning_message=?,second_warning_message=?,repeated_warning_message=?,updated_at=? WHERE assistant_id=?`,
-      )
-      .run(
-        settings.enabled ? 1 : 0,
-        settings.defaultGroupMode,
-        settings.reviewThreshold,
-        settings.warningThreshold,
-        settings.adminNotificationThreshold,
-        settings.recurrenceWindowDays,
-        settings.warningCooldownMinutes,
-        settings.publicWarningLimit,
-        settings.publicWarningWindowMinutes,
-        settings.temporaryEvidenceEnabled ? 1 : 0,
-        settings.temporaryEvidenceHours,
-        settings.warningMode,
-        settings.firstWarningMessage,
-        settings.secondWarningMessage,
-        settings.repeatedWarningMessage,
-        now,
-        assistantId,
-      );
-    return this.getModerationSettings(assistantId);
-  }
-
-  public listModerationGroupSettings(
-    assistantId: string,
-  ): Array<{ groupHash: string; mode: ModerationGroupMode; enabled: boolean }> {
-    return (
-      this.db
-        .prepare(
-          'SELECT group_hash,mode,enabled FROM assistant_group_moderation_settings WHERE assistant_id=? ORDER BY group_hash',
-        )
-        .all(assistantId) as Array<Record<string, unknown>>
-    ).map((row) => ({
-      groupHash: String(row.group_hash),
-      mode: String(row.mode) as ModerationGroupMode,
-      enabled: row.enabled === 1,
-    }));
-  }
-
-  public saveModerationGroupSettings(
-    assistantId: string,
-    groupHash: string,
-    mode: ModerationGroupMode,
-  ): void {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO assistant_group_moderation_settings(assistant_id,group_hash,mode,enabled,created_at,updated_at)
-      VALUES(?,?,?,?,?,?) ON CONFLICT(assistant_id,group_hash) DO UPDATE SET mode=excluded.mode,enabled=excluded.enabled,updated_at=excluded.updated_at`,
-      )
-      .run(assistantId, groupHash, mode, mode === 'DISABLED' ? 0 : 1, now, now);
-  }
-
-  public listModerationRules(assistantId: string, includeDisabled = true): ModerationRule[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM moderation_rules WHERE assistant_id=? ${includeDisabled ? '' : 'AND enabled=1'} ORDER BY id`,
-      )
-      .all(assistantId) as Array<Record<string, unknown>>;
-    return rows.map((row) => this.mapModerationRule(row));
-  }
-
-  public getModerationRule(assistantId: string, ruleId: number): ModerationRule | null {
-    const row = this.db
-      .prepare('SELECT * FROM moderation_rules WHERE assistant_id=? AND id=?')
-      .get(assistantId, ruleId) as Record<string, unknown> | undefined;
-    return row === undefined ? null : this.mapModerationRule(row);
-  }
-
-  public createModerationRule(
-    assistantId: string,
-    input: Omit<ModerationRule, 'id' | 'assistantId' | 'createdAt' | 'updatedAt'>,
-  ): ModerationRule {
-    if (input.enabled && input.conditions.filter((condition) => condition.enabled).length === 0)
-      throw new Error('MODERATION_RULE_REQUIRES_CONDITION');
-    const create = this.db.transaction(() => {
-      const now = new Date().toISOString();
-      const result = this.db
-        .prepare(
-          `INSERT INTO moderation_rules(assistant_id,name,description,category,severity,detection_type,score,
-        review_threshold,warning_threshold,admin_notification_threshold,enabled,applies_to_all_groups,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        )
-        .run(
-          assistantId,
-          input.name,
-          input.description,
-          input.category,
-          input.severity,
-          input.detectionType,
-          input.score,
-          input.reviewThreshold,
-          input.warningThreshold,
-          input.adminNotificationThreshold,
-          input.enabled ? 1 : 0,
-          input.appliesToAllGroups ? 1 : 0,
-          now,
-          now,
-        );
-      const ruleId = Number(result.lastInsertRowid);
-      this.replaceModerationConditions(ruleId, input.conditions, input.exceptions, now);
-      return ruleId;
-    });
-    return this.getModerationRule(assistantId, create()) as ModerationRule;
-  }
-
-  public updateModerationRule(
-    assistantId: string,
-    ruleId: number,
-    input: Omit<ModerationRule, 'id' | 'assistantId' | 'createdAt' | 'updatedAt'>,
-  ): ModerationRule {
-    if (this.getModerationRule(assistantId, ruleId) === null)
-      throw new Error('MODERATION_RULE_NOT_FOUND');
-    if (input.enabled && input.conditions.filter((condition) => condition.enabled).length === 0)
-      throw new Error('MODERATION_RULE_REQUIRES_CONDITION');
-    const update = this.db.transaction(() => {
-      const now = new Date().toISOString();
-      this.db
-        .prepare(
-          `UPDATE moderation_rules SET name=?,description=?,category=?,severity=?,detection_type=?,score=?,review_threshold=?,
-        warning_threshold=?,admin_notification_threshold=?,enabled=?,applies_to_all_groups=?,updated_at=? WHERE assistant_id=? AND id=?`,
-        )
-        .run(
-          input.name,
-          input.description,
-          input.category,
-          input.severity,
-          input.detectionType,
-          input.score,
-          input.reviewThreshold,
-          input.warningThreshold,
-          input.adminNotificationThreshold,
-          input.enabled ? 1 : 0,
-          input.appliesToAllGroups ? 1 : 0,
-          now,
-          assistantId,
-          ruleId,
-        );
-      this.db.prepare('DELETE FROM moderation_rule_conditions WHERE rule_id=?').run(ruleId);
-      this.db.prepare('DELETE FROM moderation_rule_exceptions WHERE rule_id=?').run(ruleId);
-      this.replaceModerationConditions(ruleId, input.conditions, input.exceptions, now);
-    });
-    update();
-    return this.getModerationRule(assistantId, ruleId) as ModerationRule;
-  }
-
-  public deleteModerationRule(assistantId: string, ruleId: number): boolean {
-    return (
-      this.db
-        .prepare('DELETE FROM moderation_rules WHERE assistant_id=? AND id=?')
-        .run(assistantId, ruleId).changes === 1
-    );
-  }
-
-  public listModerationTerms(assistantId: string): Array<Record<string, unknown>> {
-    return this.db
-      .prepare(
-        `SELECT id,rule_id AS ruleId,term,normalized_term AS normalizedTerm,category,severity,match_mode AS matchMode,
-      score,enabled,created_at AS createdAt,updated_at AS updatedAt FROM moderation_terms WHERE assistant_id=? ORDER BY id`,
-      )
-      .all(assistantId) as Array<Record<string, unknown>>;
-  }
-
-  public createModerationTerm(
-    assistantId: string,
-    input: {
-      ruleId: number | null;
-      term: string;
-      normalizedTerm: string;
-      category: string;
-      severity: ModerationSeverity;
-      matchMode: string;
-      score: number;
-      enabled: boolean;
-    },
-  ): Record<string, unknown> {
-    const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        `INSERT INTO moderation_terms(assistant_id,rule_id,term,normalized_term,category,severity,match_mode,score,enabled,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-      )
-      .run(
-        assistantId,
-        input.ruleId,
-        input.term,
-        input.normalizedTerm,
-        input.category,
-        input.severity,
-        input.matchMode,
-        input.score,
-        input.enabled ? 1 : 0,
-        now,
-        now,
-      );
-    return this.db
-      .prepare(
-        'SELECT id,rule_id AS ruleId,term,normalized_term AS normalizedTerm,category,severity,match_mode AS matchMode,score,enabled FROM moderation_terms WHERE id=?',
-      )
-      .get(result.lastInsertRowid) as Record<string, unknown>;
-  }
-
-  public deleteModerationTerm(assistantId: string, termId: number): boolean {
-    return (
-      this.db
-        .prepare('DELETE FROM moderation_terms WHERE assistant_id=? AND id=?')
-        .run(assistantId, termId).changes === 1
-    );
-  }
-
-  public createModerationCase(input: {
-    assistantId: string;
-    groupHash: string;
-    participantHash: string;
-    messageHash: string;
-    category: string;
-    matchedRuleIds: number[];
-    score: number;
-    severity: ModerationSeverity;
-    warningNumber: number;
-    warningSentAt: string | null;
-    adminNotifiedAt: string | null;
-    encryptedEvidence: string | null;
-    evidenceExpiresAt: string | null;
-  }): number | null {
-    const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        `INSERT OR IGNORE INTO moderation_cases(assistant_id,group_hash,participant_hash,message_hash,category,matched_rule_ids,
-      score,severity,warning_number,status,warning_sent_at,admin_notified_at,encrypted_temporary_evidence,evidence_expires_at,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,'PENDING',?,?,?,?,?,?)`,
-      )
-      .run(
-        input.assistantId,
-        input.groupHash,
-        input.participantHash,
-        input.messageHash,
-        input.category,
-        JSON.stringify(input.matchedRuleIds),
-        input.score,
-        input.severity,
-        input.warningNumber,
-        input.warningSentAt,
-        input.adminNotifiedAt,
-        input.encryptedEvidence,
-        input.evidenceExpiresAt,
-        now,
-        now,
-      );
-    return result.changes === 1 ? Number(result.lastInsertRowid) : null;
-  }
-
-  public listModerationCases(assistantId: string, status?: string): Array<Record<string, unknown>> {
-    this.expireModerationEvidence(assistantId);
-    this.anonymizeExpiredModerationCases(assistantId);
-    const rows = this.db
-      .prepare(
-        `SELECT id,group_hash AS groupHash,participant_hash AS participantHash,message_hash AS messageHash,category,
-      matched_rule_ids AS matchedRuleIds,score,severity,warning_number AS warningNumber,status,warning_sent_at AS warningSentAt,
-      admin_notified_at AS adminNotifiedAt,reviewed_at AS reviewedAt,decision,evidence_expires_at AS evidenceExpiresAt,created_at AS createdAt,
-      updated_at AS updatedAt FROM moderation_cases WHERE assistant_id=? ${status === undefined ? '' : 'AND status=?'} ORDER BY created_at DESC LIMIT 500`,
-      )
-      .all(...(status === undefined ? [assistantId] : [assistantId, status])) as Array<
-      Record<string, unknown>
-    >;
-    return rows.map((row) => ({
-      ...row,
-      matchedRuleIds: parseNumberArray(String(row.matchedRuleIds)),
-    }));
-  }
-
-  public reviewModerationCase(
-    assistantId: string,
-    caseId: number,
-    decision: 'CONFIRMED' | 'FALSE_POSITIVE' | 'DISMISSED' | 'RESOLVED',
-  ): boolean {
-    const now = new Date().toISOString();
-    return (
-      this.db
-        .prepare(
-          `UPDATE moderation_cases SET status=?,decision=?,reviewed_at=?,updated_at=? WHERE assistant_id=? AND id=?`,
-        )
-        .run(decision, decision, now, now, assistantId, caseId).changes === 1
-    );
-  }
-
-  public getModerationEvidence(
-    assistantId: string,
-    caseId: number,
-  ): { encrypted: string; messageHash: string; expiresAt: string } | null {
-    this.expireModerationEvidence(assistantId);
-    const row = this.db
-      .prepare(
-        `SELECT encrypted_temporary_evidence AS encrypted,message_hash AS messageHash,evidence_expires_at AS expiresAt
-      FROM moderation_cases WHERE assistant_id=? AND id=? AND encrypted_temporary_evidence IS NOT NULL`,
-      )
-      .get(assistantId, caseId) as
-      { encrypted: string; messageHash: string; expiresAt: string } | undefined;
-    return row ?? null;
-  }
-
-  public getModerationRecurrence(
-    assistantId: string,
-    groupHash: string,
-    participantHash: string,
-  ): { activeCount: number; lastWarningAt: string | null; expiresAt: string } | null {
-    const row = this.db
-      .prepare(
-        'SELECT active_count,last_warning_at,expires_at FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?',
-      )
-      .get(assistantId, groupHash, participantHash) as
-      { active_count: number; last_warning_at: string | null; expires_at: string } | undefined;
-    if (row === undefined) return null;
-    if (Date.parse(row.expires_at) <= Date.now()) {
-      this.db
-        .prepare(
-          'DELETE FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?',
-        )
-        .run(assistantId, groupHash, participantHash);
-      return null;
-    }
-    return {
-      activeCount: row.active_count,
-      lastWarningAt: row.last_warning_at,
-      expiresAt: row.expires_at,
-    };
-  }
-
-  public saveModerationRecurrence(
-    assistantId: string,
-    groupHash: string,
-    participantHash: string,
-    activeCount: number,
-    lastWarningAt: string | null,
-    expiresAt: string,
-  ): void {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO moderation_recurrence(assistant_id,group_hash,participant_hash,active_count,window_started_at,last_warning_at,expires_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(assistant_id,group_hash,participant_hash) DO UPDATE SET active_count=excluded.active_count,
-      last_warning_at=excluded.last_warning_at,expires_at=excluded.expires_at,updated_at=excluded.updated_at`,
-      )
-      .run(
-        assistantId,
-        groupHash,
-        participantHash,
-        activeCount,
-        now,
-        lastWarningAt,
-        expiresAt,
-        now,
-      );
-  }
-
-  public resetModerationRecurrence(
-    assistantId: string,
-    groupHash: string,
-    participantHash: string,
-  ): void {
-    this.db
-      .prepare(
-        'DELETE FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?',
-      )
-      .run(assistantId, groupHash, participantHash);
-  }
-
-  public decrementModerationRecurrence(
-    assistantId: string,
-    groupHash: string,
-    participantHash: string,
-  ): void {
-    const recurrence = this.getModerationRecurrence(assistantId, groupHash, participantHash);
-    if (recurrence === null || recurrence.activeCount <= 1) {
-      this.resetModerationRecurrence(assistantId, groupHash, participantHash);
-      return;
-    }
-    this.db
-      .prepare(
-        'UPDATE moderation_recurrence SET active_count=active_count-1,updated_at=? WHERE assistant_id=? AND group_hash=? AND participant_hash=?',
-      )
-      .run(new Date().toISOString(), assistantId, groupHash, participantHash);
-  }
-
-  public incrementModerationMetric(assistantId: string, field: string): void {
-    const columns: Record<string, string> = {
-      reviewed: 'messages_reviewed',
-      allowed: 'messages_allowed',
-      matches: 'matches_detected',
-      warnings: 'warnings_sent',
-      recurrences: 'recurrences_detected',
-      cases: 'admin_cases_created',
-      falsePositives: 'false_positives',
-      confirmed: 'confirmed_cases',
-      errors: 'local_errors',
-    };
-    const column = columns[field];
-    if (column === undefined) throw new Error('MODERATION_METRIC_INVALID');
-    const date = new Date().toISOString().slice(0, 10);
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO moderation_metrics(assistant_id,local_date,${column},created_at,updated_at) VALUES(?,?,1,?,?)
-      ON CONFLICT(assistant_id,local_date) DO UPDATE SET ${column}=${column}+1,updated_at=excluded.updated_at`,
-      )
-      .run(assistantId, date, now, now);
-  }
-
-  public getModerationMetrics(assistantId: string): Record<string, unknown> {
-    const date = new Date().toISOString().slice(0, 10);
-    return (
-      (this.db
-        .prepare(
-          `SELECT messages_reviewed AS messagesReviewed,messages_allowed AS messagesAllowed,matches_detected AS matchesDetected,
-      warnings_sent AS warningsSent,recurrences_detected AS recurrencesDetected,admin_cases_created AS adminCasesCreated,
-      false_positives AS falsePositives,confirmed_cases AS confirmedCases,local_errors AS localErrors,ai_reviews AS aiReviews,ai_tokens AS aiTokens,
-      updated_at AS updatedAt FROM moderation_metrics WHERE assistant_id=? AND local_date=?`,
-        )
-        .get(assistantId, date) as Record<string, unknown> | undefined) ?? {
-        messagesReviewed: 0,
-        messagesAllowed: 0,
-        matchesDetected: 0,
-        warningsSent: 0,
-        recurrencesDetected: 0,
-        adminCasesCreated: 0,
-        falsePositives: 0,
-        confirmedCases: 0,
-        localErrors: 0,
-        aiReviews: 0,
-        aiTokens: 0,
-        updatedAt: null,
-      }
-    );
-  }
-
-  public expireModerationEvidence(assistantId: string): number {
-    const now = new Date().toISOString();
-    return this.db
-      .prepare(
-        `UPDATE moderation_cases SET encrypted_temporary_evidence=NULL,evidence_expires_at=NULL,updated_at=?
-      WHERE assistant_id=? AND encrypted_temporary_evidence IS NOT NULL AND evidence_expires_at<=?`,
-      )
-      .run(now, assistantId, now).changes;
-  }
-
-  public anonymizeExpiredModerationCases(assistantId: string): number {
-    const settings = this.getModerationSettings(assistantId);
-    const cutoff = new Date(Date.now() - settings.recurrenceWindowDays * 86_400_000).toISOString();
-    return this.db
-      .prepare(
-        `UPDATE moderation_cases SET participant_hash='expired:'||id,message_hash='expired:'||id,updated_at=?
-      WHERE assistant_id=? AND created_at<=? AND participant_hash NOT LIKE 'expired:%'`,
-      )
-      .run(new Date().toISOString(), assistantId, cutoff).changes;
-  }
-
-  private ensureModerationSettings(assistantId: string): void {
-    if (this.getBot(assistantId) === null) throw new Error('ASSISTANT_NOT_FOUND');
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        'INSERT OR IGNORE INTO assistant_moderation_settings(assistant_id,created_at,updated_at) VALUES(?,?,?)',
-      )
-      .run(assistantId, now, now);
-  }
-
-  private mapModerationRule(row: Record<string, unknown>): ModerationRule {
-    const ruleId = Number(row.id);
-    const conditions = (
-      this.db
-        .prepare('SELECT * FROM moderation_rule_conditions WHERE rule_id=? ORDER BY id')
-        .all(ruleId) as Array<Record<string, unknown>>
-    ).map((item) => ({
-      id: Number(item.id),
-      conditionType: String(item.condition_type),
-      operator: String(item.operator) as 'ALL' | 'ANY' | 'EXCLUDE',
-      normalizedValue: String(item.normalized_value),
-      configuration: parseSafeJsonObject(String(item.configuration_json)),
-      enabled: item.enabled === 1,
-    }));
-    const exceptions = (
-      this.db
-        .prepare('SELECT * FROM moderation_rule_exceptions WHERE rule_id=? ORDER BY id')
-        .all(ruleId) as Array<Record<string, unknown>>
-    ).map((item) => ({
-      id: Number(item.id),
-      exceptionType: String(item.exception_type),
-      normalizedValue: String(item.normalized_value),
-      enabled: item.enabled === 1,
-    }));
-    return {
-      id: ruleId,
-      assistantId: String(row.assistant_id),
-      name: String(row.name),
-      description: String(row.description),
-      category: String(row.category),
-      severity: String(row.severity) as ModerationSeverity,
-      detectionType: String(row.detection_type),
-      score: Number(row.score),
-      reviewThreshold: Number(row.review_threshold),
-      warningThreshold: Number(row.warning_threshold),
-      adminNotificationThreshold: Number(row.admin_notification_threshold),
-      enabled: row.enabled === 1,
-      appliesToAllGroups: row.applies_to_all_groups === 1,
-      conditions,
-      exceptions,
-      createdAt: String(row.created_at),
-      updatedAt: String(row.updated_at),
-    };
-  }
-
-  private replaceModerationConditions(
-    ruleId: number,
-    conditions: ModerationRule['conditions'],
-    exceptions: ModerationRule['exceptions'],
-    now: string,
-  ): void {
-    const conditionStatement = this.db
-      .prepare(`INSERT INTO moderation_rule_conditions(rule_id,condition_type,operator,normalized_value,configuration_json,enabled,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?)`);
-    for (const condition of conditions)
-      conditionStatement.run(
-        ruleId,
-        condition.conditionType,
-        condition.operator,
-        condition.normalizedValue,
-        JSON.stringify(condition.configuration),
-        condition.enabled ? 1 : 0,
-        now,
-        now,
-      );
-    const exceptionStatement = this.db.prepare(
-      `INSERT INTO moderation_rule_exceptions(rule_id,exception_type,normalized_value,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?)`,
-    );
-    for (const exception of exceptions)
-      exceptionStatement.run(
-        ruleId,
-        exception.exceptionType,
-        exception.normalizedValue,
-        exception.enabled ? 1 : 0,
-        now,
-        now,
-      );
-  }
-}
-
-function mapGroupModerationProfile(row: Record<string, unknown>): GroupModerationProfile {
-  return {
-    assistantId: String(row.assistant_id),
-    groupHash: String(row.group_hash),
-    enabled: row.enabled === 1,
-    rulesText: String(row.rules_text ?? ''),
-    rulesHash: String(row.rules_hash ?? ''),
-    analysisStatus: String(row.analysis_status) as GroupModerationProfile['analysisStatus'],
-    testStatus: String(row.test_status) as GroupModerationProfile['testStatus'],
-    compiled:
-      row.compiled_json === null || row.compiled_json === undefined
-        ? null
-        : parseSafeJsonObject(String(row.compiled_json)),
-    summary:
-      row.compiled_summary_json === null || row.compiled_summary_json === undefined
-        ? null
-        : parseSafeJsonObject(String(row.compiled_summary_json)),
-    provider: row.provider === null || row.provider === undefined ? null : String(row.provider),
-    model: row.model === null || row.model === undefined ? null : String(row.model),
-    inputTokens: Number(row.input_tokens ?? 0),
-    outputTokens: Number(row.output_tokens ?? 0),
-    firstWarningMessage: String(row.first_warning_message),
-    secondWarningMessage: String(row.second_warning_message),
-    recurrenceWindowDays: Number(row.recurrence_window_days),
-    lastAnalyzedAt:
-      row.last_analyzed_at === null || row.last_analyzed_at === undefined
-        ? null
-        : String(row.last_analyzed_at),
-    lastTestedAt:
-      row.last_tested_at === null || row.last_tested_at === undefined
-        ? null
-        : String(row.last_tested_at),
-    activatedAt:
-      row.activated_at === null || row.activated_at === undefined ? null : String(row.activated_at),
-    updatedAt: String(row.updated_at),
-  };
-}
-
-function mapCommand(row: CommandRow): CommandRecord {
-  return {
-    id: row.id,
-    name: row.name,
-    response: row.response,
-    enabled: row.enabled === 1,
-    essential: row.essential === 1,
-    custom: row.custom === 1,
-    priority: row.priority,
-    healthRelated: row.health_related === 1,
-  };
-}
-
-function mapGroup(row: GroupRow): GroupRecord {
-  return {
-    id: row.chat_id,
-    name: row.name,
-    publicName: row.public_name,
-    listedPublicly: row.listed_publicly === 1,
-    authorized: row.authorized === 1,
-    status: row.status,
-    botIsMember: nullableBoolean(row.bot_is_member),
-    hasAuthorizedAdmin: nullableBoolean(row.has_authorized_admin),
-    firstSeenAt: row.first_seen_at ?? row.detected_at,
-    lastSeenAt: row.last_seen_at,
-    lastSuccessfulCheckAt: row.last_successful_check_at,
-    missingSince: row.missing_since,
-    archivedAt: row.archived_at,
-    failureCount: row.failure_count,
-    lastFailureCode: row.last_failure_code,
-    detectedAt: row.detected_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function nullableBoolean(value: number | null): boolean | null {
-  return value === null ? null : value === 1;
-}
-
-function mapKeyword(row: KeywordRow): KeywordRecord {
-  return {
-    id: row.id,
-    commandId: row.command_id,
-    term: row.term,
-    priority: row.priority,
-    enabled: row.enabled === 1,
-  };
-}
-
-function mapScheduledDelivery(row: ScheduledDeliveryRow): ScheduledDeliveryRecord {
-  return {
-    id: row.id,
-    taskType: row.task_type,
-    groupId: row.group_id,
-    localDate: row.local_date,
-    source: row.source,
-    status: row.status,
-    attempts: row.attempts,
-    errorCode: row.error_code,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    sentAt: row.sent_at,
-  };
-}
-
-function mapPollTemplate(row: PollTemplateRow, options: string[]): PollTemplate {
-  return {
-    id: row.id,
-    defaultKey: row.default_key,
-    question: row.question,
-    category: row.category,
-    options,
-    allowMultipleAnswers: row.allow_multiple_answers === 1,
-    enabled: row.enabled === 1,
-    isDefault: row.is_default === 1,
-    favorite: row.favorite === 1,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    lastUsedAt: row.last_used_at,
-    disabledUntil: row.disabled_until,
-  };
-}
-
-function mapPollHistory(row: PollHistoryRow): PollSendHistoryRecord {
-  return {
-    id: row.id,
-    groupId: row.group_id,
-    localDate: row.local_date,
-    templateId: row.template_id,
-    source: row.source,
-    countsAsDaily: row.counts_as_daily === 1,
-    status: row.status,
-    attempts: row.attempts,
-    scheduledAt: row.scheduled_at,
-    attemptedAt: row.attempted_at,
-    sentAt: row.sent_at,
-    failureCode: row.failure_code,
-  };
 }
 
 function mapAssistantProfile(row: AssistantProfileRow): AssistantProfile {
@@ -9074,7 +3297,6 @@ function mapAssistantProfile(row: AssistantProfileRow): AssistantProfile {
     internalName: row.internal_name,
     organizationName: row.organization_name,
     botName: row.bot_name,
-    activationAlias: row.activation_alias,
     description: row.description,
     organizationType: row.organization_type,
     industry: row.industry,
@@ -9087,8 +3309,6 @@ function mapAssistantProfile(row: AssistantProfileRow): AssistantProfile {
     limitMessage: row.limit_message,
     aiErrorMessage: row.ai_error_message,
     medicalMessage: row.medical_message,
-    mentionPromptMessage: row.mention_prompt_message,
-    communityGreetingMessage: row.community_greeting_message,
     contactInformation: row.contact_information,
     businessHours: row.business_hours,
     address: row.address,
@@ -9179,8 +3399,8 @@ function mapAISettings(row: Record<string, number | string>): AISettings {
     interactionHourlyLimit: Number(row.interaction_hourly_limit),
     interactionCooldownSeconds: Number(row.interaction_cooldown_seconds),
     duplicateQueryWindowSeconds: Number(row.duplicate_query_window_seconds),
-    groupHourlyLimit: Number(row.group_hourly_limit),
-    groupDailyLimit: Number(row.group_daily_limit),
+    conversationHourlyLimit: Number(row.conversation_hourly_limit),
+    conversationDailyLimit: Number(row.conversation_daily_limit),
     globalDailyLimit: Number(row.global_daily_limit),
     globalMonthlyLimit: Number(row.global_monthly_limit),
     globalDailyTokenLimit: Number(row.global_daily_token_limit),
@@ -9216,34 +3436,23 @@ function parseSafeObject(value: string): Record<string, string | number | boolea
   }
 }
 
-function parseSafeJsonObject(value: string): Record<string, unknown> {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
-}
-
 function validateAssistantProfile<
   T extends Omit<AssistantProfile, 'id' | 'active' | 'createdAt' | 'updatedAt'>,
 >(input: T): T {
   const organizationTypes: OrganizationType[] = [
-    'Comunidad',
-    'Tienda',
+    'Comercio',
     'Restaurante',
-    'Distribuidora',
-    'Servicio profesional',
-    'Organización social',
-    'Institución educativa',
+    'Servicios',
+    'Salud',
+    'Belleza',
+    'Turismo',
+    'Transporte',
+    'Educación',
+    'Profesional independiente',
     'Otro',
   ];
   if (!organizationTypes.includes(input.organizationType))
     throw new Error('El tipo de organización no es válido.');
-  const activationAlias = validatePlainText(input.activationAlias, 'alias', 80);
-  if (!activationAlias.startsWith('@')) throw new Error('El alias visible debe comenzar con @.');
   const timezone = validateTimezone(input.timezone);
   const logoPath = input.logoPath === null ? null : validateLogoPath(input.logoPath);
   return {
@@ -9251,7 +3460,6 @@ function validateAssistantProfile<
     internalName: validatePlainText(input.internalName, 'nombre interno', 120),
     organizationName: validatePlainText(input.organizationName, 'nombre público', 160),
     botName: validatePlainText(input.botName, 'nombre del bot', 80),
-    activationAlias,
     description: validatePlainText(input.description, 'descripción', 1000),
     industry: validatePlainText(input.industry, 'rubro', 160),
     objective: validatePlainText(input.objective, 'objetivo', 1200),
@@ -9267,12 +3475,6 @@ function validateAssistantProfile<
     limitMessage: validatePlainText(input.limitMessage, 'mensaje de límite', 600),
     aiErrorMessage: validatePlainText(input.aiErrorMessage, 'mensaje de error', 600),
     medicalMessage: validatePlainText(input.medicalMessage, 'mensaje médico', 600),
-    mentionPromptMessage: validatePlainText(input.mentionPromptMessage, 'mensaje de mención', 600),
-    communityGreetingMessage: validatePlainText(
-      input.communityGreetingMessage,
-      'saludo comunitario',
-      1200,
-    ),
     contactInformation: validatePlainText(input.contactInformation, 'contacto', 1000, true),
     businessHours: validatePlainText(input.businessHours, 'horarios', 1000, true),
     address:
@@ -9333,8 +3535,8 @@ function validateAISettings(settings: AISettings): void {
     [settings.userHourlyLimit, 1, 500, 'límite por usuario y hora'],
     [settings.userDailyLimit, 1, 1000, 'límite por usuario y día'],
     [settings.userCooldownSeconds, 0, 3600, 'espera por usuario'],
-    [settings.groupHourlyLimit, 1, 2000, 'límite por grupo y hora'],
-    [settings.groupDailyLimit, 1, 10_000, 'límite por grupo y día'],
+    [settings.conversationHourlyLimit, 1, 2000, 'límite por conversación y hora'],
+    [settings.conversationDailyLimit, 1, 10_000, 'límite por conversación y día'],
     [settings.globalDailyLimit, 1, 100_000, 'límite diario'],
     [settings.globalMonthlyLimit, 1, 1_000_000, 'límite mensual'],
     [settings.globalDailyTokenLimit, 1, 100_000_000, 'tokens diarios'],
@@ -9350,8 +3552,8 @@ function validateAISettings(settings: AISettings): void {
     throw new Error('La temperatura no es válida.');
   if (settings.userDailyLimit < settings.userHourlyLimit)
     throw new Error('El límite diario por usuario no puede ser menor que el límite horario.');
-  if (settings.groupDailyLimit < settings.groupHourlyLimit)
-    throw new Error('El límite diario por grupo no puede ser menor que el límite horario.');
+  if (settings.conversationDailyLimit < settings.conversationHourlyLimit)
+    throw new Error('El límite diario por conversación no puede ser menor que el horario.');
   if (settings.globalMonthlyLimit < settings.globalDailyLimit)
     throw new Error('El límite mensual no puede ser menor que el diario.');
 }
@@ -9517,101 +3719,10 @@ function validateBusinessHour(
   }
 }
 
-function defaultAutomaticConfiguration(timezone: string): AutomaticMessageConfiguration {
-  return {
-    timezone,
-    welcome: { ...DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.welcome, enabled: false },
-    dailyGreeting: {
-      ...DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyGreeting,
-      enabled: false,
-      templates: { ...DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyGreeting.templates },
-    },
-    dailyRules: { ...DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyRules, enabled: false },
-  };
-}
-
-function automaticConfigurationFromLegacy(
-  tasks: Map<string, AutomaticTaskRow>,
-  templates: Map<string, string>,
-  timezone: string,
-): AutomaticMessageConfiguration {
-  const defaults = defaultAutomaticConfiguration(timezone);
-  const welcome = tasks.get('WELCOME');
-  const greeting = tasks.get('DAILY_GREETING');
-  const rules = tasks.get('DAILY_RULES');
-  return {
-    timezone,
-    welcome: {
-      ...defaults.welcome,
-      enabled: welcome?.enabled === 1,
-      batchWindowSeconds: welcome?.batch_window_seconds ?? defaults.welcome.batchWindowSeconds,
-      groupSimultaneous: defaults.welcome.groupSimultaneous,
-      reconciliationIntervalSeconds: defaults.welcome.reconciliationIntervalSeconds,
-      template: templates.get(AUTOMATIC_TEMPLATE_KEYS.welcome) ?? defaults.welcome.template,
-    },
-    dailyGreeting: {
-      enabled: greeting?.enabled === 1,
-      sendTime: greeting?.send_time ?? defaults.dailyGreeting.sendTime,
-      toleranceMinutes: greeting?.tolerance_minutes ?? defaults.dailyGreeting.toleranceMinutes,
-      templates: {
-        monday:
-          templates.get(AUTOMATIC_TEMPLATE_KEYS.greetingMonday) ??
-          defaults.dailyGreeting.templates.monday,
-        weekday:
-          templates.get(AUTOMATIC_TEMPLATE_KEYS.greetingWeekday) ??
-          defaults.dailyGreeting.templates.weekday,
-        friday:
-          templates.get(AUTOMATIC_TEMPLATE_KEYS.greetingFriday) ??
-          defaults.dailyGreeting.templates.friday,
-        weekend:
-          templates.get(AUTOMATIC_TEMPLATE_KEYS.greetingWeekend) ??
-          defaults.dailyGreeting.templates.weekend,
-      },
-    },
-    dailyRules: {
-      enabled: rules?.enabled === 1,
-      sendTime: rules?.send_time ?? defaults.dailyRules.sendTime,
-      toleranceMinutes: rules?.tolerance_minutes ?? defaults.dailyRules.toleranceMinutes,
-      template: templates.get(AUTOMATIC_TEMPLATE_KEYS.dailyRules) ?? defaults.dailyRules.template,
-    },
-  };
-}
-
-function automaticCustomization(
-  configuration: AutomaticMessageConfiguration,
-): Record<string, boolean> {
-  const defaults = DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION;
-  return {
-    [AUTOMATIC_TEMPLATE_KEYS.welcome]: configuration.welcome.template !== defaults.welcome.template,
-    [AUTOMATIC_TEMPLATE_KEYS.dailyRules]:
-      configuration.dailyRules.template !== defaults.dailyRules.template,
-    [AUTOMATIC_TEMPLATE_KEYS.greetingMonday]:
-      configuration.dailyGreeting.templates.monday !== defaults.dailyGreeting.templates.monday,
-    [AUTOMATIC_TEMPLATE_KEYS.greetingWeekday]:
-      configuration.dailyGreeting.templates.weekday !== defaults.dailyGreeting.templates.weekday,
-    [AUTOMATIC_TEMPLATE_KEYS.greetingFriday]:
-      configuration.dailyGreeting.templates.friday !== defaults.dailyGreeting.templates.friday,
-    [AUTOMATIC_TEMPLATE_KEYS.greetingWeekend]:
-      configuration.dailyGreeting.templates.weekend !== defaults.dailyGreeting.templates.weekend,
-  };
-}
-
-function setAutomaticTemplate(
-  configuration: AutomaticMessageConfiguration,
-  templateKey: string,
-  content: string,
-): void {
-  if (templateKey === AUTOMATIC_TEMPLATE_KEYS.welcome) configuration.welcome.template = content;
-  else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.dailyRules)
-    configuration.dailyRules.template = content;
-  else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.greetingMonday)
-    configuration.dailyGreeting.templates.monday = content;
-  else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.greetingWeekday)
-    configuration.dailyGreeting.templates.weekday = content;
-  else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.greetingFriday)
-    configuration.dailyGreeting.templates.friday = content;
-  else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.greetingWeekend)
-    configuration.dailyGreeting.templates.weekend = content;
+function requireAdministratorPhoneNumber(value: string): string {
+  const normalized = canonicalPhoneIdentity(value);
+  if (normalized === null) throw new Error('El número del administrador no es válido.');
+  return normalized;
 }
 
 function validateDate(value: string): string {
@@ -9626,71 +3737,4 @@ function validateDate(value: string): string {
 
 function isTime(value: string): boolean {
   return /^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(value);
-}
-
-function validatePollTemplateContent(
-  questionValue: string,
-  categoryValue: string,
-  optionValues: string[],
-): { question: string; category: string; options: string[] } {
-  const question = validatePollPlainText(questionValue, 'pregunta', 200);
-  const category = validatePollPlainText(categoryValue, 'categoría', 80);
-  if (optionValues.length < 2 || optionValues.length > 12) {
-    throw new Error('Una encuesta debe tener entre 2 y 12 alternativas.');
-  }
-  const options = optionValues.map((option) => validatePollPlainText(option, 'alternativa', 100));
-  const normalized = options.map((option) =>
-    option.normalize('NFKC').trim().toLocaleLowerCase('es'),
-  );
-  if (new Set(normalized).size !== options.length) {
-    throw new Error('Las alternativas de una encuesta no pueden repetirse.');
-  }
-  return { question, category, options };
-}
-
-function validatePollPlainText(value: string, field: string, maximumLength: number): string {
-  const normalized = value.normalize('NFKC').trim();
-  if (normalized.length === 0 || normalized.length > maximumLength) {
-    throw new Error(`La ${field} debe tener entre 1 y ${maximumLength} caracteres.`);
-  }
-  if (/[<>]|```/u.test(normalized) || normalized.includes('\u0000')) {
-    throw new Error(`La ${field} debe contener solamente texto plano.`);
-  }
-  return normalized;
-}
-
-function requireAdministratorId(value: string): string {
-  const normalized = canonicalPhoneIdentity(value);
-  if (normalized === null) throw new Error('El identificador del administrador no es válido.');
-  return normalized;
-}
-
-function operatingModeFor(mode: BotMode): BotOperatingMode {
-  if (mode === 'community') return 'COMMUNITY_GROUPS';
-  if (mode === 'business') return 'BUSINESS_PRIVATE';
-  return 'BUSINESS_MIXED';
-}
-
-function capabilitiesFor(mode: BotMode): BotCapabilities {
-  const community = mode !== 'business';
-  const commercial = mode !== 'community';
-  return {
-    communitySingleTurnMode: community,
-    privateChatsEnabled: commercial,
-    conversationContinuationEnabled: commercial,
-    interactiveMenusEnabled: commercial,
-    numericMenuRepliesEnabled: commercial,
-    pollsAsMenusEnabled: false,
-    pollsForCommunityEngagementEnabled: community,
-    catalogEnabled: commercial,
-    humanAssistanceEnabled: commercial,
-  };
-}
-
-function normalizeActivationAlias(value: string): string {
-  const alias = value.normalize('NFKC').trim().toLocaleLowerCase('es');
-  if (!/^@[\p{L}\p{N}_.-]{2,40}$/u.test(alias)) {
-    throw new Error('Cada alias debe comenzar con @ y contener entre 2 y 40 caracteres válidos.');
-  }
-  return alias;
 }

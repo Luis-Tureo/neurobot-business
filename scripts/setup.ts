@@ -11,7 +11,15 @@ type EnvironmentEntry = {
 };
 
 const destination = resolve(process.cwd(), '.env');
-const deprecatedKeys = new Set(['WHATSAPP_SESSION_PATH', 'CHROME_EXECUTABLE_PATH']);
+const deprecatedKeys = new Set([
+  'WHATSAPP_SESSION_PATH',
+  'CHROME_EXECUTABLE_PATH',
+  'USER_RATE_LIMIT',
+  'GROUP_RATE_LIMIT',
+  'RATE_WINDOW_SECONDS',
+  'USER_COOLDOWN_SECONDS',
+  'REPEAT_WINDOW_SECONDS',
+]);
 
 const entries: EnvironmentEntry[] = [
   { key: 'NODE_ENV', createValue: () => 'development' },
@@ -34,11 +42,6 @@ const entries: EnvironmentEntry[] = [
     replaceWhenBlank: true,
   },
   { key: 'PANEL_INITIAL_PASSWORD', createValue: () => '' },
-  { key: 'USER_RATE_LIMIT', createValue: () => '3' },
-  { key: 'GROUP_RATE_LIMIT', createValue: () => '10' },
-  { key: 'RATE_WINDOW_SECONDS', createValue: () => '60' },
-  { key: 'USER_COOLDOWN_SECONDS', createValue: () => '5' },
-  { key: 'REPEAT_WINDOW_SECONDS', createValue: () => '120' },
   { key: 'MAX_MESSAGE_LENGTH', createValue: () => '2000' },
   { key: 'MAX_RECONNECT_ATTEMPTS', createValue: () => '8' },
   { key: 'MAX_RECONNECT_DELAY_SECONDS', createValue: () => '300' },

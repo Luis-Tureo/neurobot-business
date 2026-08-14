@@ -1,10 +1,7 @@
 import { createHmac } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { buildAdminServer } from '../src/admin/server.js';
-import { ConnectionManager } from '../src/core/connection-manager.js';
-import { GroupDiscoveryService } from '../src/core/group-discovery-service.js';
 import { createLogger } from '../src/infrastructure/logger.js';
-import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { Anonymizer } from '../src/security/anonymizer.js';
 
@@ -20,28 +17,10 @@ describe('webhook oficial de Meta para WhatsApp', () => {
   beforeEach(async () => {
     database = new AppDatabase(':memory:');
     database.migrate();
-    const client = new SimulatedMessagingClient();
     const logger = createLogger('silent');
-    const connectionManager = new ConnectionManager(client, logger, {
-      maxAttempts: 1,
-      maxDelayMs: 10,
-    });
-    const groupDiscovery = new GroupDiscoveryService(
-      client,
-      database,
-      logger,
-      {
-        onLoading: vi.fn(),
-        onLoaded: vi.fn(),
-        onFailure: vi.fn(),
-      },
-      { developmentMode: false },
-    );
     processor = createProcessor();
     app = await buildAdminServer({
       database,
-      connectionManager,
-      groupDiscovery,
       anonymizer: new Anonymizer('a'.repeat(32)),
       logger,
       sessionSecret: 's'.repeat(32),

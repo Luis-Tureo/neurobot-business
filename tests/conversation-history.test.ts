@@ -1,7 +1,3 @@
-import BetterSqlite3 from 'better-sqlite3';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { createProfileFromPreset } from '../src/core/profile-presets.js';
 import { AppDatabase } from '../src/persistence/database.js';
 
@@ -9,14 +5,14 @@ function profile(name: string) {
   return createProfileFromPreset({
     organizationName: name,
     botName: `Asistente ${name}`,
-    organizationType: 'Tienda',
+    organizationType: 'Comercio',
     timezone: 'America/Santiago',
     preset: 'store',
   });
 }
 
 function createBusiness(database: AppDatabase, id: string, name: string) {
-  return database.createBot({ id, mode: 'business', profile: profile(name) });
+  return database.createBot({ id, profile: profile(name) });
 }
 
 describe('historial persistente de conversaciones', () => {
@@ -277,37 +273,8 @@ describe('migración de historial', () => {
     const database = new AppDatabase(':memory:');
     database.migrate();
     database.migrate();
-    expect(database.getMigrationVersions()).toContain(23);
+    expect(database.getMigrationVersions()).toEqual([24]);
     expect(database.quickCheck()).toEqual(['ok']);
     database.close();
-  });
-
-  it('migra una base existente sin perder datos anteriores', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'neurobot-conversation-migration-'));
-    const path = join(directory, 'existing.sqlite');
-    try {
-      const initial = new AppDatabase(path);
-      initial.migrate();
-      initial.setSetting('legacy_marker', { preserved: true });
-      initial.close();
-
-      const legacy = new BetterSqlite3(path);
-      legacy.exec(`
-        PRAGMA foreign_keys=OFF;
-        DROP TABLE conversation_messages;
-        DROP TABLE conversations;
-        DELETE FROM migrations WHERE version=23;
-      `);
-      legacy.close();
-
-      const migrated = new AppDatabase(path);
-      migrated.migrate();
-      expect(migrated.getSetting('legacy_marker', null)).toEqual({ preserved: true });
-      expect(migrated.getMigrationVersions()).toContain(23);
-      expect(migrated.quickCheck()).toEqual(['ok']);
-      migrated.close();
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
   });
 });

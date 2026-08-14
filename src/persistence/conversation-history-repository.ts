@@ -9,7 +9,7 @@ export type ConversationMessageStatus =
 
 export type ConversationRecord = {
   id: string;
-  assistantId: string;
+  assistantId: string | null;
   phoneNumberId: string;
   waId: string;
   contactName: string | null;
@@ -67,7 +67,8 @@ export type PaginatedResult<T> = {
 
 type ConversationRow = {
   id: string;
-  assistant_id: string;
+  assistant_id: string | null;
+  assistant_name_snapshot: string;
   phone_number_id: string;
   wa_id: string;
   contact_name: string | null;
@@ -291,7 +292,8 @@ export class ConversationHistoryRepository {
     parameters.offset = (page - 1) * pageSize;
     const rows = this.database
       .prepare(
-        `SELECT conversations.*,profiles.bot_name AS assistant_name,
+        `SELECT conversations.*,
+           COALESCE(profiles.bot_name,conversations.assistant_name_snapshot) AS assistant_name,
            last_message.direction AS last_direction,
            last_message.message_type AS last_message_type,
            last_message.text_content AS last_text_content,
@@ -299,8 +301,8 @@ export class ConversationHistoryRepository {
            last_message.whatsapp_status AS last_whatsapp_status,
            last_message.message_timestamp AS last_message_timestamp
          FROM conversations
-         JOIN bot_profiles mapping ON mapping.bot_id=conversations.assistant_id
-         JOIN assistant_profiles profiles ON profiles.id=mapping.profile_id
+         LEFT JOIN bot_profiles mapping ON mapping.bot_id=conversations.assistant_id
+         LEFT JOIN assistant_profiles profiles ON profiles.id=mapping.profile_id
          LEFT JOIN conversation_messages last_message ON last_message.id=(
            SELECT candidate.id FROM conversation_messages candidate
            WHERE candidate.conversation_id=conversations.id
@@ -333,12 +335,13 @@ export class ConversationHistoryRepository {
     const normalizedId = requiredText(conversationId, 80, 'conversationId');
     const conversationRow = this.database
       .prepare(
-        `SELECT conversations.*,profiles.bot_name AS assistant_name,
+        `SELECT conversations.*,
+           COALESCE(profiles.bot_name,conversations.assistant_name_snapshot) AS assistant_name,
            NULL AS last_direction,NULL AS last_message_type,NULL AS last_text_content,
            NULL AS last_caption,NULL AS last_whatsapp_status,NULL AS last_message_timestamp
          FROM conversations
-         JOIN bot_profiles mapping ON mapping.bot_id=conversations.assistant_id
-         JOIN assistant_profiles profiles ON profiles.id=mapping.profile_id
+         LEFT JOIN bot_profiles mapping ON mapping.bot_id=conversations.assistant_id
+         LEFT JOIN assistant_profiles profiles ON profiles.id=mapping.profile_id
          WHERE conversations.id=?`,
       )
       .get(normalizedId) as (ConversationRow & Record<string, unknown>) | undefined;
@@ -383,19 +386,30 @@ export class ConversationHistoryRepository {
     now: string;
     activityAt: string;
   }): ConversationRow {
+    const assistant = this.database
+      .prepare(
+        `SELECT profiles.bot_name
+         FROM bot_profiles mapping
+         JOIN assistant_profiles profiles ON profiles.id=mapping.profile_id
+         WHERE mapping.bot_id=?`,
+      )
+      .get(input.assistantId) as { bot_name: string } | undefined;
+    if (assistant === undefined) throw new Error('ASSISTANT_NOT_FOUND');
     this.database
       .prepare(
         `INSERT INTO conversations(
-           id,assistant_id,phone_number_id,wa_id,contact_name,status,
+           id,assistant_id,assistant_name_snapshot,phone_number_id,wa_id,contact_name,status,
            created_at,updated_at,last_message_at
-         ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
          ON CONFLICT(assistant_id,phone_number_id,wa_id) DO UPDATE SET
+           assistant_name_snapshot=excluded.assistant_name_snapshot,
            contact_name=COALESCE(excluded.contact_name,conversations.contact_name),
            status='active',updated_at=excluded.updated_at`,
       )
       .run(
         randomUUID(),
         input.assistantId,
+        assistant.bot_name,
         input.phoneNumberId,
         input.waId,
         input.contactName,

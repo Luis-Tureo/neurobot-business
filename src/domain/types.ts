@@ -8,31 +8,19 @@ export type ConnectionState =
   | 'reconnecting'
   | 'resetting';
 
-export type ActivationType = 'command' | 'mention' | 'reply';
-
 export type IncomingMessage = {
   id: string;
   replyToMessageId?: string;
-  recipientId?: string;
+  businessPhoneNumberId?: string;
   receivedAt?: string;
   chatId: string;
-  participantId: string;
-  administratorId?: string | null;
-  participantIdentityStatus?: 'phone' | 'lid_resolved' | 'lid_unresolved' | 'missing';
+  customerId: string;
   messageType?: string;
   visibleText?: string;
   caption?: string;
   contactName?: string;
-  groupIdSource?: 'from' | 'to';
   body: string;
-  isGroup: boolean;
-  fromMe: boolean;
-  isStatus: boolean;
-  isBroadcast: boolean;
-  isChannel: boolean;
   hasMedia: boolean;
-  mentionsBot: boolean;
-  botMentionToken?: string;
   isReplyToBot: boolean;
 };
 
@@ -58,150 +46,6 @@ export type OutboundMessageAccepted = {
   acceptedAt: string;
 };
 
-export type DetectedGroup = {
-  id: string;
-  name: string;
-  source?: GroupListSource;
-  botIsMember?: boolean | null;
-  participantIds?: string[] | null;
-};
-
-export type GroupListSource = 'GET_CHATS' | 'MINIMAL_CHAT_SNAPSHOT' | 'SIMULATED';
-
-export type GroupStatus =
-  | 'ACTIVE'
-  | 'BOT_NOT_MEMBER'
-  | 'NO_AUTHORIZED_ADMIN'
-  | 'PENDING_RECHECK'
-  | 'NOT_FOUND'
-  | 'INACCESSIBLE'
-  | 'ARCHIVED';
-
-export type GroupChangeEvent = {
-  groupId: string;
-  type: 'JOIN' | 'LEAVE' | 'UPDATE';
-  botAffected: boolean;
-};
-
-export type GroupJoinEvent = {
-  groupId: string;
-  participantIds: string[];
-  participants?: WelcomeParticipant[];
-  eventId?: string;
-  timestamp?: number;
-  source?: 'group_join' | 'notification' | 'reconciliation';
-  subtype?: 'add' | 'invite' | 'linked_group_join' | 'unknown';
-};
-
-export type WelcomeParticipant = {
-  participantId: string;
-  displayName: string | null;
-  nameSource: 'PUSHNAME' | 'FALLBACK';
-  mentionId: string;
-};
-
-export type AutomaticTaskType = 'DAILY_GREETING' | 'DAILY_RULES';
-export type AutomaticMessageType = 'WELCOME' | AutomaticTaskType;
-export type ScheduledDeliveryStatus = 'PENDING' | 'SENT' | 'SKIPPED' | 'FAILED';
-export type DeliverySource = 'scheduled' | 'manual';
-
-export type AutomaticMessageConfiguration = {
-  timezone: string;
-  welcome: {
-    enabled: boolean;
-    batchWindowSeconds: number;
-    groupSimultaneous: boolean;
-    reconciliationIntervalSeconds: number;
-    template: string;
-    includePublicName: boolean;
-    enableRealMention: boolean;
-    unknownNameFallback: string;
-    multipleJoinMode: 'INDIVIDUAL' | 'GROUPED';
-    maximumGroupedNames: number;
-    sendDelaySeconds: number;
-  };
-  dailyGreeting: {
-    enabled: boolean;
-    sendTime: string;
-    toleranceMinutes: number;
-    templates: {
-      monday: string;
-      weekday: string;
-      friday: string;
-      weekend: string;
-    };
-  };
-  dailyRules: {
-    enabled: boolean;
-    sendTime: string;
-    toleranceMinutes: number;
-    template: string;
-  };
-};
-
-export type ScheduledDeliveryRecord = {
-  id: number;
-  taskType: AutomaticMessageType;
-  groupId: string;
-  localDate: string;
-  source: DeliverySource;
-  status: ScheduledDeliveryStatus;
-  attempts: number;
-  errorCode: string | null;
-  createdAt: string;
-  updatedAt: string;
-  sentAt: string | null;
-};
-
-export type CommandRecord = {
-  id: number;
-  name: string;
-  response: string;
-  enabled: boolean;
-  essential: boolean;
-  custom: boolean;
-  priority: number;
-  healthRelated: boolean;
-};
-
-export type KeywordRecord = {
-  id: number;
-  commandId: number;
-  term: string;
-  priority: number;
-  enabled: boolean;
-};
-
-export type GroupRecord = {
-  id: string;
-  name: string;
-  publicName: string | null;
-  listedPublicly: boolean;
-  authorized: boolean;
-  status: GroupStatus;
-  botIsMember: boolean | null;
-  hasAuthorizedAdmin: boolean | null;
-  firstSeenAt: string;
-  lastSeenAt: string | null;
-  lastSuccessfulCheckAt: string | null;
-  missingSince: string | null;
-  archivedAt: string | null;
-  failureCount: number;
-  lastFailureCode: string | null;
-  detectedAt: string;
-  updatedAt: string;
-};
-
-export type GroupSynchronizationSummary = {
-  active: number;
-  discovered: number;
-  archived: number;
-  missing: number;
-  withoutAuthorizedAdmin: number;
-  temporaryErrors: number;
-  source: GroupListSource | null;
-};
-
 export type ConnectionSnapshot = {
   state: ConnectionState;
   lastConnectedAt: string | null;
@@ -209,85 +53,16 @@ export type ConnectionSnapshot = {
   lastErrorCode: string | null;
 };
 
-export type GroupDiscoveryState = 'idle' | 'waiting' | 'loading' | 'ready' | 'failed';
-
-export type GroupDiscoverySnapshot = {
-  state: GroupDiscoveryState;
-  retryAttempt: number;
-  detectedGroups: number;
-  skippedChats: number;
-  lastUpdatedAt: string | null;
-  lastErrorCode: string | null;
-  lastErrorMessage: string | null;
-  summary?: GroupSynchronizationSummary;
-};
-
-export type PollSelectionMode = 'SAME_FOR_ALL' | 'PER_GROUP';
-export type PollDeliverySource = 'scheduled' | 'manual';
-export type PollDeliveryStatus = 'PENDING' | 'SENDING' | 'SENT' | 'FAILED' | 'SKIPPED';
-
-export type NativePoll = {
-  question: string;
-  options: string[];
-  allowMultipleAnswers: boolean;
-};
-
-export type PollTemplate = NativePoll & {
-  id: number;
-  defaultKey: string | null;
-  category: string;
-  enabled: boolean;
-  isDefault: boolean;
-  favorite: boolean;
-  createdAt: string;
-  updatedAt: string;
-  lastUsedAt: string | null;
-  disabledUntil: string | null;
-};
-
-export type HiddenPollTemplate = PollTemplate & {
-  hiddenAt: string;
-  removalReason: string | null;
-};
-
-export type PollConfiguration = {
-  enabled: boolean;
-  sendTime: string;
-  timezone: string;
-  toleranceMinutes: number;
-  selectionMode: PollSelectionMode;
-};
-
-export type PollSendHistoryRecord = {
-  id: number;
-  groupId: string;
-  localDate: string;
-  templateId: number;
-  source: PollDeliverySource;
-  countsAsDaily: boolean;
-  status: PollDeliveryStatus;
-  attempts: number;
-  scheduledAt: string;
-  attemptedAt: string | null;
-  sentAt: string | null;
-  failureCode: string | null;
-};
-
-export type PollDateOverride = {
-  localDate: string;
-  templateId: number;
-  createdAt: string;
-  updatedAt: string;
-};
-
 export type OrganizationType =
-  | 'Comunidad'
-  | 'Tienda'
+  | 'Comercio'
   | 'Restaurante'
-  | 'Distribuidora'
-  | 'Servicio profesional'
-  | 'Organización social'
-  | 'Institución educativa'
+  | 'Servicios'
+  | 'Salud'
+  | 'Belleza'
+  | 'Turismo'
+  | 'Transporte'
+  | 'Educación'
+  | 'Profesional independiente'
   | 'Otro';
 
 export type AssistantProfile = {
@@ -295,7 +70,6 @@ export type AssistantProfile = {
   internalName: string;
   organizationName: string;
   botName: string;
-  activationAlias: string;
   description: string;
   organizationType: OrganizationType;
   industry: string;
@@ -308,8 +82,6 @@ export type AssistantProfile = {
   limitMessage: string;
   aiErrorMessage: string;
   medicalMessage: string;
-  mentionPromptMessage: string;
-  communityGreetingMessage: string;
   contactInformation: string;
   businessHours: string;
   address: string | null;
@@ -408,8 +180,8 @@ export type AISettings = {
   interactionHourlyLimit: number;
   interactionCooldownSeconds: number;
   duplicateQueryWindowSeconds: number;
-  groupHourlyLimit: number;
-  groupDailyLimit: number;
+  conversationHourlyLimit: number;
+  conversationDailyLimit: number;
   globalDailyLimit: number;
   globalMonthlyLimit: number;
   globalDailyTokenLimit: number;
@@ -467,85 +239,6 @@ export type AIQueueMetrics = {
 export type AIProviderHealthState =
   'AVAILABLE' | 'BUSY' | 'RATE_LIMITED' | 'DEGRADED' | 'UNAVAILABLE' | 'NOT_CONFIGURED';
 
-export type ModerationSeverity = 'INFORMATIVA' | 'LEVE' | 'MEDIA' | 'ALTA' | 'CRITICA';
-export type ModerationAction = 'NO_ACTION' | 'ADMIN_REVIEW' | 'WARNING' | 'WARNING_AND_NOTIFY';
-export type ModerationGroupMode = 'INHERIT' | 'ENABLED' | 'DISABLED';
-
-export type ModerationSettings = {
-  enabled: boolean;
-  defaultGroupMode: ModerationGroupMode;
-  reviewThreshold: number;
-  warningThreshold: number;
-  adminNotificationThreshold: number;
-  recurrenceWindowDays: number;
-  warningCooldownMinutes: number;
-  publicWarningLimit: number;
-  publicWarningWindowMinutes: number;
-  temporaryEvidenceEnabled: boolean;
-  temporaryEvidenceHours: number;
-  warningMode: 'GROUP_GENERAL' | 'GROUP_MENTION' | 'ADMIN_ONLY';
-  automaticAIReviewEnabled: false;
-  manualAIReviewEnabled: false;
-  automaticBanEnabled: false;
-  automaticDeletionEnabled: false;
-  firstWarningMessage: string;
-  secondWarningMessage: string;
-  repeatedWarningMessage: string;
-};
-
-export type ModerationCondition = {
-  id: number;
-  conditionType: string;
-  operator: 'ALL' | 'ANY' | 'EXCLUDE';
-  normalizedValue: string;
-  configuration: Record<string, unknown>;
-  enabled: boolean;
-};
-
-export type ModerationException = {
-  id: number;
-  exceptionType: string;
-  normalizedValue: string;
-  enabled: boolean;
-};
-
-export type ModerationRule = {
-  id: number;
-  assistantId: string;
-  name: string;
-  description: string;
-  category: string;
-  severity: ModerationSeverity;
-  detectionType: string;
-  score: number;
-  reviewThreshold: number;
-  warningThreshold: number;
-  adminNotificationThreshold: number;
-  enabled: boolean;
-  appliesToAllGroups: boolean;
-  conditions: ModerationCondition[];
-  exceptions: ModerationException[];
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type ModerationResult = {
-  allowed: boolean;
-  matchedRules: Array<{
-    id: number;
-    name: string;
-    category: string;
-    severity: ModerationSeverity;
-    score: number;
-  }>;
-  categories: string[];
-  totalScore: number;
-  severity: ModerationSeverity;
-  action: ModerationAction;
-  exceptionsApplied: string[];
-  duplicate: boolean;
-};
-
 export type AIProviderStatus = {
   configured: boolean;
   enabled: boolean;
@@ -567,8 +260,8 @@ export type AILimitCode =
   | 'AI_LIMIT_USER_HOURLY_REACHED'
   | 'AI_LIMIT_USER_DAILY_REACHED'
   | 'AI_LIMIT_USER_COOLDOWN'
-  | 'AI_LIMIT_GROUP_HOURLY_REACHED'
-  | 'AI_LIMIT_GROUP_DAILY_REACHED'
+  | 'AI_LIMIT_CONVERSATION_HOURLY_REACHED'
+  | 'AI_LIMIT_CONVERSATION_DAILY_REACHED'
   | 'AI_LIMIT_DAILY_REACHED'
   | 'AI_LIMIT_MONTHLY_REACHED'
   | 'AI_LIMIT_DAILY_TOKENS_REACHED'
@@ -577,20 +270,8 @@ export type AILimitCode =
 export type AIReservationDecision =
   { allowed: true; reservation: AIReservation } | { allowed: false; code: AILimitCode };
 
-export type LinkedGroupRecord = {
-  groupHash: string;
-  name: string;
-  active: boolean;
-  blocked: boolean;
-  botIsMember: boolean | null;
-  status: GroupStatus;
-  lastVerifiedAt: string;
-};
-
-export type BotMode = 'community' | 'business' | 'mixed';
 export type MenuType = 'automatic' | 'native_buttons' | 'native_list' | 'numbered';
 export type ConnectorType = 'WHATSAPP_CLOUD_API';
-export type BotOperatingMode = 'COMMUNITY_GROUPS' | 'BUSINESS_PRIVATE' | 'BUSINESS_MIXED';
 export type AssistantLifecycleStatus =
   | 'DRAFT'
   | 'UNLINKED'
@@ -603,13 +284,10 @@ export type AssistantLifecycleStatus =
   | 'DELETED';
 
 export type BotCapabilities = {
-  communitySingleTurnMode: boolean;
   privateChatsEnabled: boolean;
   conversationContinuationEnabled: boolean;
   interactiveMenusEnabled: boolean;
   numericMenuRepliesEnabled: boolean;
-  pollsAsMenusEnabled: boolean;
-  pollsForCommunityEngagementEnabled: boolean;
   catalogEnabled: boolean;
   humanAssistanceEnabled: boolean;
 };
@@ -618,18 +296,12 @@ export type BotRecord = {
   id: string;
   internalIdentifier: string;
   clientId: string;
-  mode: BotMode;
   connectorType: ConnectorType;
-  operatingMode: BotOperatingMode;
   lifecycleStatus: AssistantLifecycleStatus;
   deletionLocked: boolean;
   deletedAt: string | null;
   scheduledPermanentDeletionAt: string | null;
-  groupChannelEnabled: boolean;
-  privateChannelEnabled: boolean;
-  privateBusinessModeEnabled: boolean;
   activeConnectorId: number | null;
-  connectorMigrationLocked: boolean;
   capabilities: BotCapabilities;
   enabled: boolean;
   profileId: number;
@@ -640,9 +312,6 @@ export type BotRecord = {
   whatsappStatus: string;
   maskedNumber: string | null;
   lastConnectedAt: string | null;
-  groupsEnabled: boolean;
-  privateMessagesEnabled: boolean;
-  realMentionRequired: boolean;
   continuedConversationsEnabled: boolean;
   menuType: MenuType;
   aiCredentialMode: 'global' | 'per_bot';

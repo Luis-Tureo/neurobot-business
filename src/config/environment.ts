@@ -26,11 +26,6 @@ const environmentSchema = z.object({
     (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
     z.string().min(12).max(128).optional(),
   ),
-  USER_RATE_LIMIT: z.coerce.number().int().min(1).max(100).default(3),
-  GROUP_RATE_LIMIT: z.coerce.number().int().min(1).max(500).default(10),
-  RATE_WINDOW_SECONDS: z.coerce.number().int().min(10).max(3600).default(60),
-  USER_COOLDOWN_SECONDS: z.coerce.number().int().min(0).max(3600).default(5),
-  REPEAT_WINDOW_SECONDS: z.coerce.number().int().min(0).max(86_400).default(120),
   MAX_MESSAGE_LENGTH: z.coerce.number().int().min(100).max(10_000).default(2000),
   MAX_RECONNECT_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(8),
   MAX_RECONNECT_DELAY_SECONDS: z.coerce.number().int().min(5).max(3600).default(300),
@@ -43,7 +38,11 @@ const environmentSchema = z.object({
   META_WABA_ID: optionalTrimmedString,
   META_APP_SECRET: optionalMetaSecret,
   META_WEBHOOK_VERIFY_TOKEN: optionalMetaSecret,
-  META_GRAPH_API_VERSION: z.string().trim().regex(/^v\d+\.\d+$/u).default('v25.0'),
+  META_GRAPH_API_VERSION: z
+    .string()
+    .trim()
+    .regex(/^v\d+\.\d+$/u)
+    .default('v25.0'),
   META_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(10_000),
   META_WHATSAPP_ACCOUNTS_JSON: optionalTrimmedString,
   AI_PROVIDER: z.enum(['groq', 'disabled']).default('groq'),
@@ -61,11 +60,6 @@ export type Environment = {
   anonymizationSecret: string;
   panelSessionSecret: string;
   panelInitialPassword?: string;
-  userRateLimit: number;
-  groupRateLimit: number;
-  rateWindowMs: number;
-  userCooldownMs: number;
-  repeatWindowMs: number;
   maxMessageLength: number;
   maxReconnectAttempts: number;
   maxReconnectDelayMs: number;
@@ -127,11 +121,6 @@ export function loadEnvironment(
     ...(value.PANEL_INITIAL_PASSWORD === undefined
       ? {}
       : { panelInitialPassword: value.PANEL_INITIAL_PASSWORD }),
-    userRateLimit: value.USER_RATE_LIMIT,
-    groupRateLimit: value.GROUP_RATE_LIMIT,
-    rateWindowMs: value.RATE_WINDOW_SECONDS * 1000,
-    userCooldownMs: value.USER_COOLDOWN_SECONDS * 1000,
-    repeatWindowMs: value.REPEAT_WINDOW_SECONDS * 1000,
     maxMessageLength: value.MAX_MESSAGE_LENGTH,
     maxReconnectAttempts: value.MAX_RECONNECT_ATTEMPTS,
     maxReconnectDelayMs: value.MAX_RECONNECT_DELAY_SECONDS * 1000,
@@ -154,18 +143,24 @@ export function loadEnvironment(
   };
 }
 
-function parseMetaAccounts(value: z.infer<typeof environmentSchema>): MetaWhatsAppAccountConfiguration[] {
+function parseMetaAccounts(
+  value: z.infer<typeof environmentSchema>,
+): MetaWhatsAppAccountConfiguration[] {
   const accounts: MetaWhatsAppAccountConfiguration[] = [];
   if (value.META_WHATSAPP_ACCOUNTS_JSON !== undefined) {
     let candidate: unknown;
     try {
       candidate = JSON.parse(value.META_WHATSAPP_ACCOUNTS_JSON);
     } catch {
-      throw new Error('Configuración inválida: META_WHATSAPP_ACCOUNTS_JSON no contiene JSON válido.');
+      throw new Error(
+        'Configuración inválida: META_WHATSAPP_ACCOUNTS_JSON no contiene JSON válido.',
+      );
     }
     const parsed = z.array(metaAccountSchema).max(100).safeParse(candidate);
     if (!parsed.success) {
-      throw new Error('Configuración inválida: META_WHATSAPP_ACCOUNTS_JSON contiene una cuenta inválida.');
+      throw new Error(
+        'Configuración inválida: META_WHATSAPP_ACCOUNTS_JSON contiene una cuenta inválida.',
+      );
     }
     accounts.push(...parsed.data);
   }
@@ -180,7 +175,12 @@ function parseMetaAccounts(value: z.infer<typeof environmentSchema>): MetaWhatsA
       ...(value.META_ACCESS_TOKEN === undefined ? {} : { accessToken: value.META_ACCESS_TOKEN }),
       ...(value.META_PHONE_NUMBER_ID === undefined
         ? {}
-        : { phoneNumberId: validateMetaIdentifier(value.META_PHONE_NUMBER_ID, 'META_PHONE_NUMBER_ID') }),
+        : {
+            phoneNumberId: validateMetaIdentifier(
+              value.META_PHONE_NUMBER_ID,
+              'META_PHONE_NUMBER_ID',
+            ),
+          }),
       ...(value.META_WABA_ID === undefined
         ? {}
         : { wabaId: validateMetaIdentifier(value.META_WABA_ID, 'META_WABA_ID') }),
@@ -196,7 +196,9 @@ function parseMetaAccounts(value: z.infer<typeof environmentSchema>): MetaWhatsA
     botIds.add(account.botId);
     if (account.phoneNumberId !== undefined) {
       if (phoneNumberIds.has(account.phoneNumberId)) {
-        throw new Error('Configuración inválida: un META_PHONE_NUMBER_ID está asignado a dos asistentes.');
+        throw new Error(
+          'Configuración inválida: un META_PHONE_NUMBER_ID está asignado a dos asistentes.',
+        );
       }
       phoneNumberIds.add(account.phoneNumberId);
     }
@@ -219,7 +221,9 @@ function validateProductionMetaConfiguration(
     if (account.wabaId === undefined) missing.push(`${account.botId}:wabaId`);
   }
   if (missing.length > 0) {
-    throw new Error(`Configuración inválida: faltan credenciales obligatorias de Meta (${missing.join(', ')}).`);
+    throw new Error(
+      `Configuración inválida: faltan credenciales obligatorias de Meta (${missing.join(', ')}).`,
+    );
   }
 }
 

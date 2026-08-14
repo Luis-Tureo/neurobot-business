@@ -2,8 +2,6 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Logger } from 'pino';
-import { ConnectionManager } from '../src/core/connection-manager.js';
-import { GroupDiscoveryService } from '../src/core/group-discovery-service.js';
 import {
   assertAllowedMaintenancePath,
   MaintenanceAlreadyRunningError,
@@ -11,14 +9,12 @@ import {
   type MaintenanceStage,
   UnsafeMaintenancePathError,
 } from '../src/core/maintenance-service.js';
-import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
-import { Anonymizer } from '../src/security/anonymizer.js';
 import { hashPassword, verifyPassword } from '../src/security/password.js';
 
 type Subject = ReturnType<typeof createSubject>;
 
-describe('mantenimiento destructivo sin sesiones de WhatsApp Web', () => {
+describe('mantenimiento de la instalación Business', () => {
   const subjects: Subject[] = [];
 
   afterEach(() => {
@@ -28,7 +24,7 @@ describe('mantenimiento destructivo sin sesiones de WhatsApp Web', () => {
     }
   });
 
-  it('restablece SQLite sin crear respaldos ni tocar configuración del proyecto', async () => {
+  it('restablece SQLite sin tocar la configuración del proyecto', async () => {
     const subject = createSubject();
     subjects.push(subject);
     const newHash = await hashPassword('contraseña-nueva-segura');
@@ -45,18 +41,18 @@ describe('mantenimiento destructivo sin sesiones de WhatsApp Web', () => {
       logoutRequired: true,
     });
     expect(subject.database.isOpen()).toBe(true);
-    expect(subject.database.listGroups()).toHaveLength(0);
+    expect(subject.database.listBots()).toEqual([
+      expect.objectContaining({ id: 'negocio-ejemplo', enabled: false }),
+    ]);
     expect(subject.database.listAdministrators()).toHaveLength(0);
-    expect(subject.database.getCommand('personalizado')).toBeNull();
-    expect(subject.database.getBot('neurobot')?.connectorType).toBe('WHATSAPP_CLOUD_API');
     expect(
       await verifyPassword(
         'contraseña-nueva-segura',
         subject.database.getPanelPasswordHash() ?? '',
       ),
     ).toBe(true);
-    expect(subject.client.destroyCalls).toBe(1);
-    expect(subject.client.initializeCalls).toBe(1);
+    expect(subject.stopMessaging).toHaveBeenCalledOnce();
+    expect(subject.startMessaging).toHaveBeenCalledOnce();
     expect(subject.transientReset).toHaveBeenCalledOnce();
     expect(existsSync(join(subject.projectRoot, 'backups'))).toBe(false);
     expect(existsSync(subject.legacyDatabasePath)).toBe(false);
@@ -78,7 +74,8 @@ describe('mantenimiento destructivo sin sesiones de WhatsApp Web', () => {
     const result = await subject.service.waitForCompletion();
     expect(result).toMatchObject({ result: 'failed', code: 'RESET_DATABASE_CREATE_FAILED' });
     expect(subject.database.isOpen()).toBe(true);
-    expect(subject.database.getCommand('personalizado')).toBeNull();
+    expect(subject.database.getBot('negocio-ejemplo')).not.toBeNull();
+    expect(subject.startMessaging).toHaveBeenCalledOnce();
   });
 
   it('impide dos restablecimientos simultáneos', async () => {
@@ -116,7 +113,7 @@ describe('mantenimiento destructivo sin sesiones de WhatsApp Web', () => {
     ).toThrow(UnsafeMaintenancePathError);
   });
 
-  it('no filtra contraseñas ni identificadores en estados o registros', async () => {
+  it('no filtra contraseñas ni números en estados o registros', async () => {
     const subject = createSubject();
     subjects.push(subject);
     subject.service.startFactoryReset({
@@ -143,56 +140,31 @@ function createSubject(
   const database = new AppDatabase(databasePath);
   database.migrate();
   database.setPanelPasswordHash('hash-inicial');
-  database.upsertDetectedGroup('grupo-secreto@g.us', 'Grupo secreto');
-  database.setGroupAuthorized('grupo-secreto@g.us', true);
   database.addAdministrator('56912345678@c.us');
-  database.saveCommand({
-    name: 'personalizado',
-    response: 'Respuesta configurada',
-    enabled: true,
-    priority: 1,
-    healthRelated: false,
-  });
   database.checkpoint();
   writeFileSync(legacyDatabasePath, 'base-anterior');
 
   const { logger, entries: logEntries } = createCapturedLogger();
   const transientReset = vi.fn();
-  const client = new SimulatedMessagingClient();
-  const manager = new ConnectionManager(client, logger, { maxAttempts: 1, maxDelayMs: 10 });
-  const discovery = new GroupDiscoveryService(
-    client,
-    database,
-    logger,
-    {
-      onLoading: () => manager.updateState('loading_chats'),
-      onLoaded: () => manager.updateState('connected'),
-      onFailure: (code) => manager.updateState('loading_chats', code),
-    },
-    { developmentMode: false, readyRetryDelaysMs: [0] },
-  );
-  const service = new MaintenanceService(
-    database,
-    manager,
-    discovery,
-    new Anonymizer('a'.repeat(32)),
-    logger,
-    {
-      projectRoot,
-      databasePath,
-      now: () => new Date('2026-08-02T03:04:05.000Z'),
-      resetTransientState: transientReset,
-      ...(options.beforeStage === undefined ? {} : { beforeStage: options.beforeStage }),
-    },
-  );
+  const stopMessaging = vi.fn(async () => undefined);
+  const startMessaging = vi.fn(async () => undefined);
+  const service = new MaintenanceService(database, logger, {
+    projectRoot,
+    databasePath,
+    now: () => new Date('2026-08-02T03:04:05.000Z'),
+    resetTransientState: transientReset,
+    stopMessaging,
+    startMessaging,
+    ...(options.beforeStage === undefined ? {} : { beforeStage: options.beforeStage }),
+  });
   return {
     projectRoot,
     legacyDatabasePath,
     database,
-    client,
-    manager,
     service,
     transientReset,
+    stopMessaging,
+    startMessaging,
     logEntries,
   };
 }

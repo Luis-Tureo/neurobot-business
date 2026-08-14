@@ -12,21 +12,6 @@ export function normalizeText(value: string): string {
     .trim();
 }
 
-export function parseCommand(value: string): { name: string; args: string[] } | null {
-  const normalized = normalizeText(value);
-  if (!normalized.startsWith('!') || normalized.includes('://')) {
-    return null;
-  }
-
-  const tokens = normalized.split(' ');
-  const first = tokens[0];
-  if (first === undefined || !/^![a-z0-9_-]+$/.test(first)) {
-    return null;
-  }
-
-  return { name: first.slice(1), args: tokens.slice(1) };
-}
-
 export function containsWholeTerm(text: string, term: string): boolean {
   const normalizedText = ` ${normalizeText(text)} `;
   const normalizedTerm = normalizeText(term);
@@ -49,7 +34,7 @@ export function maskPhoneNumber(identifier: string): string {
   return `${'*'.repeat(Math.max(6, digits.length - 4))}${digits.slice(-4)}`;
 }
 
-export function normalizeParticipantId(value: string): string {
+export function normalizePhoneNumber(value: string): string {
   const canonical = canonicalPhoneIdentity(value);
   if (canonical === null) {
     throw new Error('El número debe usar formato internacional y contener entre 8 y 15 dígitos.');

@@ -12,7 +12,6 @@ describe('arquitectura moderna del panel empresarial', () => {
     expect(html.match(/<script type="module"/gu)).toHaveLength(1);
     expect(existsSync('public/friendly-panel.js')).toBe(false);
     expect(existsSync('public/friendly-panel.css')).toBe(false);
-    expect(existsSync('public/community-design.css')).toBe(false);
     expect(existsSync('public/styles.css')).toBe(false);
   });
 

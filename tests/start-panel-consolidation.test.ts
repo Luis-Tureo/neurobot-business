@@ -32,11 +32,9 @@ describe('inicio empresarial consolidado', () => {
     );
   });
 
-  it('no carga módulos comunitarios al seleccionar un negocio', () => {
-    expect(multibot).toContain(
-      "!['automatic-messages', 'polls', 'moderation', 'maintenance'].includes(module)",
-    );
-    expect(multibot).not.toContain('loaders.push(loadModeration())');
+  it('usa directamente los módulos empresariales entregados por el servidor', () => {
+    expect(multibot).toContain('state.visibleModules = detail.visibleModules || []');
+    expect(multibot).toContain('navigation.setModuleVisibility(state.visibleModules)');
   });
 
   it('mantiene una sola inicialización del controlador', () => {

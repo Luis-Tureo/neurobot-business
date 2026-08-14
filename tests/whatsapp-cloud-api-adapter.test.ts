@@ -154,18 +154,17 @@ describe('conector oficial WhatsApp Cloud API', () => {
     expect(received).toMatchObject([
       {
         id: 'wamid.text',
-        chatId: '56912345678@c.us',
-        participantId: '56912345678@c.us',
-        recipientId: account.phoneNumberId,
+        chatId: '56912345678',
+        customerId: '56912345678',
+        businessPhoneNumberId: account.phoneNumberId,
         receivedAt: '2026-08-12T16:00:00.000Z',
         body: 'Hola',
         visibleText: 'Hola',
         contactName: 'Persona Real',
-        isGroup: false,
       },
       {
         id: 'wamid.list',
-        recipientId: account.phoneNumberId,
+        businessPhoneNumberId: account.phoneNumberId,
         body: 'hours',
         visibleText: 'Horarios',
         contactName: 'Persona Real',

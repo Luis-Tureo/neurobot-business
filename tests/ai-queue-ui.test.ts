@@ -25,6 +25,6 @@ describe('panel de capacidad de IA', () => {
     const start = script.indexOf("renderMetricGrid('#ai-queue-cards'");
     const end = script.indexOf("document.querySelector('#ai-queue-simulator')", start);
     const metricsBlock = script.slice(start, end);
-    expect(metricsBlock).not.toMatch(/question|answer|phone|apiKey|groupId|userId/u);
+    expect(metricsBlock).not.toMatch(/question|answer|phone|apiKey|conversationId|userId/u);
   });
 });
