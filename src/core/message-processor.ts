@@ -1,4 +1,5 @@
 import type { Logger } from 'pino';
+import { DEFAULT_BUSINESS_ASSISTANT_ID } from '../domain/business-defaults.js';
 import type { IncomingMessage } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import type { AppDatabase } from '../persistence/database.js';
@@ -21,7 +22,7 @@ export class MessageProcessor {
     private readonly anonymizer: Anonymizer,
     private readonly logger: Logger,
     private readonly options: MessageProcessorOptions,
-    private readonly botId = 'neurobot',
+    private readonly botId = DEFAULT_BUSINESS_ASSISTANT_ID,
     private readonly conversationFlow?: ConversationFlowService,
   ) {}
 

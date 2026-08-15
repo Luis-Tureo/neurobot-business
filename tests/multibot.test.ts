@@ -1,4 +1,5 @@
 import { AIProviderFactory } from '../src/ai/ai-provider-factory.js';
+import { loadEnvironment } from '../src/config/environment.js';
 import { CatalogService } from '../src/core/catalog-service.js';
 import { ConversationFlowService, selectOption } from '../src/core/conversation-flow-service.js';
 import { MultiBotManager } from '../src/core/multi-bot-manager.js';
@@ -205,5 +206,45 @@ describe('aislamiento de asistentes empresariales', () => {
     expect(manager.client(bot.id)).toBe(client);
     await manager.stopAll();
     expect(client.destroyCalls).toBe(1);
+  });
+
+  it('asocia la cuenta Meta simple con el asistente creado por la base inicial', () => {
+    const environment = loadEnvironment({
+      ANONYMIZATION_SECRET: 'a'.repeat(32),
+      PANEL_SESSION_SECRET: 'b'.repeat(32),
+      META_ACCESS_TOKEN: 'token-ficticio-de-prueba-1234567890',
+      META_PHONE_NUMBER_ID: '123456789012345',
+      META_WABA_ID: '987654321098765',
+    });
+    const logger = createLogger('silent');
+    const warn = vi.spyOn(logger, 'warn');
+
+    new MultiBotManager(
+      database,
+      new AIProviderFactory(
+        database,
+        new SecretVault(undefined),
+        undefined,
+        'disabled',
+        'disabled',
+      ),
+      new Anonymizer('x'.repeat(32)),
+      logger,
+      {
+        maxMessageLength: 2000,
+        maxReconnectAttempts: 1,
+        maxReconnectDelayMs: 10,
+        developmentMode: false,
+        mediaRoot: 'data/media',
+      },
+      environment.metaWhatsApp,
+    );
+
+    expect(environment.metaWhatsApp.accounts[0]?.botId).toBe('negocio-ejemplo');
+    expect(database.getBotIdByMetaPhoneNumberId('123456789012345')).toBe('negocio-ejemplo');
+    expect(warn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ operation: 'META_ACCOUNT_ASSISTANT_MISSING' }),
+      expect.any(String),
+    );
   });
 });

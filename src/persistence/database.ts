@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import BetterSqlite3 from 'better-sqlite3';
+import { DEFAULT_BUSINESS_ASSISTANT_ID } from '../domain/business-defaults.js';
 import type {
   BotRecord,
   BusinessHour,
@@ -1707,7 +1708,7 @@ export class AppDatabase {
 
   public createAssistantProfile(
     input: Omit<AssistantProfile, 'id' | 'active' | 'createdAt' | 'updatedAt'>,
-    botId = 'neurobot',
+    botId = DEFAULT_BUSINESS_ASSISTANT_ID,
   ): AssistantProfile {
     const values = validateAssistantProfile(input);
     const now = new Date().toISOString();
@@ -2690,7 +2691,7 @@ export class AppDatabase {
         )
         .run(nowIso);
       const settings = this.getAISettings(input.profileId);
-      const botId = input.botId ?? 'neurobot';
+      const botId = input.botId ?? DEFAULT_BUSINESS_ASSISTANT_ID;
       const pending = this.db
         .prepare(
           `SELECT COUNT(*) AS requests,

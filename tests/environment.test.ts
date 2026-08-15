@@ -56,7 +56,7 @@ describe('configuración de entorno', () => {
     });
     expect(environment.metaWhatsApp.accounts).toEqual([
       {
-        botId: 'neurobot',
+        botId: 'negocio-ejemplo',
         accessToken: 'token-ficticio-de-prueba-1234567890',
         phoneNumberId: '123456789012345',
         wabaId: '987654321098765',

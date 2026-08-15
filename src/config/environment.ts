@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import { DEFAULT_BUSINESS_ASSISTANT_ID } from '../domain/business-defaults.js';
 
 const optionalTrimmedString = z.preprocess(
   (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
@@ -171,7 +172,7 @@ function parseMetaAccounts(
     value.META_WABA_ID !== undefined
   ) {
     accounts.push({
-      botId: 'neurobot',
+      botId: DEFAULT_BUSINESS_ASSISTANT_ID,
       ...(value.META_ACCESS_TOKEN === undefined ? {} : { accessToken: value.META_ACCESS_TOKEN }),
       ...(value.META_PHONE_NUMBER_ID === undefined
         ? {}
