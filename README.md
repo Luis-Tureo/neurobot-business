@@ -93,6 +93,9 @@ persistencia de SQLite después de reiniciar `systemd`.
 | `APP_ENCRYPTION_KEY` | Según uso | Sí | Cifrado de credenciales de IA por asistente. |
 | `GROQ_API_KEY` | Si Groq está habilitado | Sí | Clave global de Groq. |
 
+Las tres variables de cuenta simple se asocian al asistente inicial `negocio-ejemplo`. Para otros
+identificadores o varias cuentas, utilice `META_WHATSAPP_ACCOUNTS_JSON`.
+
 Las variables generales del panel, base de datos, límites e IA se documentan en [`.env.example`](./.env.example).
 
 ### Configuración multibot

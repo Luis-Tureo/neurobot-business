@@ -1,4 +1,5 @@
 import type BetterSqlite3 from 'better-sqlite3';
+import { DEFAULT_BUSINESS_ASSISTANT_ID } from '../domain/business-defaults.js';
 
 const BUSINESS_SCHEMA_VERSION = 24;
 
@@ -961,7 +962,7 @@ function ensureBusinessExample(database: BetterSqlite3.Database): void {
   };
   if (Number(count.count) > 0) return;
   const now = new Date().toISOString();
-  const botId = 'negocio-ejemplo';
+  const botId = DEFAULT_BUSINESS_ASSISTANT_ID;
   database
     .prepare(
       `INSERT INTO bots(

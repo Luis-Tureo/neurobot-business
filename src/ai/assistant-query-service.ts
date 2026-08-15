@@ -1,4 +1,5 @@
 import type { Logger } from 'pino';
+import { DEFAULT_BUSINESS_ASSISTANT_ID } from '../domain/business-defaults.js';
 import type { AISettings, AssistantProfile, KnowledgeFragment } from '../domain/types.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { AIProvider } from './ai-provider.js';
@@ -40,7 +41,7 @@ export class AssistantQueryService {
     private readonly database: AppDatabase,
     private readonly provider: AIProvider,
     private readonly logger: Logger,
-    private readonly botId = 'neurobot',
+    private readonly botId = DEFAULT_BUSINESS_ASSISTANT_ID,
     private readonly queue = new AIRequestQueueService(database, logger, botId),
   ) {
     this.answerCache = new AnswerCacheService(database, logger, botId);
