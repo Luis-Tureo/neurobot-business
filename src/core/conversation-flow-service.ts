@@ -123,6 +123,32 @@ export class ConversationFlowService {
     const selected = selectOption(options, normalized);
     if (selected === undefined) {
       const menu = this.database.getMenu(this.botId, state.currentMenuId);
+      const isFreeText = !allowInitialSelection && !/^\d+$/u.test(normalized);
+      if (isFreeText && this.queryService !== undefined) {
+        const answer = await this.queryService.answerQuestion(
+          body.trim(),
+          chatHash,
+          userHash,
+          now,
+          async () => {
+            await this.sendQueued(
+              chatId,
+              'Estoy atendiendo varias consultas. Tu pregunta quedó en espera; no necesitas repetirla.',
+            );
+          },
+        );
+        await this.sendQueued(chatId, answer.text);
+        if (menu !== null)
+          this.saveState(
+            chatHash,
+            userHash,
+            menu.id,
+            state.previousMenuId,
+            menu.expirationMinutes,
+            now,
+          );
+        return true;
+      }
       if (menu !== null) await this.sendMenu(chatId, menu, options);
       return true;
     }
