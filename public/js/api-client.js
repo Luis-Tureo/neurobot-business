@@ -76,7 +76,7 @@ export async function api(path, options = {}) {
   if (!response.ok) {
     const { message, technicalMessage } = friendlyApiError(payload, response);
     if (technicalMessage !== message) {
-      console.error('API validation error:', technicalMessage);
+      window.console.error('API validation error:', technicalMessage);
     }
     const error = new Error(message);
     error.code =

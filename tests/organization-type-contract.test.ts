@@ -63,6 +63,6 @@ describe('contrato de tipos de negocio', () => {
       'No se pudo guardar porque el tipo de negocio seleccionado no es válido.',
     );
     expect(apiClient).toContain('error.technicalMessage = technicalMessage');
-    expect(apiClient).toContain("console.error('API validation error:', technicalMessage)");
+    expect(apiClient).toContain("window.console.error('API validation error:', technicalMessage)");
   });
 });
