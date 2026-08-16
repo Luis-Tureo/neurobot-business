@@ -70,30 +70,34 @@ export class ConversationFlowService {
       return this.start(chatId, chatHash, userHash, now);
     const state = this.database.getConversationState(this.botId, chatHash, userHash);
     if (state === null) {
-      if (!allowInitialSelection) return false;
       const initialMenu = this.database
         .listMenus(this.botId)
         .find((candidate) => candidate.isInitial && candidate.enabled);
-      if (initialMenu === undefined) return false;
-      const selected = selectOption(
-        this.database
-          .listMenuOptions(this.botId, initialMenu.id)
-          .filter((option) => option.enabled),
-        normalized,
-      );
-      if (selected === undefined) return false;
-      const initialState: ConversationState = {
-        botId: this.botId,
-        chatHash,
-        userHash,
-        activeFlow: 'menu',
-        currentMenuId: initialMenu.id,
-        previousMenuId: null,
-        currentStep: 'waiting_option',
-        expiresAt: new Date(now.getTime() + initialMenu.expirationMinutes * 60_000).toISOString(),
-        updatedAt: now.toISOString(),
-      };
-      return this.executeOption(chatId, chatHash, userHash, initialState, selected, now);
+      const initialOptions =
+        initialMenu === undefined
+          ? []
+          : this.database
+              .listMenuOptions(this.botId, initialMenu.id)
+              .filter((option) => option.enabled);
+      const selected = selectOption(initialOptions, normalized);
+      if (allowInitialSelection && initialMenu !== undefined && selected !== undefined) {
+        const initialState: ConversationState = {
+          botId: this.botId,
+          chatHash,
+          userHash,
+          activeFlow: 'menu',
+          currentMenuId: initialMenu.id,
+          previousMenuId: null,
+          currentStep: 'waiting_option',
+          expiresAt: new Date(
+            now.getTime() + initialMenu.expirationMinutes * 60_000,
+          ).toISOString(),
+          updatedAt: now.toISOString(),
+        };
+        return this.executeOption(chatId, chatHash, userHash, initialState, selected, now);
+      }
+      if (isGreeting(normalized) || /^\d+$/u.test(normalized) || selected !== undefined) return false;
+      return this.answerFreeText(chatId, chatHash, userHash, body, now);
     }
     if (new Date(state.expiresAt).getTime() <= now.getTime()) {
       this.database.deleteConversationState(this.botId, chatHash, userHash);
@@ -125,19 +129,7 @@ export class ConversationFlowService {
       const menu = this.database.getMenu(this.botId, state.currentMenuId);
       const isFreeText = !allowInitialSelection && !/^\d+$/u.test(normalized);
       if (isFreeText && this.queryService !== undefined) {
-        const answer = await this.queryService.answerQuestion(
-          body.trim(),
-          chatHash,
-          userHash,
-          now,
-          async () => {
-            await this.sendQueued(
-              chatId,
-              'Estoy atendiendo varias consultas. Tu pregunta quedó en espera; no necesitas repetirla.',
-            );
-          },
-        );
-        await this.sendQueued(chatId, answer.text);
+        await this.answerFreeText(chatId, chatHash, userHash, body, now);
         if (menu !== null)
           this.saveState(
             chatHash,
@@ -164,6 +156,47 @@ export class ConversationFlowService {
       'Se seleccionó una opción local',
     );
     return this.executeOption(chatId, chatHash, userHash, state, selected, now);
+  }
+
+  private async answerFreeText(
+    chatId: string,
+    chatHash: string,
+    userHash: string,
+    body: string,
+    now: Date,
+  ): Promise<boolean> {
+    if (isBusinessHoursQuestion(body)) {
+      this.logger.info(
+        {
+          operation: 'AI_QUERY_ROUTED',
+          botId: this.botId,
+          AI_PROVIDER: 'not_called',
+          AI_MODEL: 'not_called',
+          AI_ROUTE: 'business_hours_local',
+          chatHash,
+          userHash,
+        },
+        'La consulta se resolvió con conocimiento local confirmado',
+      );
+      await this.sendQueued(chatId, this.hours.summary());
+      return true;
+    }
+    if (this.queryService === undefined) return false;
+    const answer = await this.queryService.answerQuestion(
+      body.trim(),
+      chatHash,
+      userHash,
+      now,
+      async () => {
+        await this.sendQueued(
+          chatId,
+          'Estoy atendiendo varias consultas. Tu pregunta quedó en espera; no necesitas repetirla.',
+        );
+      },
+      'free_text_fallback',
+    );
+    await this.sendQueued(chatId, answer.text);
+    return true;
   }
 
   private async executeOption(
@@ -394,6 +427,16 @@ export function normalizeSelection(value: string): string {
     .toLocaleLowerCase('es')
     .replace(/[^a-z0-9]+/gu, ' ')
     .trim();
+}
+
+function isGreeting(value: string): boolean {
+  return /^(?:hola|holi|buen(?:os)? dias|buenas (?:tardes|noches)|que tal|saludos)$/u.test(value);
+}
+
+function isBusinessHoursQuestion(value: string): boolean {
+  return /\b(?:horario|horarios|hora de atencion|horas de atencion|cuando (?:abren|abre|atienden|atiende)|a que hora (?:abren|abre|cierran|cierra))\b/iu.test(
+    normalizeSelection(value),
+  );
 }
 
 function localDate(now: Date, timezone: string): string {

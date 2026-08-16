@@ -53,7 +53,21 @@ export class AssistantQueryService {
     customerHash: string,
     now = new Date(),
     onWaitNotice?: () => Promise<void>,
+    route = 'assistant_query',
   ): Promise<AssistantQueryResult> {
+    const provider = this.provider.getModelInformation();
+    this.logger.info(
+      {
+        operation: 'AI_QUERY_ROUTED',
+        botId: this.botId,
+        AI_PROVIDER: provider.provider,
+        AI_MODEL: provider.model,
+        AI_ROUTE: route,
+        conversationHash,
+        customerHash,
+      },
+      'Se enrutó una consulta segura al subsistema de IA',
+    );
     const profile = this.database.getBotProfile(this.botId);
     const settings = this.database.getAISettings(profile.id);
     if (question === '') return { text: profile.noInformationMessage, code: 'KNOWLEDGE_NOT_FOUND' };
