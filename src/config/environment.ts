@@ -48,8 +48,7 @@ const environmentSchema = z.object({
   META_WHATSAPP_ACCOUNTS_JSON: optionalTrimmedString,
   AI_PROVIDER: z.enum(['groq', 'disabled']).default('groq'),
   GROQ_API_KEY: optionalTrimmedString,
-  GROQ_MODEL: z.string().trim().min(1).max(120).default('llama-3.1-8b-instant'),
-  APP_ENCRYPTION_KEY: optionalTrimmedString,
+  GROQ_MODEL: z.string().trim().min(1).max(120).default('openai/gpt-oss-120b'),
 });
 
 export type Environment = {
@@ -69,7 +68,6 @@ export type Environment = {
   aiProvider: 'groq' | 'disabled';
   groqApiKey?: string;
   groqModel: string;
-  appEncryptionKey?: string;
 };
 
 export type MetaWhatsAppAccountConfiguration = {
@@ -138,9 +136,6 @@ export function loadEnvironment(
     aiProvider: value.AI_PROVIDER,
     ...(value.GROQ_API_KEY === undefined ? {} : { groqApiKey: value.GROQ_API_KEY }),
     groqModel: value.GROQ_MODEL,
-    ...(value.APP_ENCRYPTION_KEY === undefined
-      ? {}
-      : { appEncryptionKey: value.APP_ENCRYPTION_KEY }),
   };
 }
 

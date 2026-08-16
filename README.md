@@ -1,6 +1,6 @@
-# Neurobot Business
+# Don Gato Digital
 
-Neurobot Business es un asistente para atención privada por WhatsApp que utiliza exclusivamente la API oficial de Meta, WhatsApp Cloud API.
+Don Gato Digital es una plataforma de asistentes para atención privada por WhatsApp que utiliza exclusivamente la API oficial de Meta, WhatsApp Cloud API.
 
 La aplicación mantiene Node.js 24, TypeScript, Fastify, SQLite, Vitest y Groq. No usa navegadores, scraping, sesiones locales ni vinculación por código.
 
@@ -10,7 +10,7 @@ La aplicación mantiene Node.js 24, TypeScript, Fastify, SQLite, Vitest y Groq. 
 WhatsApp del usuario
   -> Meta WhatsApp Cloud API
   -> POST /api/webhooks/meta/whatsapp
-  -> capa de mensajería de Neurobot
+  -> capa de mensajería de Don Gato Digital
   -> asistente seleccionado por phone_number_id
   -> reglas, historial, automatizaciones compatibles e IA/Groq
   -> Meta Graph API
@@ -90,8 +90,7 @@ persistencia de SQLite después de reiniciar `systemd`.
 | `ANONYMIZATION_SECRET` | Sí | Sí | HMAC para identificadores internos. |
 | `PANEL_SESSION_SECRET` | Sí | Sí | Firma de sesiones del panel. |
 | `PANEL_INITIAL_PASSWORD` | No | Sí | Contraseña inicial opcional del panel. |
-| `APP_ENCRYPTION_KEY` | Según uso | Sí | Cifrado de credenciales de IA por asistente. |
-| `GROQ_API_KEY` | Si Groq está habilitado | Sí | Clave global de Groq. |
+| `GROQ_API_KEY` | Si Groq está habilitado | Sí | Clave de plataforma de Groq; no se configura por negocio. |
 
 Las tres variables de cuenta simple se asocian al asistente inicial `negocio-ejemplo`. Para otros
 identificadores o varias cuentas, utilice `META_WHATSAPP_ACCOUNTS_JSON`.
@@ -133,14 +132,14 @@ Debe ser HTTPS y accesible desde Internet.
 
 ### Verificación GET
 
-Meta envía `hub.mode`, `hub.verify_token` y `hub.challenge`. Neurobot devuelve el challenge como texto solo cuando:
+Meta envía `hub.mode`, `hub.verify_token` y `hub.challenge`. Don Gato Digital devuelve el challenge como texto solo cuando:
 
 - `hub.mode=subscribe`;
 - el token coincide mediante comparación segura con `META_WEBHOOK_VERIFY_TOKEN`.
 
 ### Eventos POST
 
-Neurobot:
+Don Gato Digital:
 
 - conserva el cuerpo JSON original para validar `X-Hub-Signature-256` con HMAC-SHA256 y `META_APP_SECRET`;
 - valida que el payload sea de `whatsapp_business_account`;

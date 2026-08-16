@@ -36,12 +36,13 @@ describe('interfaz empresarial simplificada', () => {
 
   it('presenta asistentes con jerarquía y pocas acciones', () => {
     expect(panel).toContain("className: 'assistant-card'");
-    expect(panel).toContain('text: bot.organizationName || bot.botName');
-    expect(panel).toContain('text: bot.botName');
+    expect(panel).toContain('bot.businessName || bot.organizationName || bot.botName');
+    expect(panel).toContain('`Asistente · ${bot.assistantName || bot.botName}`');
     expect(panel).toContain("actionButton('Administrar'");
+    expect(panel).toContain("actionButton('Probar'");
     expect(panel).toContain('createMoreMenu([');
-    expect(panel).toContain("['WhatsApp', connectionLabels[bot.whatsappStatus]");
-    expect(panel).toContain("['Número', bot.maskedNumber");
+    expect(panel).toContain("['WhatsApp', readinessLabel(bot.readiness?.whatsapp)]");
+    expect(panel).toContain("['Modelo', modelLabel(bot.aiModel)]");
   });
 
   it('guarda un contrato empresarial mínimo', () => {
@@ -50,6 +51,19 @@ describe('interfaz empresarial simplificada', () => {
     );
     expect(panel).toContain('menuType: form.elements.menuType.value');
     expect(panel).toContain("connectorType: 'WHATSAPP_CLOUD_API'");
+  });
+
+  it('expone ocho pasos, interacciones y trazas completas del simulador', () => {
+    for (let step = 1; step <= 8; step += 1) {
+      expect(html).toContain(`data-wizard-step="${step}"`);
+      expect(html).toContain(`data-wizard-indicator="${step}"`);
+    }
+    expect(html).toContain('id="dynamic-interactions-form"');
+    expect(html).toContain('id="assistant-tools-list"');
+    expect(panel).toContain("['Herramienta', debugData.toolCalled || 'Ninguna']");
+    expect(panel).toContain("['Resultados reales', String(debugData.toolResultCount ?? 0)]");
+    expect(panel).toContain("['Presentación', debugData.presentation || 'TEXT']");
+    expect(panel).toContain("['Acciones', (debugData.actions || []).join(', ') || 'Ninguna']");
   });
 
   it('unifica carga, errores y bloqueo de doble envío', () => {

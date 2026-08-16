@@ -25,7 +25,7 @@ class IdentifiedProvider implements AIProvider {
   }
 
   public getModelInformation(): { provider: string; model: string } {
-    return { provider: 'groq', model: 'llama-3.1-8b-instant' };
+    return { provider: 'groq', model: 'openai/gpt-oss-120b' };
   }
 
   public normalizeUsage(): { inputTokens: number; outputTokens: number; totalTokens: number } {
@@ -63,7 +63,7 @@ describe('enrutamiento seguro de consultas de IA', () => {
       expect.objectContaining({
         operation: 'AI_QUERY_ROUTED',
         AI_PROVIDER: 'groq',
-        AI_MODEL: 'llama-3.1-8b-instant',
+        AI_MODEL: 'openai/gpt-oss-120b',
         AI_ROUTE: 'free_text_fallback',
       }),
       expect.any(String),

@@ -57,6 +57,7 @@ describe('enrutamiento del flujo conversacional', () => {
       now,
       expect.any(Function),
       'free_text_fallback',
+      { useBusinessKnowledge: true, allowGeneralAnswer: true },
     );
     expect(client.sentMessages).toHaveLength(1);
     expect(client.sentMessages[0]?.text).toBe('La respuesta es 4.');
@@ -87,9 +88,10 @@ describe('enrutamiento del flujo conversacional', () => {
   it('mantiene los saludos y opciones nuevas en la ruta de menú', async () => {
     const now = new Date('2026-08-15T15:00:00.000Z');
     await expect(flow.handle(chatId, chatHash, userHash, 'Hola', now, false)).resolves.toBe(false);
-    await expect(flow.handle(chatId, chatHash, userHash, '1', now, false)).resolves.toBe(false);
+    await expect(flow.handle(chatId, chatHash, userHash, '1', now, false)).resolves.toBe(true);
     expect(answerQuestion).not.toHaveBeenCalled();
-    expect(client.sentMessages).toHaveLength(0);
+    expect(client.sentMessages).toHaveLength(1);
+    expect(client.sentMessages[0]?.text).toContain('¿En qué podemos ayudarte?');
   });
 
   it('procesa de extremo a extremo las dos consultas sin alterar el transporte', async () => {

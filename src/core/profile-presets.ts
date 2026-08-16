@@ -162,7 +162,7 @@ export function createProfileFromPreset(input: {
     primaryColor: '#176b61',
     secondaryColor: '#d8a446',
     timezone: input.timezone,
-    applicationName: 'Panel del Asistente',
+    applicationName: 'Don Gato Digital',
     headerText: input.botName,
     footerText: '',
     supportInformation: '',

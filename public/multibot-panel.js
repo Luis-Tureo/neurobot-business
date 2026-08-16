@@ -32,6 +32,8 @@ const state = {
   cachedAnswers: [],
   menus: [],
   menuOptions: [],
+  tools: [],
+  behavior: null,
   catalogCategories: [],
   catalogItems: [],
   mediaAssets: [],
@@ -48,17 +50,10 @@ const state = {
   conversationMessagePage: 1,
   conversationMessagePagination: null,
   refreshTimer: null,
-};
-
-const connectionLabels = {
-  disconnected: 'Desconectado',
-  initializing: 'Iniciando',
-  authenticated: 'Configuración cargada',
-  loading_chats: 'Sincronizando',
-  connected: 'Conectado',
-  auth_failure: 'Error de autenticación',
-  reconnecting: 'Reconectando',
-  resetting: 'Restableciendo',
+  aiProviders: [],
+  defaultAIModel: '',
+  wizardStep: 1,
+  role: 'global_admin',
 };
 
 const dayLabels = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -116,36 +111,59 @@ let configured = false;
 let initializationPromise = null;
 let moreMenuSequence = 0;
 
-function connectionTone(value) {
-  if (value === 'connected') return 'success';
-  if (value === 'auth_failure') return 'error';
-  return value === 'disconnected' ? 'warning' : 'neutral';
-}
-
-function booleanTone(value) {
-  return value ? 'success' : 'warning';
-}
-
 function providerLabel(value) {
   if (value === 'groq') return 'Groq';
   if (value === 'disabled') return 'Desactivada';
   return value || 'Sin proveedor';
 }
 
-function safeHash(value, label = 'Usuario') {
-  return value ? `${label} · ${String(value).slice(0, 8)}` : 'Sin identificador';
+const assistantStatusLabels = {
+  DRAFT: 'Borrador',
+  READY_TO_TEST: 'Listo para probar',
+  OPERATIONAL: 'Operativo',
+  PAUSED: 'Pausado',
+  ERROR: 'Error',
+};
+
+const readinessTone = {
+  DRAFT: 'warning',
+  READY_TO_TEST: 'neutral',
+  OPERATIONAL: 'success',
+  PAUSED: 'warning',
+  ERROR: 'error',
+};
+
+function modelLabel(modelId) {
+  for (const provider of state.aiProviders) {
+    const model = provider.models.find((candidate) => candidate.id === modelId);
+    if (model) return model.label;
+  }
+  return modelId || 'Sin modelo';
 }
 
-function normalizeBotIdentifier(value) {
-  let normalized = String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/gu, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/-+/gu, '-')
-    .replace(/^-|-$/gu, '');
-  if (normalized && !/^[a-z]/u.test(normalized)) normalized = `bot-${normalized}`;
-  return normalized.slice(0, 40).replace(/-$/u, '');
+async function loadAIProviders() {
+  const result = await api('/api/ai/providers');
+  state.aiProviders = result.providers || [];
+  state.defaultAIModel = result.defaultModel || '';
+  populateAIModelSelects();
+}
+
+function populateAIModelSelects(selectedModel = null) {
+  const groq = state.aiProviders.find((provider) => provider.id === 'groq');
+  const models = groq?.models || [];
+  for (const select of document.querySelectorAll('[data-ai-model-select]')) {
+    const current = selectedModel || select.value || state.defaultAIModel;
+    select.replaceChildren();
+    for (const model of models) {
+      const suffix = model.recommended ? ' · Recomendado' : '';
+      select.add(new window.Option(`${model.label}${suffix}`, model.id));
+    }
+    select.value = models.some((model) => model.id === current) ? current : state.defaultAIModel;
+  }
+}
+
+function safeHash(value, label = 'Usuario') {
+  return value ? `${label} · ${String(value).slice(0, 8)}` : 'Sin identificador';
 }
 
 function recordPanelEvent(eventType, assistantId) {
@@ -243,8 +261,12 @@ async function loadBots({ background = false } = {}) {
     renderEmpty(
       target,
       'Todavía no hay asistentes',
-      'Crea el primero para comenzar a atender con Neurobot.',
-      actionButton('Crear asistente', '', () => openCreateBot()),
+      state.role === 'global_admin'
+        ? 'Crea el primero para comenzar a atender con Don Gato Digital.'
+        : 'Tu cuenta todavía no tiene un negocio asignado.',
+      state.role === 'global_admin'
+        ? actionButton('Crear asistente', '', () => openCreateBot())
+        : undefined,
     );
     return;
   }
@@ -255,27 +277,28 @@ async function loadBots({ background = false } = {}) {
     const heading = element('div', { className: 'assistant-card__heading' });
     const copy = element('div');
     copy.append(
-      element('h3', { text: bot.organizationName || bot.botName }),
-      element('p', { className: 'assistant-card__bot-name', text: bot.botName }),
+      element('h3', { text: bot.businessName || bot.organizationName || bot.botName }),
+      element('p', {
+        className: 'assistant-card__bot-name',
+        text: `Asistente · ${bot.assistantName || bot.botName}`,
+      }),
     );
     heading.append(
       copy,
-      statusBadge(bot.enabled ? 'Activo' : 'Inactivo', booleanTone(bot.enabled)),
+      statusBadge(
+        assistantStatusLabels[bot.assistantStatus] || 'Sin estado',
+        readinessTone[bot.assistantStatus] || 'neutral',
+      ),
     );
 
     const facts = element('div', { className: 'assistant-card__facts' });
     const factValues = [
-      ['Tipo de negocio', bot.organizationType || 'Sin tipo'],
-      ['WhatsApp', connectionLabels[bot.whatsappStatus] || 'Sin estado'],
-      ['Número', bot.maskedNumber || 'Sin número asociado'],
-      [
-        'IA',
-        bot.aiConfigured
-          ? `${providerLabel(bot.aiProvider)} · ${bot.aiEnabled ? 'Activa' : 'Inactiva'}`
-          : 'Sin configurar',
-      ],
+      ['WhatsApp', readinessLabel(bot.readiness?.whatsapp)],
+      ['Proveedor de IA', providerLabel(bot.aiProvider)],
+      ['Modelo', modelLabel(bot.aiModel)],
+      ['Conocimiento', bot.knowledgeStatus === 'CONFIGURED' ? 'Activo' : 'Vacío'],
     ];
-    if (bot.lastConnectedAt) factValues.push(['Última actividad', formatDate(bot.lastConnectedAt)]);
+    if (bot.lastUpdatedAt) factValues.push(['Actualizado', formatDate(bot.lastUpdatedAt)]);
     for (const [label, value] of factValues) {
       const row = element('div', { className: 'fact-row' });
       row.append(element('span', { text: label }), element('strong', { text: value }));
@@ -285,8 +308,12 @@ async function loadBots({ background = false } = {}) {
     const actions = element('div', { className: 'assistant-card__actions' });
     actions.append(
       actionButton('Administrar', '', () => selectBot(bot.id, 'status')),
-      actionButton(bot.enabled ? 'Desactivar' : 'Activar', 'secondary', () => toggleBot(bot)),
+      actionButton('Probar', 'secondary', () => selectBot(bot.id, 'test-center')),
       createMoreMenu([
+        {
+          label: bot.enabled ? 'Pausar asistente' : 'Activar asistente',
+          action: () => toggleBot(bot),
+        },
         {
           label: 'Enviar a la papelera',
           danger: true,
@@ -299,8 +326,17 @@ async function loadBots({ background = false } = {}) {
   }
 }
 
+function readinessLabel(value) {
+  if (value === 'CONNECTED') return 'Conectado';
+  if (value === 'CONFIGURING') return 'Configurando';
+  if (value === 'ERROR') return 'Error';
+  return 'No configurado';
+}
+
 function openCreateBot() {
   const form = document.querySelector('#create-bot-form');
+  showWizardStep(1);
+  populateAIModelSelects();
   showPanel(form, { focus: true });
 }
 
@@ -309,8 +345,44 @@ function closeCreateBot() {
   form.reset();
   form.elements.timezone.value = 'America/Santiago';
   form.elements.menuType.value = 'automatic';
-  form.dataset.identifierEdited = 'false';
+  populateAIModelSelects();
+  showWizardStep(1);
   hidePanel(form);
+}
+
+function showWizardStep(step) {
+  state.wizardStep = Math.max(1, Math.min(8, step));
+  document.querySelectorAll('[data-wizard-step]').forEach((panel) => {
+    panel.classList.toggle('hidden', Number(panel.dataset.wizardStep) !== state.wizardStep);
+  });
+  document.querySelectorAll('[data-wizard-indicator]').forEach((indicator) => {
+    const position = Number(indicator.dataset.wizardIndicator);
+    indicator.classList.toggle('active', position === state.wizardStep);
+    indicator.classList.toggle('complete', position < state.wizardStep);
+    if (position === state.wizardStep) indicator.setAttribute('aria-current', 'step');
+    else indicator.removeAttribute('aria-current');
+  });
+  document.querySelector('#wizard-previous').classList.toggle('hidden', state.wizardStep === 1);
+  document.querySelector('#wizard-next').classList.toggle('hidden', state.wizardStep === 8);
+  document.querySelector('#wizard-submit').classList.toggle('hidden', state.wizardStep !== 8);
+  document
+    .querySelector(`[data-wizard-step="${state.wizardStep}"] legend`)
+    ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function validateWizardStep() {
+  const step = document.querySelector(`[data-wizard-step="${state.wizardStep}"]`);
+  const inputs = [...step.querySelectorAll('input, select, textarea')].filter(
+    (input) => !input.disabled,
+  );
+  for (const input of inputs) {
+    if (!input.checkValidity()) {
+      input.reportValidity();
+      input.focus();
+      return false;
+    }
+  }
+  return true;
 }
 
 async function toggleBot(bot) {
@@ -417,23 +489,28 @@ async function loadTrash() {
 function updateAssistantContext(detail) {
   const bot = detail.bot;
   const profile = detail.profile;
-  document.querySelector('#assistant-context-business').textContent = profile.organizationName;
+  document.querySelector('#assistant-context-business').textContent =
+    detail.business?.name || profile.organizationName;
   document.querySelector('#assistant-context-name').textContent = profile.botName;
   setStatus(
     '#assistant-context-status',
-    bot.enabled ? 'Activo' : 'Inactivo',
-    booleanTone(bot.enabled),
+    assistantStatusLabels[detail.readiness?.assistant] || 'Sin estado',
+    readinessTone[detail.readiness?.assistant] || 'neutral',
   );
   setStatus(
     '#assistant-context-whatsapp',
-    connectionLabels[bot.whatsappStatus] || 'Sin estado',
-    connectionTone(bot.whatsappStatus),
+    readinessLabel(detail.readiness?.whatsapp),
+    detail.readiness?.whatsapp === 'CONNECTED'
+      ? 'success'
+      : detail.readiness?.whatsapp === 'ERROR'
+        ? 'error'
+        : 'warning',
   );
-  const details = [bot.organizationType, bot.maskedNumber].filter(Boolean);
+  const details = [bot.organizationType, detail.whatsapp?.displayPhoneNumber].filter(Boolean);
   document.querySelector('#assistant-context-detail').textContent = details.join(' · ');
 }
 
-function fillProfile(profile) {
+function fillProfile(profile, business) {
   const form = document.querySelector('#profile-form');
   for (const [field, value] of Object.entries(profile)) {
     const input = form.elements[field];
@@ -441,6 +518,41 @@ function fillProfile(profile) {
     input.value = Array.isArray(value) ? value.join('\n') : (value ?? '');
   }
   form.elements.address.value = profile.address || '';
+  form.elements.language.value = business?.language || 'es-CL';
+}
+
+function fillAssistantBehavior(behavior) {
+  const form = document.querySelector('#assistant-behavior-form');
+  if (!behavior) return;
+  state.behavior = behavior;
+  for (const [field, value] of Object.entries(behavior)) {
+    const input = form.elements[field];
+    if (!input) continue;
+    if (input.type === 'checkbox') input.checked = Boolean(value);
+    else input.value = value ?? '';
+  }
+  const dynamicForm = document.querySelector('#dynamic-interactions-form');
+  for (const field of [
+    'allowDynamicButtons',
+    'allowDynamicLists',
+    'allowBusinessDataQueries',
+    'showAISuggestedActions',
+    'allowWriteTools',
+  ]) {
+    const input = dynamicForm.elements[field];
+    if (input) input.checked = Boolean(behavior[field]);
+  }
+}
+
+function dynamicBehaviorPayload() {
+  const form = document.querySelector('#dynamic-interactions-form');
+  return {
+    allowDynamicButtons: form.elements.allowDynamicButtons.checked,
+    allowDynamicLists: form.elements.allowDynamicLists.checked,
+    allowBusinessDataQueries: form.elements.allowBusinessDataQueries.checked,
+    showAISuggestedActions: form.elements.showAISuggestedActions.checked,
+    allowWriteTools: false,
+  };
 }
 
 function fillBotConfiguration(bot) {
@@ -454,39 +566,52 @@ function fillBotConfiguration(bot) {
 }
 
 function renderOverview(detail) {
-  const connection = detail.runtime?.connection || {
-    state: detail.bot.whatsappStatus,
-  };
+  const readiness = detail.readiness || {};
   renderHealthGrid('#status-cards', [
     {
       label: 'Asistente',
-      value: detail.bot.enabled ? 'Activo' : 'Inactivo',
-      tone: booleanTone(detail.bot.enabled),
+      value: assistantStatusLabels[readiness.assistant] || 'Sin estado',
+      tone: readinessTone[readiness.assistant] || 'neutral',
     },
     {
       label: 'WhatsApp',
-      value: connectionLabels[connection.state] || 'Sin estado',
-      tone: connectionTone(connection.state),
+      value: readinessLabel(readiness.whatsapp),
+      tone: readiness.whatsapp === 'CONNECTED' ? 'success' : 'warning',
     },
     {
       label: 'Inteligencia artificial',
-      value: detail.ai.configured ? (detail.ai.enabled ? 'Activa' : 'Inactiva') : 'Sin configurar',
-      tone: detail.ai.configured && detail.ai.enabled ? 'success' : 'warning',
+      value:
+        readiness.ai === 'GROQ_CONNECTED'
+          ? 'Groq conectado'
+          : readiness.ai === 'ERROR'
+            ? 'Error'
+            : 'No configurada',
+      tone:
+        readiness.ai === 'GROQ_CONNECTED'
+          ? 'success'
+          : readiness.ai === 'ERROR'
+            ? 'error'
+            : 'warning',
     },
     {
-      label: 'Solicitudes humanas',
-      value: detail.pendingRequests === 0 ? 'Al día' : `${detail.pendingRequests} pendientes`,
-      tone: detail.pendingRequests === 0 ? 'success' : 'warning',
+      label: 'Conocimiento',
+      value: readiness.knowledge === 'CONFIGURED' ? 'Configurado' : 'Vacío',
+      tone: readiness.knowledge === 'CONFIGURED' ? 'success' : 'warning',
     },
   ]);
 
   const quickActions = document.querySelector('#status-quick-actions');
+  const activationButton = actionButton(
+    detail.bot.enabled ? 'Pausar asistente' : 'Activar asistente',
+    detail.bot.enabled ? 'secondary' : '',
+    () => toggleBot(detail.bot),
+  );
+  if (!detail.bot.enabled && readiness.canActivate === false) {
+    activationButton.disabled = true;
+    activationButton.title = (readiness.missingRequirements || []).join(' ');
+  }
   quickActions.replaceChildren(
-    actionButton(
-      detail.bot.enabled ? 'Desactivar asistente' : 'Activar asistente',
-      detail.bot.enabled ? 'secondary' : '',
-      () => toggleBot(detail.bot),
-    ),
+    activationButton,
     actionButton('Revisar WhatsApp', 'secondary', () =>
       navigation.navigate('whatsapp', { focus: true }),
     ),
@@ -498,23 +623,10 @@ function renderOverview(detail) {
     ),
   );
 
-  const issues = [];
-  if (!detail.bot.enabled)
-    issues.push(['Asistente inactivo', 'Actívalo para comenzar a responder.']);
-  if (connection.state !== 'connected') {
-    issues.push([
-      'WhatsApp no está conectado',
-      detail.bot.meta?.configured
-        ? 'Revisa la conexión o vuelve a validar la configuración.'
-        : 'Completa la configuración de WhatsApp Cloud API en el servidor.',
-    ]);
-  }
-  if (!detail.ai.configured && detail.ai.provider !== 'disabled') {
-    issues.push([
-      'IA sin configurar',
-      'Configura el proveedor antes de activar respuestas con IA.',
-    ]);
-  }
+  const issues = (readiness.missingRequirements || []).map((description) => [
+    'Configuración pendiente',
+    description,
+  ]);
 
   const attentionPanel = document.querySelector('#attention-panel');
   const attentionList = document.querySelector('#attention-list');
@@ -540,14 +652,16 @@ async function loadBotSummary({ refreshForms = true } = {}) {
   updateAssistantContext(detail);
   renderOverview(detail);
   if (refreshForms) {
-    fillProfile(detail.profile);
+    fillProfile(detail.profile, detail.business);
     fillBotConfiguration(detail.bot);
+    fillAssistantBehavior(detail.behavior);
   }
   return detail;
 }
 
 async function selectBot(botId, section = 'status') {
   const previous = state.selectedBotId;
+  if (previous !== botId) resetAssistantSimulator();
   state.selectedBotId = botId;
   navigation.setContext('assistant');
   await loadBotSummary();
@@ -571,10 +685,10 @@ async function setGlobalContext(section = 'bots') {
   state.profile = null;
   state.visibleModules = [];
   navigation.setContext('global');
-  document.querySelector('#application-title').textContent = 'Business';
+  document.querySelector('#application-title').textContent = 'Digital';
   document.querySelector('#application-subtitle').textContent =
     'Atención inteligente para cada negocio.';
-  document.title = 'Neurobot Business';
+  document.title = 'Don Gato Digital';
   await navigation.navigate(section, { notify: false, focus: true });
   window.history.replaceState(null, '', section === 'bots' ? '#assistants' : `#${section}`);
   recordPanelEvent('GLOBAL_PANEL_OPENED');
@@ -585,21 +699,19 @@ async function loadWhatsApp() {
   const target = document.querySelector('#whatsapp-cards');
   setLoading(target, 'Comprobando WhatsApp…');
   const detail = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}`);
-  const connection = detail.runtime?.connection || {
-    state: detail.bot.whatsappStatus,
-    lastErrorCode: null,
-  };
+  const runtimeConnection = detail.runtime?.connection || { lastErrorCode: null };
+  const connection = detail.whatsapp;
   const meta = detail.bot.meta || { configured: false, webhookAvailable: false };
   renderHealthGrid(target, [
     {
       label: 'Estado',
-      value: connectionLabels[connection.state] || 'Sin estado',
-      tone: connectionTone(connection.state),
+      value: readinessLabel(detail.readiness?.whatsapp),
+      tone: detail.readiness?.whatsapp === 'CONNECTED' ? 'success' : 'warning',
     },
     {
-      label: 'Número',
-      value: detail.bot.maskedNumber || 'Sin número asociado',
-      tone: detail.bot.maskedNumber ? 'success' : 'warning',
+      label: 'Número de WhatsApp',
+      value: connection.displayPhoneNumber || 'Sin número asociado',
+      tone: connection.displayPhoneNumber ? 'success' : 'warning',
     },
     { label: 'Integración', value: 'WhatsApp Cloud API', tone: 'success' },
     {
@@ -615,10 +727,13 @@ async function loadWhatsApp() {
     messages.push('La integración requiere completar su configuración en el servidor.');
   if (meta.lastErrorCode)
     messages.push('Meta informó un problema que requiere revisión de la cuenta.');
-  if (connection.lastErrorCode)
+  if (runtimeConnection.lastErrorCode)
     messages.push('La conexión registró un problema y puede necesitar revalidación.');
   issues.classList.toggle('hidden', messages.length === 0);
   issues.replaceChildren(...messages.map((message) => element('p', { text: message })));
+  const setupForm = document.querySelector('#whatsapp-setup-form');
+  const setupInput = setupForm.querySelector(`[name="setupMode"][value="${connection.setupMode}"]`);
+  if (setupInput) setupInput.checked = true;
 }
 
 function knowledgePriorityLabel(value) {
@@ -919,6 +1034,8 @@ function clearMenuForm() {
   form.reset();
   form.elements.id.value = '';
   form.elements.expirationMinutes.value = 15;
+  form.elements.presentation.value = 'AUTOMATIC';
+  form.elements.listButtonLabel.value = 'Ver opciones';
   form.elements.enabled.checked = true;
   document.querySelector('#menu-form-title').textContent = 'Crear menú';
 }
@@ -927,7 +1044,15 @@ function openMenu(menu = null) {
   const form = document.querySelector('#menu-form');
   clearMenuForm();
   if (menu) {
-    for (const field of ['id', 'title', 'message', 'helpText', 'expirationMinutes']) {
+    for (const field of [
+      'id',
+      'title',
+      'message',
+      'helpText',
+      'expirationMinutes',
+      'presentation',
+      'listButtonLabel',
+    ]) {
       form.elements[field].value = menu[field];
     }
     form.elements.parentMenuId.value = menu.parentMenuId || '';
@@ -1024,6 +1149,8 @@ function resetMenuOptionForm() {
   form.reset();
   form.elements.id.value = '';
   form.elements.order.value = 1;
+  form.elements.description.value = '';
+  form.elements.section.value = '';
   form.elements.enabled.checked = true;
   document.querySelector('#menu-option-form-title').textContent = 'Agregar opción';
   renderMenuActionFields();
@@ -1033,7 +1160,15 @@ function openMenuOption(option = null) {
   const form = document.querySelector('#menu-option-form');
   resetMenuOptionForm();
   if (option) {
-    for (const field of ['id', 'menuId', 'label', 'order', 'actionType']) {
+    for (const field of [
+      'id',
+      'menuId',
+      'label',
+      'order',
+      'actionType',
+      'description',
+      'section',
+    ]) {
       form.elements[field].value = option[field];
     }
     form.elements.aliases.value = option.aliases.join('\n');
@@ -1048,25 +1183,29 @@ async function loadMenus() {
   if (!state.selectedBotId) return;
   const menusTarget = document.querySelector('#menus-list');
   setLoading(menusTarget, 'Cargando menús…');
-  const result = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/menus`);
-  state.menus = result.menus;
-  state.menuOptions = result.options;
+  const result = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/interactions`);
+  state.menus = result.persistent.menus;
+  state.menuOptions = result.persistent.options;
+  state.tools = result.tools;
+  state.behavior = result.dynamic;
+  fillAssistantBehavior(result.dynamic);
+  renderAssistantTools(result.tools);
   replaceOptions(
     document.querySelector('#menu-form').elements.parentMenuId,
-    result.menus,
+    state.menus,
     'id',
     'title',
     'Ninguno',
   );
   replaceOptions(
     document.querySelector('#menu-option-form').elements.menuId,
-    result.menus,
+    state.menus,
     'id',
     'title',
   );
   renderMenuActionFields();
 
-  if (result.menus.length === 0) {
+  if (state.menus.length === 0) {
     renderEmpty(
       menusTarget,
       'Todavía no hay menús',
@@ -1075,10 +1214,10 @@ async function loadMenus() {
     );
   } else {
     menusTarget.replaceChildren();
-    for (const menu of result.menus) {
+    for (const menu of state.menus) {
       const row = listRow(
         menu.title,
-        `${menu.isInitial ? 'Menú inicial · ' : ''}${menu.enabled ? 'Activo' : 'Inactivo'} · ${menu.expirationMinutes} min`,
+        `${menu.isInitial ? 'Menú inicial · ' : ''}${menu.enabled ? 'Activo' : 'Inactivo'} · ${menuPresentationLabel(menu.presentation)} · ${menu.expirationMinutes} min`,
       );
       const options = [
         { label: 'Editar', action: () => openMenu(menu) },
@@ -1112,18 +1251,18 @@ async function loadMenus() {
   }
 
   const optionsTarget = document.querySelector('#menu-options-list');
-  if (result.options.length === 0) {
+  if (state.menuOptions.length === 0) {
     renderEmpty(
       optionsTarget,
       'Todavía no hay opciones',
-      result.menus.length ? 'Agrega una opción a uno de tus menús.' : 'Crea primero un menú.',
-      result.menus.length ? actionButton('Agregar opción', '', () => openMenuOption()) : undefined,
+      state.menus.length ? 'Agrega una opción a uno de tus menús.' : 'Crea primero un menú.',
+      state.menus.length ? actionButton('Agregar opción', '', () => openMenuOption()) : undefined,
     );
     return;
   }
   optionsTarget.replaceChildren();
-  for (const option of result.options) {
-    const menu = result.menus.find((candidate) => candidate.id === option.menuId);
+  for (const option of state.menuOptions) {
+    const menu = state.menus.find((candidate) => candidate.id === option.menuId);
     const row = listRow(
       `${option.order}. ${option.label}`,
       `${menu?.title || 'Menú no disponible'} · ${actionLabels[option.actionType] || option.actionType} · ${option.enabled ? 'Activa' : 'Inactiva'}`,
@@ -1153,6 +1292,58 @@ async function loadMenus() {
       ]),
     );
     optionsTarget.append(row);
+  }
+}
+
+function menuPresentationLabel(value) {
+  if (value === 'BUTTONS') return 'Botones';
+  if (value === 'LIST') return 'Lista';
+  return 'Presentación automática';
+}
+
+function toolStateLabel(tool) {
+  if (tool.state === 'FUTURE') return 'Próximamente · requiere fuente real';
+  if (tool.state === 'ENABLED') return 'Disponible';
+  return 'Desactivada';
+}
+
+function renderAssistantTools(tools) {
+  const target = document.querySelector('#assistant-tools-list');
+  state.tools = tools;
+  if (tools.length === 0) {
+    renderEmpty(target, 'Sin herramientas', 'No hay herramientas registradas para este asistente.');
+    return;
+  }
+  target.replaceChildren();
+  for (const tool of tools) {
+    const row = listRow(
+      tool.name,
+      `${tool.description} · Permisos: ${tool.permissions.join(', ')} · ${toolStateLabel(tool)}`,
+    );
+    const toggle = actionButton(
+      tool.state === 'ENABLED' ? 'Desactivar' : 'Activar',
+      'secondary',
+      async () => {
+        const result = await api(
+          `/api/bots/${encodeURIComponent(state.selectedBotId)}/tools/${encodeURIComponent(tool.id)}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify({
+              enabled: tool.state !== 'ENABLED',
+              permissions: tool.permissions,
+            }),
+          },
+        );
+        renderAssistantTools(result.tools);
+        notify(tool.state === 'ENABLED' ? 'Herramienta desactivada.' : 'Herramienta activada.');
+      },
+    );
+    if (tool.state === 'FUTURE') {
+      toggle.disabled = true;
+      toggle.textContent = 'Requiere fuente real';
+    }
+    row.append(toggle);
+    target.append(row);
   }
 }
 
@@ -1500,31 +1691,30 @@ async function loadAI({ renderStatistics = false } = {}) {
   setLoading(target, 'Cargando inteligencia artificial…');
   const [result, global] = await Promise.all([
     api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/ai`),
-    api('/api/ai/global-limits'),
+    state.role === 'global_admin' ? api('/api/ai/global-limits') : Promise.resolve(null),
   ]);
   state.ai = result;
 
   const form = document.querySelector('#ai-settings-form');
+  populateAIModelSelects(result.settings.model);
   for (const [field, value] of Object.entries(result.settings)) {
     const input = form.elements[field];
     if (!input) continue;
     if (input.type === 'checkbox') input.checked = Boolean(value);
+    else if (field === 'provider' && value === 'disabled') input.value = 'groq';
     else input.value = value;
   }
   form.elements.confirmIncreasedLimits.checked = false;
-
-  const credentialForm = document.querySelector('#ai-credential-form');
-  credentialForm.elements.mode.value = result.credential.mode;
-  credentialForm.elements.apiKey.value = '';
-  credentialForm.elements.apiKey.disabled = result.credential.mode !== 'per_bot';
 
   const queueForm = document.querySelector('#ai-queue-settings-form');
   for (const [field, value] of Object.entries(result.queue.settings)) {
     if (queueForm.elements[field]) queueForm.elements[field].value = value;
   }
   const globalForm = document.querySelector('#global-ai-limits-form');
-  for (const [field, value] of Object.entries(global.limits)) {
-    if (globalForm.elements[field]) globalForm.elements[field].value = value;
+  if (global) {
+    for (const [field, value] of Object.entries(global.limits)) {
+      if (globalForm.elements[field]) globalForm.elements[field].value = value;
+    }
   }
 
   renderHealthGrid(target, [
@@ -2033,6 +2223,71 @@ async function restartBot() {
   notify('Configuración de WhatsApp revalidada.');
 }
 
+function resetAssistantSimulator() {
+  const messages = document.querySelector('#assistant-simulator-messages');
+  messages.replaceChildren();
+  const empty = element('div', { className: 'simulator-empty' });
+  empty.append(
+    element('strong', { text: 'Inicia una conversación de prueba' }),
+    element('span', { text: 'Por ejemplo: ¿Cuánto es 2 + 2? o ¿Cuál es el horario?' }),
+  );
+  messages.append(empty);
+  const debug = document.querySelector('#assistant-simulator-debug');
+  debug.classList.add('hidden');
+  debug.querySelector('dl').replaceChildren();
+  document.querySelector('#assistant-simulator-form').reset();
+}
+
+function appendSimulatorMessage(kind, text, interaction = null) {
+  const messages = document.querySelector('#assistant-simulator-messages');
+  messages.querySelector('.simulator-empty')?.remove();
+  const message = element('div', {
+    className: `simulator-message ${kind}`,
+    attributes: { role: kind === 'assistant' ? 'status' : undefined },
+  });
+  message.append(
+    element('span', { text: kind === 'assistant' ? 'Asistente' : 'Tú' }),
+    element('p', { text }),
+  );
+  if (kind === 'assistant' && interaction?.options?.length) {
+    const options = element('div', {
+      className: `simulator-options ${interaction.presentation?.toLowerCase() || 'text'}`,
+      attributes: { 'aria-label': 'Opciones simuladas' },
+    });
+    for (const option of interaction.options) {
+      const item = element('span', { text: option.label });
+      if (option.description) item.title = option.description;
+      options.append(item);
+    }
+    message.append(options);
+  }
+  messages.append(message);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function renderSimulatorDebug(debugData) {
+  const debug = document.querySelector('#assistant-simulator-debug');
+  const list = debug.querySelector('dl');
+  list.replaceChildren();
+  const values = [
+    ['Ruta', debugData.route],
+    ['Proveedor', providerLabel(debugData.provider)],
+    ['Modelo', modelLabel(debugData.model)],
+    ['Conocimiento utilizado', debugData.knowledgeUsed ? 'Sí' : 'No'],
+    ['Herramienta', debugData.toolCalled || 'Ninguna'],
+    ['Resultados reales', String(debugData.toolResultCount ?? 0)],
+    ['Presentación', debugData.presentation || 'TEXT'],
+    ['Acciones', (debugData.actions || []).join(', ') || 'Ninguna'],
+    ['Tiempo de respuesta', `${debugData.durationMs} ms`],
+    ['Estado', debugData.status],
+    ['Error', debugData.error || 'Ninguno'],
+  ];
+  for (const [label, value] of values) {
+    list.append(element('dt', { text: label }), element('dd', { text: value }));
+  }
+  debug.classList.remove('hidden');
+}
+
 function readFileAsBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new window.FileReader();
@@ -2057,30 +2312,44 @@ function configureForms() {
   document.querySelector('[data-cancel-create]').addEventListener('click', closeCreateBot);
 
   const createForm = document.querySelector('#create-bot-form');
-  createForm.elements.id.addEventListener('input', () => {
-    createForm.dataset.identifierEdited = 'true';
+  document.querySelector('#wizard-previous').addEventListener('click', () => {
+    showWizardStep(state.wizardStep - 1);
   });
-  createForm.elements.organizationName.addEventListener('input', (event) => {
-    if (createForm.dataset.identifierEdited === 'true') return;
-    createForm.elements.id.value = normalizeBotIdentifier(event.currentTarget.value);
+  document.querySelector('#wizard-next').addEventListener('click', () => {
+    if (validateWizardStep()) showWizardStep(state.wizardStep + 1);
   });
   bindAsyncForm(createForm, async (_event, form) => {
     const payload = {
-      id: normalizeBotIdentifier(form.elements.id.value || form.elements.organizationName.value),
       organizationName: form.elements.organizationName.value,
       botName: form.elements.botName.value,
+      description: form.elements.description.value,
+      language: form.elements.language.value,
       organizationType: form.elements.organizationType.value,
       timezone: form.elements.timezone.value,
       connectorType: 'WHATSAPP_CLOUD_API',
+      whatsappSetupMode: form.elements.whatsappSetupMode.value,
       provider: form.elements.provider.value,
+      model: form.elements.model.value,
+      behavior: {
+        showInitialMenuOnGreeting: form.elements.showInitialMenuOnGreeting.checked,
+        allowFreeQuestions: form.elements.allowFreeQuestions.checked,
+        useAIForUnmatched: form.elements.useAIForUnmatched.checked,
+        useBusinessKnowledge: form.elements.useBusinessKnowledge.checked,
+        allowDynamicButtons: form.elements.allowDynamicButtons.checked,
+        allowDynamicLists: form.elements.allowDynamicLists.checked,
+        allowBusinessDataQueries: form.elements.allowBusinessDataQueries.checked,
+        showAISuggestedActions: form.elements.showAISuggestedActions.checked,
+        allowWriteTools: false,
+        fallbackMessage: form.elements.fallbackMessage.value,
+      },
       preset: form.elements.preset.value,
       menuType: 'automatic',
     };
     const result = await api('/api/bots', { method: 'POST', body: JSON.stringify(payload) });
     closeCreateBot();
     await loadBots();
-    await selectBot(result.bot.id, 'whatsapp');
-    notify('Asistente creado. Completa ahora su conexión de WhatsApp.');
+    await selectBot(result.bot.id, 'test-center');
+    notify('Borrador guardado. Pruébalo y revisa los requisitos antes de activarlo.');
   });
 
   bindAsyncForm('#profile-form', async (_event, form) => {
@@ -2107,6 +2376,7 @@ function configureForms() {
       primaryColor: form.elements.primaryColor.value,
       secondaryColor: form.elements.secondaryColor.value,
       timezone: form.elements.timezone.value,
+      language: form.elements.language.value,
       applicationName: form.elements.applicationName.value,
       headerText: form.elements.headerText.value,
       footerText: form.elements.footerText.value,
@@ -2118,6 +2388,45 @@ function configureForms() {
     });
     await Promise.all([loadBotSummary(), loadBots({ background: true })]);
     notify('Perfil guardado.');
+  });
+
+  bindAsyncForm('#assistant-behavior-form', async (_event, form) => {
+    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/behavior`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        showInitialMenuOnGreeting: form.elements.showInitialMenuOnGreeting.checked,
+        allowFreeQuestions: form.elements.allowFreeQuestions.checked,
+        useAIForUnmatched: form.elements.useAIForUnmatched.checked,
+        useBusinessKnowledge: form.elements.useBusinessKnowledge.checked,
+        ...dynamicBehaviorPayload(),
+        fallbackMessage: form.elements.fallbackMessage.value,
+        humanHandoffReady: false,
+      }),
+    });
+    await Promise.all([loadBotSummary(), loadBots({ background: true })]);
+    notify('Comportamiento guardado.');
+  });
+
+  bindAsyncForm('#dynamic-interactions-form', async () => {
+    const result = await api(
+      `/api/bots/${encodeURIComponent(state.selectedBotId)}/interactions/dynamic`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(dynamicBehaviorPayload()),
+      },
+    );
+    fillAssistantBehavior(result.behavior);
+    await Promise.all([loadBotSummary({ refreshForms: false }), loadBots({ background: true })]);
+    notify('Interacciones dinámicas guardadas.');
+  });
+
+  bindAsyncForm('#whatsapp-setup-form', async (_event, form) => {
+    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/whatsapp/setup`, {
+      method: 'PATCH',
+      body: JSON.stringify({ setupMode: form.elements.setupMode.value }),
+    });
+    await loadWhatsApp();
+    notify('Opción de conexión guardada.');
   });
 
   bindAsyncForm('#bot-configuration-form', async (_event, form) => {
@@ -2248,6 +2557,8 @@ function configureForms() {
         title: form.elements.title.value,
         message: form.elements.message.value,
         helpText: form.elements.helpText.value,
+        presentation: form.elements.presentation.value,
+        listButtonLabel: form.elements.listButtonLabel.value,
         enabled: form.elements.enabled.checked,
         isInitial: form.elements.isInitial.checked,
         expirationMinutes: Number(form.elements.expirationMinutes.value),
@@ -2265,6 +2576,8 @@ function configureForms() {
         ...(form.elements.id.value ? { id: Number(form.elements.id.value) } : {}),
         menuId: Number(form.elements.menuId.value),
         label: form.elements.label.value,
+        description: form.elements.description.value,
+        section: form.elements.section.value,
         aliases: lines(form.elements.aliases.value),
         order: Number(form.elements.order.value),
         actionType: form.elements.actionType.value,
@@ -2376,12 +2689,6 @@ function configureForms() {
     });
   });
 
-  document
-    .querySelector('#ai-credential-form [name="mode"]')
-    .addEventListener('change', (event) => {
-      document.querySelector('#ai-credential-form').elements.apiKey.disabled =
-        event.currentTarget.value !== 'per_bot';
-    });
   bindAsyncForm('#ai-settings-form', async (_event, form) => {
     const payload = {};
     for (const input of form.elements) {
@@ -2399,34 +2706,6 @@ function configureForms() {
     });
     await loadAI();
     notify('Configuración de IA guardada.');
-  });
-  bindAsyncForm('#ai-credential-form', async (_event, form) => {
-    await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/ai-key`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        mode: form.elements.mode.value,
-        ...(form.elements.mode.value === 'per_bot' ? { apiKey: form.elements.apiKey.value } : {}),
-      }),
-    });
-    form.elements.apiKey.value = '';
-    await loadAI();
-    notify('Conexión del proveedor guardada.');
-  });
-  document.querySelector('#delete-ai-key').addEventListener('click', () => {
-    void withBusy(document.querySelector('#delete-ai-key'), async () => {
-      const confirmation = await confirmAction({
-        title: 'Eliminar clave exclusiva',
-        description: 'El asistente volverá a depender de la configuración global.',
-        confirmLabel: 'Eliminar clave',
-        danger: true,
-      });
-      if (!confirmation) return;
-      await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/ai-key`, {
-        method: 'DELETE',
-      });
-      await loadAI();
-      notify('Clave exclusiva eliminada.');
-    });
   });
   bindAsyncForm('#ai-queue-settings-form', async (_event, form) => {
     const payload = Object.fromEntries(
@@ -2518,6 +2797,19 @@ function configureForms() {
   });
   document.querySelector('#test-menu').addEventListener('click', () => {
     void withBusy(document.querySelector('#test-menu'), testMenu);
+  });
+  bindAsyncForm('#assistant-simulator-form', async (_event, form) => {
+    const message = form.elements.message.value.trim();
+    if (!message) return;
+    appendSimulatorMessage('user', message);
+    const result = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}/simulator`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    });
+    appendSimulatorMessage('assistant', result.response, result);
+    renderSimulatorDebug(result.debug);
+    form.reset();
+    form.elements.message.focus();
   });
 
   const historyFilters = document.querySelector('#history-filters');
@@ -2653,6 +2945,8 @@ async function initialize({ force = false } = {}) {
   if (initializationPromise) return initializationPromise;
   initializationPromise = (async () => {
     configureForms();
+    applyRoleVisibility();
+    await loadAIProviders();
     await loadBots();
     const route = window.location.hash.replace(/^#/u, '').split('/').filter(Boolean);
     if (
@@ -2662,7 +2956,11 @@ async function initialize({ force = false } = {}) {
     ) {
       await selectBot(route[1], route[2] || 'status');
     } else {
-      const section = ['trash', 'administrators'].includes(route[0]) ? route[0] : 'bots';
+      const section =
+        ['trash', 'administrators'].includes(route[0]) &&
+        (route[0] !== 'administrators' || state.role === 'global_admin')
+          ? route[0]
+          : 'bots';
       navigation.setContext('global');
       await navigation.navigate(section, { focus: false });
     }
@@ -2673,7 +2971,25 @@ async function initialize({ force = false } = {}) {
   return initializationPromise;
 }
 
+function applyRoleVisibility() {
+  const isGlobal = state.role === 'global_admin';
+  document.querySelector('#open-create-bot')?.classList.toggle('hidden', !isGlobal);
+  document
+    .querySelector('.nav-item[data-section="administrators"]')
+    ?.classList.toggle('hidden', !isGlobal);
+  document
+    .querySelector('#global-ai-limits-form')
+    ?.closest('details')
+    ?.classList.toggle('hidden', !isGlobal);
+  if (!isGlobal) closeCreateBot();
+}
+
+function setRole(role) {
+  state.role = role === 'business_admin' ? 'business_admin' : 'global_admin';
+  if (configured) applyRoleVisibility();
+}
+
 export function createAssistantPanel(options) {
   navigation = options.navigation;
-  return { initialize, reset, enterGlobal, enterSection };
+  return { initialize, reset, enterGlobal, enterSection, setRole };
 }

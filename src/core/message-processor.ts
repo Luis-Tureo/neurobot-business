@@ -75,7 +75,13 @@ export class MessageProcessor {
         interactiveReply,
       );
       if (handled) return 'responded';
-      return (await this.conversationFlow.start(message.chatId, conversationHash, customerHash))
+      return (await this.conversationFlow.start(
+        message.chatId,
+        conversationHash,
+        customerHash,
+        new Date(),
+        true,
+      ))
         ? 'responded'
         : 'ignored';
     } catch (error) {

@@ -8,7 +8,6 @@ import { createLogger } from '../src/infrastructure/logger.js';
 import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { Anonymizer } from '../src/security/anonymizer.js';
-import { SecretVault } from '../src/security/secret-vault.js';
 
 function storeProfile(name: string) {
   return createProfileFromPreset({
@@ -88,16 +87,6 @@ describe('aislamiento de asistentes empresariales', () => {
     expect(database.listHumanAssistanceRequests(second.id)).toHaveLength(0);
   });
 
-  it('cifra claves por negocio con autenticación de ámbito', () => {
-    const vault = new SecretVault('k'.repeat(32));
-    const encrypted = vault.encrypt('clave-de-prueba-no-real', 'bot:tienda-uno:groq');
-    expect(encrypted.encrypted).not.toContain('clave-de-prueba-no-real');
-    expect(vault.decrypt(encrypted.encrypted, 'bot:tienda-uno:groq')).toBe(
-      'clave-de-prueba-no-real',
-    );
-    expect(() => vault.decrypt(encrypted.encrypted, 'bot:tienda-dos:groq')).toThrow();
-  });
-
   it('selecciona menús y mantiene estado temporal privado', async () => {
     const bot = database.createBot({
       id: 'tienda-menu',
@@ -170,13 +159,7 @@ describe('aislamiento de asistentes empresariales', () => {
     const logger = createLogger('silent');
     const manager = new MultiBotManager(
       database,
-      new AIProviderFactory(
-        database,
-        new SecretVault(undefined),
-        undefined,
-        'disabled',
-        'disabled',
-      ),
+      new AIProviderFactory(database, undefined, 'disabled', 'disabled'),
       new Anonymizer('x'.repeat(32)),
       logger,
       {
@@ -221,13 +204,7 @@ describe('aislamiento de asistentes empresariales', () => {
 
     new MultiBotManager(
       database,
-      new AIProviderFactory(
-        database,
-        new SecretVault(undefined),
-        undefined,
-        'disabled',
-        'disabled',
-      ),
+      new AIProviderFactory(database, undefined, 'disabled', 'disabled'),
       new Anonymizer('x'.repeat(32)),
       logger,
       {

@@ -19,6 +19,7 @@ const deprecatedKeys = new Set([
   'RATE_WINDOW_SECONDS',
   'USER_COOLDOWN_SECONDS',
   'REPEAT_WINDOW_SECONDS',
+  'APP_ENCRYPTION_KEY',
 ]);
 
 const entries: EnvironmentEntry[] = [
@@ -56,12 +57,7 @@ const entries: EnvironmentEntry[] = [
   { key: 'META_WHATSAPP_ACCOUNTS_JSON', createValue: () => '' },
   { key: 'AI_PROVIDER', createValue: () => 'groq' },
   { key: 'GROQ_API_KEY', createValue: () => '' },
-  { key: 'GROQ_MODEL', createValue: () => 'llama-3.1-8b-instant' },
-  {
-    key: 'APP_ENCRYPTION_KEY',
-    createValue: () => randomBytes(32).toString('base64url'),
-    replaceWhenBlank: true,
-  },
+  { key: 'GROQ_MODEL', createValue: () => 'openai/gpt-oss-120b' },
 ];
 
 function findEntryIndex(lines: string[], key: string): number {

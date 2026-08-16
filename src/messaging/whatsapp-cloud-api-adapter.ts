@@ -149,6 +149,7 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
       return true;
     }
     if (payload.kind === 'list' && options.length >= 1 && options.length <= 10) {
+      const sections = groupListSections(payload.title, options);
       await this.sendPayload({
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
@@ -159,16 +160,8 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
           header: { type: 'text', text: payload.title.slice(0, 60) },
           body: { text: payload.message.slice(0, 1024) },
           action: {
-            button: 'Ver opciones',
-            sections: [
-              {
-                title: payload.title.slice(0, 24),
-                rows: options.map((option) => ({
-                  id: option.id.slice(0, 200),
-                  title: option.label.slice(0, 24),
-                })),
-              },
-            ],
+            button: (payload.listButtonLabel ?? 'Ver opciones').slice(0, 20),
+            sections,
           },
         },
       });
@@ -372,6 +365,30 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
       );
     }
   }
+}
+
+function groupListSections(
+  fallbackTitle: string,
+  options: InteractiveMenuPayload['options'],
+): Array<{
+  title: string;
+  rows: Array<{ id: string; title: string; description?: string }>;
+}> {
+  const groups = new Map<string, InteractiveMenuPayload['options']>();
+  for (const option of options) {
+    const section = option.section?.trim().slice(0, 24) || fallbackTitle.slice(0, 24);
+    groups.set(section, [...(groups.get(section) ?? []), option]);
+  }
+  return [...groups.entries()].map(([title, rows]) => ({
+    title,
+    rows: rows.map((option) => ({
+      id: option.id.slice(0, 200),
+      title: option.label.slice(0, 24),
+      ...(option.description?.trim()
+        ? { description: option.description.trim().slice(0, 72) }
+        : {}),
+    })),
+  }));
 }
 
 export function isValidMetaWebhookPayload(payload: unknown): boolean {

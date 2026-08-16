@@ -5,14 +5,22 @@ import type { ConversationState, MenuDefinition, MenuOption } from '../domain/ty
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import type { AppDatabase } from '../persistence/database.js';
 import { BusinessHoursService } from './business-hours-service.js';
+import { ActionRegistry } from './action-registry.js';
+import { AssistantRuntimeService } from './assistant-runtime-service.js';
 import { CatalogService } from './catalog-service.js';
+import { ConversationRouter } from './conversation-router.js';
 import { InteractiveMessageAdapter } from './interactive-message-adapter.js';
 import type { OutboundMessageQueueService } from './outbound-message-queue-service.js';
+import { WhatsAppRenderer } from '../messaging/whatsapp-renderer.js';
 
 export class ConversationFlowService {
   private readonly interactive: InteractiveMessageAdapter;
   private readonly catalog: CatalogService;
   private readonly hours: BusinessHoursService;
+  private readonly actions = new ActionRegistry();
+  private readonly router = new ConversationRouter();
+  private readonly renderer = new WhatsAppRenderer();
+  private readonly runtime?: AssistantRuntimeService;
 
   public constructor(
     private readonly database: AppDatabase,
@@ -26,6 +34,9 @@ export class ConversationFlowService {
     this.interactive = new InteractiveMessageAdapter(client, logger, botId);
     this.catalog = new CatalogService(database, botId);
     this.hours = new BusinessHoursService(database, botId);
+    if (queryService !== undefined) {
+      this.runtime = new AssistantRuntimeService(database, queryService, logger, botId);
+    }
   }
 
   public async start(
@@ -33,8 +44,11 @@ export class ConversationFlowService {
     chatHash: string,
     userHash: string,
     now = new Date(),
+    respectGreetingPreference = false,
   ): Promise<boolean> {
     const bot = this.database.getBot(this.botId);
+    const behavior = this.database.getAssistantBehavior(this.botId);
+    if (respectGreetingPreference && !behavior.showInitialMenuOnGreeting) return false;
     const menu = this.database
       .listMenus(this.botId)
       .find((candidate) => candidate.isInitial && candidate.enabled);
@@ -65,6 +79,18 @@ export class ConversationFlowService {
     const bot = this.database.getBot(this.botId);
     if (bot === null || !bot.capabilities.conversationContinuationEnabled) return false;
     const normalized = normalizeSelection(body);
+    const behavior = this.database.getAssistantBehavior(this.botId);
+    if (/^dyn_[a-f0-9]{32}$/u.test(body.trim()) && this.runtime !== undefined) {
+      const result = this.runtime.resolveDynamicInteraction({
+        id: body.trim(),
+        conversationHash: chatHash,
+        customerHash: userHash,
+        channel: 'WHATSAPP',
+        now,
+      });
+      await this.renderer.send(this.client, chatId, result.response);
+      return true;
+    }
     if (/^\d+$/u.test(normalized) && !bot.capabilities.numericMenuRepliesEnabled) return false;
     if (normalized === 'menu' || normalized === 'inicio')
       return this.start(chatId, chatHash, userHash, now);
@@ -89,14 +115,22 @@ export class ConversationFlowService {
           currentMenuId: initialMenu.id,
           previousMenuId: null,
           currentStep: 'waiting_option',
-          expiresAt: new Date(
-            now.getTime() + initialMenu.expirationMinutes * 60_000,
-          ).toISOString(),
+          expiresAt: new Date(now.getTime() + initialMenu.expirationMinutes * 60_000).toISOString(),
           updatedAt: now.toISOString(),
         };
         return this.executeOption(chatId, chatHash, userHash, initialState, selected, now);
       }
-      if (isGreeting(normalized) || /^\d+$/u.test(normalized) || selected !== undefined) return false;
+      if (isGreeting(normalized)) {
+        if (behavior.showInitialMenuOnGreeting) return false;
+        if (behavior.allowFreeQuestions && behavior.useAIForUnmatched) {
+          return this.answerFreeText(chatId, chatHash, userHash, body, now);
+        }
+        return false;
+      }
+      if (/^\d+$/u.test(normalized) || selected !== undefined) {
+        return this.start(chatId, chatHash, userHash, now);
+      }
+      if (!behavior.allowFreeQuestions || !behavior.useAIForUnmatched) return false;
       return this.answerFreeText(chatId, chatHash, userHash, body, now);
     }
     if (new Date(state.expiresAt).getTime() <= now.getTime()) {
@@ -128,7 +162,12 @@ export class ConversationFlowService {
     if (selected === undefined) {
       const menu = this.database.getMenu(this.botId, state.currentMenuId);
       const isFreeText = !allowInitialSelection && !/^\d+$/u.test(normalized);
-      if (isFreeText && this.queryService !== undefined) {
+      if (
+        isFreeText &&
+        behavior.allowFreeQuestions &&
+        behavior.useAIForUnmatched &&
+        this.queryService !== undefined
+      ) {
         await this.answerFreeText(chatId, chatHash, userHash, body, now);
         if (menu !== null)
           this.saveState(
@@ -182,6 +221,28 @@ export class ConversationFlowService {
       return true;
     }
     if (this.queryService === undefined) return false;
+    const route = this.router.route({ body });
+    if (
+      route.route === 'AI_TOOL' &&
+      route.suggestedToolId !== 'get_business_hours' &&
+      this.runtime !== undefined
+    ) {
+      const result = await this.runtime.handleFreeText({
+        message: body,
+        conversationHash: chatHash,
+        customerHash: userHash,
+        channel: 'WHATSAPP',
+        now,
+        onWaitNotice: async () => {
+          await this.sendQueued(
+            chatId,
+            'Estoy atendiendo varias consultas. Tu pregunta quedó en espera; no necesitas repetirla.',
+          );
+        },
+      });
+      await this.renderer.send(this.client, chatId, result.response);
+      return true;
+    }
     const answer = await this.queryService.answerQuestion(
       body.trim(),
       chatHash,
@@ -194,12 +255,37 @@ export class ConversationFlowService {
         );
       },
       'free_text_fallback',
+      {
+        useBusinessKnowledge: this.database.getAssistantBehavior(this.botId).useBusinessKnowledge,
+        allowGeneralAnswer: this.database.getAssistantBehavior(this.botId).allowFreeQuestions,
+      },
     );
     await this.sendQueued(chatId, answer.text);
     return true;
   }
 
   private async executeOption(
+    chatId: string,
+    chatHash: string,
+    userHash: string,
+    state: ConversationState,
+    option: MenuOption,
+    now: Date,
+  ): Promise<boolean> {
+    const bot = this.database.getBot(this.botId);
+    if (bot === null) return false;
+    return this.actions.execute({
+      actionId: option.actionType,
+      assistantId: this.botId,
+      businessId: bot.businessId,
+      expectedBusinessId: bot.businessId,
+      userAuthorized: true,
+      payload: option.actionPayload,
+      perform: () => this.executeRegisteredOption(chatId, chatHash, userHash, state, option, now),
+    });
+  }
+
+  private async executeRegisteredOption(
     chatId: string,
     chatHash: string,
     userHash: string,

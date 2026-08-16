@@ -9,6 +9,7 @@ export type ConversationMessageStatus =
 
 export type ConversationRecord = {
   id: string;
+  businessId: string | null;
   assistantId: string | null;
   phoneNumberId: string;
   waId: string;
@@ -53,6 +54,7 @@ export type ConversationListQuery = {
   pageSize: number;
   search?: string;
   assistantId?: string;
+  businessIds?: string[];
   from?: string;
   toExclusive?: string;
 };
@@ -67,6 +69,7 @@ export type PaginatedResult<T> = {
 
 type ConversationRow = {
   id: string;
+  business_id: string | null;
   assistant_id: string | null;
   assistant_name_snapshot: string;
   phone_number_id: string;
@@ -276,6 +279,18 @@ export class ConversationHistoryRepository {
       where.push('conversations.assistant_id=@assistantId');
       parameters.assistantId = requiredText(query.assistantId, 120, 'assistantId');
     }
+    if (query.businessIds !== undefined) {
+      if (query.businessIds.length === 0) {
+        where.push('0=1');
+      } else {
+        const placeholders = query.businessIds.map((businessId, index) => {
+          const key = `businessId${index}`;
+          parameters[key] = requiredText(businessId, 120, 'businessId');
+          return `@${key}`;
+        });
+        where.push(`conversations.business_id IN (${placeholders.join(',')})`);
+      }
+    }
     if (query.from) {
       where.push('conversations.last_message_at>=@from');
       parameters.from = normalizeTimestamp(query.from);
@@ -388,26 +403,29 @@ export class ConversationHistoryRepository {
   }): ConversationRow {
     const assistant = this.database
       .prepare(
-        `SELECT profiles.bot_name
+        `SELECT profiles.bot_name,bots.business_id
          FROM bot_profiles mapping
          JOIN assistant_profiles profiles ON profiles.id=mapping.profile_id
+         JOIN bots ON bots.id=mapping.bot_id
          WHERE mapping.bot_id=?`,
       )
-      .get(input.assistantId) as { bot_name: string } | undefined;
+      .get(input.assistantId) as { bot_name: string; business_id: string } | undefined;
     if (assistant === undefined) throw new Error('ASSISTANT_NOT_FOUND');
     this.database
       .prepare(
         `INSERT INTO conversations(
-           id,assistant_id,assistant_name_snapshot,phone_number_id,wa_id,contact_name,status,
+           id,business_id,assistant_id,assistant_name_snapshot,phone_number_id,wa_id,contact_name,status,
            created_at,updated_at,last_message_at
-         ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
          ON CONFLICT(assistant_id,phone_number_id,wa_id) DO UPDATE SET
+           business_id=excluded.business_id,
            assistant_name_snapshot=excluded.assistant_name_snapshot,
            contact_name=COALESCE(excluded.contact_name,conversations.contact_name),
            status='active',updated_at=excluded.updated_at`,
       )
       .run(
         randomUUID(),
+        assistant.business_id,
         input.assistantId,
         assistant.bot_name,
         input.phoneNumberId,
@@ -452,6 +470,7 @@ function sanitizeConversationErrorCode(value: string | null | undefined): string
 function mapConversation(row: ConversationRow): ConversationRecord {
   return {
     id: row.id,
+    businessId: row.business_id,
     assistantId: row.assistant_id,
     phoneNumberId: row.phone_number_id,
     waId: row.wa_id,

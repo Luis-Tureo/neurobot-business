@@ -11,7 +11,6 @@ describe('módulo simplificado de inteligencia artificial', () => {
     for (const id of [
       'ai-status-cards',
       'ai-settings-form',
-      'ai-credential-form',
       'ai-queue-settings-form',
       'ai-queue-simulator',
       'global-ai-limits-form',
@@ -20,6 +19,9 @@ describe('módulo simplificado de inteligencia artificial', () => {
     ]) {
       expect(html).toContain(`id="${id}"`);
     }
+    expect(html).toContain('Credencial administrada por Don Gato Digital');
+    expect(html).not.toContain('id="ai-credential-form"');
+    expect(html).toContain('data-ai-model-select');
   });
 
   it('mantiene cerradas por defecto las opciones técnicas', () => {

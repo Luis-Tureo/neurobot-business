@@ -1,13 +1,27 @@
+import { randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
 import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
-import type { AssistantProfile, BotRecord, ConnectorType, MenuType } from '../domain/types.js';
+import { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
+import { AssistantQueryService } from '../ai/assistant-query-service.js';
+import type {
+  AssistantBehaviorSettings,
+  AssistantProfile,
+  BotRecord,
+  ConnectorType,
+  MenuType,
+  WhatsAppSetupMode,
+} from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import { WhatsAppCloudApiAdapter } from '../messaging/whatsapp-cloud-api-adapter.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
-import type { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
 import { BotInstance, type BotInstanceOptions } from './bot-instance.js';
+import {
+  AssistantRuntimeService,
+  type AssistantRuntimeResult,
+} from './assistant-runtime-service.js';
+import { TenantResolver } from './tenant-resolver.js';
 
 export type MetaBotAccount = {
   botId: string;
@@ -28,6 +42,7 @@ export class MultiBotManager {
   private readonly instances = new Map<string, BotInstance>();
   private readonly started = new Set<string>();
   private readonly accountsByBot = new Map<string, MetaBotAccount>();
+  private readonly tenantResolver: TenantResolver;
 
   public constructor(
     private readonly database: AppDatabase,
@@ -48,10 +63,15 @@ export class MultiBotManager {
         logger,
       ),
   ) {
+    this.tenantResolver = new TenantResolver(database);
     for (const account of meta.accounts) {
       this.accountsByBot.set(account.botId, account);
       if (account.phoneNumberId !== undefined && this.database.getBot(account.botId) !== null) {
-        this.database.configureMetaConnector(account.botId, account.phoneNumberId);
+        this.database.configureMetaConnector(account.botId, {
+          phoneNumberId: account.phoneNumberId,
+          ...(account.wabaId === undefined ? {} : { wabaId: account.wabaId }),
+          credentialReference: `environment:meta/${account.botId}`,
+        });
       } else if (this.database.getBot(account.botId) === null) {
         this.logger.warn(
           { operation: 'META_ACCOUNT_ASSISTANT_MISSING', botId: account.botId },
@@ -115,9 +135,18 @@ export class MultiBotManager {
   }
 
   public async create(input: {
-    id: string;
+    id?: string;
+    business?: {
+      name: string;
+      description: string;
+      language: string;
+      timezone: string;
+    };
     connectorType: ConnectorType;
     menuType: MenuType;
+    whatsappSetupMode?: WhatsAppSetupMode;
+    ai?: { provider: 'groq' | 'disabled'; model: string; enabled: boolean };
+    behavior?: Partial<Omit<AssistantBehaviorSettings, 'assistantId' | 'updatedAt'>>;
     profile: Omit<AssistantProfile, 'id' | 'active' | 'createdAt' | 'updatedAt'>;
   }): Promise<BotRecord> {
     const bot = this.database.createBot({ ...input });
@@ -134,8 +163,7 @@ export class MultiBotManager {
     payload: unknown,
     acceptedEventIds: ReadonlySet<string>,
   ): Promise<{ messages: number; statuses: number; unsupportedMessages: number }> {
-    const botId = this.database.getBotIdByMetaPhoneNumberId(phoneNumberId);
-    if (botId === null) throw new Error('META_PHONE_NUMBER_NOT_CONFIGURED');
+    const botId = this.tenantResolver.requireByPhoneNumberId(phoneNumberId).assistantId;
     if (!this.started.has(botId)) await this.start(botId);
     const client = this.client(botId);
     if (!(client instanceof WhatsAppCloudApiAdapter)) throw new Error('META_ADAPTER_NOT_AVAILABLE');
@@ -146,10 +174,15 @@ export class MultiBotManager {
     configured: boolean;
     credentialsMissing: string[];
     phoneNumberIdConfigured: boolean;
+    wabaIdConfigured: boolean;
+    setupMode: WhatsAppSetupMode;
+    connectionStatus: string;
+    webhookStatus: string;
     lastErrorCode: string | null;
   } {
     const account = this.accountsByBot.get(botId);
     const client = this.client(botId);
+    const connection = this.database.getWhatsAppConnection(botId);
     const credentialsMissing = [
       ...(account?.accessToken === undefined ? ['META_ACCESS_TOKEN'] : []),
       ...(account?.phoneNumberId === undefined ? ['META_PHONE_NUMBER_ID'] : []),
@@ -158,7 +191,12 @@ export class MultiBotManager {
     return {
       configured: credentialsMissing.length === 0,
       credentialsMissing,
-      phoneNumberIdConfigured: account?.phoneNumberId !== undefined,
+      phoneNumberIdConfigured:
+        account?.phoneNumberId !== undefined || connection.phoneNumberIdConfigured,
+      wabaIdConfigured: account?.wabaId !== undefined || connection.wabaIdConfigured,
+      setupMode: connection.setupMode,
+      connectionStatus: connection.status,
+      webhookStatus: connection.webhookStatus,
       lastErrorCode:
         client instanceof WhatsAppCloudApiAdapter ? client.status().lastErrorCode : null,
     };
@@ -207,6 +245,34 @@ export class MultiBotManager {
 
   public aiQueue(botId: string): AIRequestQueueService | null {
     return this.instances.get(botId)?.aiRequestQueue() ?? null;
+  }
+
+  public async simulateAssistantQuestion(
+    botId: string,
+    question: string,
+  ): Promise<AssistantRuntimeResult> {
+    const bot = this.database.getBot(botId);
+    if (bot === null) throw new Error('El asistente no existe.');
+    const queue = new AIRequestQueueService(this.database, this.logger, botId);
+    const service = new AssistantQueryService(
+      this.database,
+      this.providers.forBot(botId),
+      this.logger,
+      botId,
+      queue,
+    );
+    const simulationId = randomUUID();
+    try {
+      const runtime = new AssistantRuntimeService(this.database, service, this.logger, botId);
+      return await runtime.handleFreeText({
+        message: question,
+        conversationHash: this.anonymizer.identifier(`simulator-conversation:${simulationId}`),
+        customerHash: this.anonymizer.identifier(`simulator-user:${simulationId}`),
+        channel: 'SIMULATOR',
+      });
+    } finally {
+      queue.shutdown();
+    }
   }
 
   public resetTransientState(): void {

@@ -106,7 +106,6 @@ function Assert-ProductionEnvironment([string]$Path) {
     'META_WABA_ID',
     'META_APP_SECRET',
     'META_WEBHOOK_VERIFY_TOKEN',
-    'APP_ENCRYPTION_KEY',
     'PANEL_SESSION_SECRET',
     'PANEL_INITIAL_PASSWORD',
     'ANONYMIZATION_SECRET',

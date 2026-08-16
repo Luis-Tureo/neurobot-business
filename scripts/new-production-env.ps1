@@ -37,7 +37,6 @@ $generatedValues = @{
   ANONYMIZATION_SECRET = New-RandomSecret 48
   PANEL_SESSION_SECRET = New-RandomSecret 48
   PANEL_INITIAL_PASSWORD = New-RandomSecret 24
-  APP_ENCRYPTION_KEY = New-RandomSecret 32
   META_WEBHOOK_VERIFY_TOKEN = New-RandomSecret 32
 }
 foreach ($entry in $generatedValues.GetEnumerator()) {

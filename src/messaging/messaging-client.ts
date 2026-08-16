@@ -17,7 +17,8 @@ export type InteractiveMenuPayload = {
   title: string;
   message: string;
   helpText: string;
-  options: Array<{ id: string; label: string }>;
+  listButtonLabel?: string;
+  options: Array<{ id: string; label: string; description?: string; section?: string }>;
   kind: 'buttons' | 'list';
 };
 

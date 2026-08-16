@@ -273,7 +273,7 @@ describe('migración de historial', () => {
     const database = new AppDatabase(':memory:');
     database.migrate();
     database.migrate();
-    expect(database.getMigrationVersions()).toEqual([24]);
+    expect(database.getMigrationVersions()).toEqual([24, 25, 26]);
     expect(database.quickCheck()).toEqual(['ok']);
     database.close();
   });

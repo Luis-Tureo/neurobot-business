@@ -12,7 +12,7 @@ describe('persistencia Business', () => {
   afterEach(() => database.close());
 
   it('crea una base nueva con un negocio de ejemplo desactivado y sin vincular', () => {
-    expect(database.getMigrationVersions()).toEqual([24]);
+    expect(database.getMigrationVersions()).toEqual([24, 25, 26]);
     expect(database.quickCheck()).toEqual(['ok']);
     expect(database.listBots()).toEqual([
       expect.objectContaining({

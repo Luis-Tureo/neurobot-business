@@ -1179,6 +1179,170 @@
     display: none;
   }
 
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .full-span {
+    grid-column: 1 / -1;
+  }
+
+  .assistant-wizard {
+    @apply gap-6;
+  }
+
+  .wizard-progress {
+    @apply grid list-none grid-cols-4 gap-2 border-y border-slate-100 py-4;
+    margin: 0;
+    padding-inline: 0;
+  }
+
+  .wizard-progress li {
+    @apply flex min-w-0 items-center gap-2 text-xs font-semibold text-slate-500;
+  }
+
+  .wizard-progress li span {
+    @apply grid h-7 w-7 shrink-0 place-items-center rounded-full border border-slate-300 bg-white text-xs;
+  }
+
+  .wizard-progress li.active {
+    @apply text-indigo-700;
+  }
+
+  .wizard-progress li.active span,
+  .wizard-progress li.complete span {
+    @apply border-indigo-600 bg-indigo-600 text-white;
+  }
+
+  .choice-grid,
+  .behavior-grid {
+    @apply grid grid-cols-2 gap-3;
+  }
+
+  .choice-card {
+    @apply flex min-h-28 cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 transition-colors;
+  }
+
+  .choice-card:has(input:checked) {
+    @apply border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500;
+  }
+
+  .choice-card input {
+    @apply mt-1 h-5 w-5 shrink-0 accent-indigo-600;
+  }
+
+  .choice-card span,
+  .behavior-grid .switch-row span {
+    @apply grid gap-1;
+  }
+
+  .choice-card.disabled {
+    @apply cursor-not-allowed bg-slate-50 opacity-65;
+  }
+
+  .provider-summary,
+  .future-note {
+    @apply grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-indigo-100 bg-indigo-50/60 p-4;
+  }
+
+  .provider-summary p,
+  .future-note p {
+    @apply col-span-full text-sm text-slate-600;
+  }
+
+  .behavior-grid .switch-row {
+    @apply min-h-24 items-start rounded-xl border border-slate-200 bg-white p-4;
+  }
+
+  .behavior-grid .switch-row.disabled {
+    @apply border-slate-100 bg-slate-50 text-slate-400;
+  }
+
+  .behavior-grid .switch-row.disabled input {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  .simulator-card {
+    @apply col-span-full grid gap-4 rounded-2xl border border-indigo-200 bg-gradient-to-br from-white to-indigo-50/60 p-5 shadow-sm;
+  }
+
+  .simulator-card__heading {
+    @apply flex items-start justify-between gap-4;
+  }
+
+  .simulator-card__heading > div {
+    @apply grid gap-1;
+  }
+
+  .simulator-messages {
+    @apply grid max-h-[28rem] min-h-64 content-start gap-3 overflow-y-auto rounded-xl border border-slate-200 bg-white p-4;
+  }
+
+  .simulator-empty {
+    @apply grid min-h-52 place-content-center gap-1 text-center text-slate-500;
+  }
+
+  .simulator-message {
+    @apply grid max-w-[85%] gap-1 rounded-2xl px-4 py-3 text-sm;
+  }
+
+  .simulator-message > span {
+    @apply text-xs font-bold uppercase tracking-wide opacity-70;
+  }
+
+  .simulator-message.user {
+    @apply ml-auto rounded-br-sm bg-indigo-600 text-white;
+  }
+
+  .simulator-message.assistant {
+    @apply mr-auto rounded-bl-sm bg-slate-100 text-slate-800;
+  }
+
+  .simulator-options {
+    @apply mt-1 grid gap-2;
+  }
+
+  .simulator-options span {
+    @apply rounded-lg border border-indigo-200 bg-white px-3 py-2 text-center text-sm font-semibold text-indigo-700;
+  }
+
+  .simulator-options.list span {
+    @apply text-left;
+  }
+
+  .simulator-composer {
+    @apply grid grid-cols-[minmax(0,1fr)_auto] gap-2;
+  }
+
+  .debug-panel {
+    @apply rounded-xl border border-slate-200 bg-slate-950 p-4 text-slate-100;
+  }
+
+  .debug-panel summary {
+    @apply cursor-pointer text-sm font-bold;
+  }
+
+  .debug-grid {
+    @apply mt-4 grid grid-cols-[minmax(10rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm;
+  }
+
+  .debug-grid dt {
+    @apply text-slate-400;
+  }
+
+  .debug-grid dd {
+    @apply m-0 break-words font-mono text-slate-100;
+  }
+
   :focus-visible {
     outline: 3px solid #67e8f9;
     outline-offset: 2px;
@@ -1381,8 +1545,38 @@
 
   .two-columns,
   .three-columns,
-  .hour-fields {
+  .hour-fields,
+  .choice-grid,
+  .behavior-grid {
     grid-template-columns: 1fr;
+  }
+
+  .wizard-progress {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .simulator-card__heading {
+    display: grid;
+  }
+
+  .simulator-composer {
+    grid-template-columns: 1fr;
+  }
+
+  .simulator-composer button {
+    width: 100%;
+  }
+
+  .simulator-message {
+    max-width: 92%;
+  }
+
+  .debug-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .debug-grid dd {
+    margin-bottom: 0.5rem;
   }
 
   .editor-panel,

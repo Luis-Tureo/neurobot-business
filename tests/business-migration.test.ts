@@ -67,6 +67,8 @@ describe('migración irreversible a Business', () => {
       expect(database.prepare('SELECT version FROM migrations ORDER BY version').all()).toEqual([
         { version: 23 },
         { version: 24 },
+        { version: 25 },
+        { version: 26 },
       ]);
       expect(database.pragma('foreign_key_check')).toEqual([]);
     } finally {

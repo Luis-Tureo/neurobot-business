@@ -9,8 +9,12 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import type { Logger } from 'pino';
 import { z } from 'zod';
 import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
+import { AIProviderRegistry } from '../ai/ai-provider-registry.js';
 import { hashNormalizedQuestion, normalizeQuestionForCache } from '../ai/answer-cache-service.js';
 import { CatalogService } from '../core/catalog-service.js';
+import { ActionRegistry } from '../core/action-registry.js';
+import { calculateAssistantReadiness } from '../core/assistant-readiness-service.js';
+import { ToolRegistry } from '../core/tool-registry.js';
 import {
   AssistantModuleVisibilityService,
   type AssistantModuleKey,
@@ -31,7 +35,6 @@ import {
 } from '../messaging/whatsapp-cloud-api-adapter.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
-import type { SecretVault } from '../security/secret-vault.js';
 import { hashPassword, verifyPassword } from '../security/password.js';
 import { maskPhoneNumber, normalizeBotIdentifier, normalizePhoneNumber } from '../utils/text.js';
 import { LoginAttemptGate, SessionStore, type PanelSession } from './session-store.js';
@@ -82,6 +85,13 @@ const profileFieldsSchema = z
   })
   .strict();
 
+const profileUpdateSchema = profileFieldsSchema.extend({
+  language: z
+    .string()
+    .regex(/^[a-z]{2,3}(?:-[A-Z]{2})?$/u)
+    .optional(),
+});
+
 const knowledgeCategorySchema = z
   .object({
     id: z.number().int().positive().optional(),
@@ -108,6 +118,11 @@ const aiSettingsSchema = z
   .object({
     enabled: z.boolean(),
     provider: z.enum(['groq', 'disabled']),
+    model: z.string().trim().min(2).max(120),
+    providerConfig: z
+      .object({ model: z.string().trim().min(2).max(120).optional() })
+      .strict()
+      .optional(),
     questionMaxChars: z.number().int().min(1).max(3000),
     contextMaxTokens: z.number().int().min(1).max(7000),
     inputMaxTokens: z.number().int().min(1).max(10_000),
@@ -208,23 +223,83 @@ const globalAILimitsSchema = z
 
 const botCreateSchema = z
   .object({
-    id: z.preprocess(
-      (value) => (typeof value === 'string' ? normalizeBotIdentifier(value) : value),
-      z
-        .string()
-        .regex(/^[a-z][a-z0-9-]{2,39}$/u, 'Escribe un identificador de al menos 3 caracteres.'),
-    ),
+    id: z
+      .preprocess(
+        (value) => (typeof value === 'string' ? normalizeBotIdentifier(value) : value),
+        z.string().regex(/^[a-z][a-z0-9-]{2,39}$/u),
+      )
+      .optional(),
     organizationName: z.string().trim().min(1).max(160),
     botName: z.string().trim().min(1).max(80),
+    description: z.string().trim().min(1).max(1000),
+    language: z.string().regex(/^[a-z]{2,3}(?:-[A-Z]{2})?$/u),
     organizationType: organizationTypeSchema,
     timezone: z.string().trim().min(1).max(80),
     connectorType: z.literal('WHATSAPP_CLOUD_API'),
-    provider: z.enum(['groq', 'disabled']),
+    whatsappSetupMode: z.enum(['EXISTING', 'NEW_CUSTOMER']),
+    provider: z.literal('groq'),
+    model: z.string().trim().min(2).max(120),
+    behavior: z
+      .object({
+        showInitialMenuOnGreeting: z.boolean(),
+        allowFreeQuestions: z.boolean(),
+        useAIForUnmatched: z.boolean(),
+        useBusinessKnowledge: z.boolean(),
+        allowDynamicButtons: z.boolean().default(true),
+        allowDynamicLists: z.boolean().default(true),
+        allowBusinessDataQueries: z.boolean().default(true),
+        showAISuggestedActions: z.boolean().default(true),
+        allowWriteTools: z.boolean().default(false),
+        fallbackMessage: z.string().trim().min(1).max(600),
+      })
+      .strict(),
     preset: z.enum(['store', 'restaurant', 'service', 'empty']),
     menuType: z
       .enum(['automatic', 'native_buttons', 'native_list', 'numbered'])
       .default('automatic'),
   })
+  .strict();
+
+const assistantBehaviorSchema = z
+  .object({
+    showInitialMenuOnGreeting: z.boolean(),
+    allowFreeQuestions: z.boolean(),
+    useAIForUnmatched: z.boolean(),
+    useBusinessKnowledge: z.boolean(),
+    allowDynamicButtons: z.boolean().default(true),
+    allowDynamicLists: z.boolean().default(true),
+    allowBusinessDataQueries: z.boolean().default(true),
+    showAISuggestedActions: z.boolean().default(true),
+    allowWriteTools: z.boolean().default(false),
+    fallbackMessage: z.string().trim().min(1).max(600),
+    humanHandoffReady: z.boolean().default(false),
+  })
+  .strict();
+
+const whatsappSetupSchema = z.object({ setupMode: z.enum(['EXISTING', 'NEW_CUSTOMER']) }).strict();
+
+const toolConfigurationSchema = z
+  .object({
+    enabled: z.boolean(),
+    permissions: z
+      .array(z.enum(['READ', 'SUGGEST', 'EXECUTE']))
+      .min(1)
+      .max(3),
+  })
+  .strict();
+
+const dynamicInteractionSettingsSchema = z
+  .object({
+    allowDynamicButtons: z.boolean(),
+    allowDynamicLists: z.boolean(),
+    allowBusinessDataQueries: z.boolean(),
+    showAISuggestedActions: z.boolean(),
+    allowWriteTools: z.boolean(),
+  })
+  .strict();
+
+const assistantSimulationSchema = z
+  .object({ message: z.string().trim().min(1).max(2000) })
   .strict();
 
 const botConfigurationSchema = z
@@ -242,6 +317,8 @@ const menuSchema = z
     title: z.string().trim().min(1).max(120),
     message: z.string().trim().min(1).max(600),
     helpText: z.string().trim().max(300),
+    presentation: z.enum(['AUTOMATIC', 'BUTTONS', 'LIST']).default('AUTOMATIC'),
+    listButtonLabel: z.string().trim().min(1).max(20).default('Ver opciones'),
     enabled: z.boolean(),
     isInitial: z.boolean(),
     expirationMinutes: z.number().int().min(1).max(1440),
@@ -253,6 +330,8 @@ const menuOptionSchema = z
     id: z.number().int().positive().optional(),
     menuId: z.number().int().positive(),
     label: z.string().trim().min(1).max(100),
+    description: z.string().trim().max(72).default(''),
+    section: z.string().trim().max(24).default(''),
     aliases: z.array(z.string().trim().min(1).max(100)).max(20),
     order: z.number().int().min(1).max(100),
     actionType: z.enum([
@@ -422,7 +501,6 @@ export type AdminServerContext = {
   brandingDirectory?: string;
   multiBotManager?: MultiBotManager;
   aiProviderFactory?: AIProviderFactory;
-  secretVault?: SecretVault;
   mediaDirectory?: string;
   metaWebhook?: {
     appSecret?: string;
@@ -620,6 +698,50 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
   app.addHook('preHandler', async (request, reply) => {
     if (!request.url.startsWith('/api/')) return;
     const route = request.routeOptions.url ?? '';
+    if (
+      route === '/api/health' ||
+      route === '/api/auth/login' ||
+      route === '/api/webhooks/meta/whatsapp'
+    ) {
+      return;
+    }
+    const session = getSession(request, sessions);
+    if (session === null) return;
+    const authorization = context.database.getPanelUserAuthorization(session.username);
+    if (authorization === null) {
+      await reply.code(401).send({ error: 'La sesión ya no tiene acceso al panel.' });
+      return;
+    }
+    const botId = botIdForProtectedRoute(request, route);
+    if (botId !== null && !context.database.canPanelUserAccessBot(session.username, botId)) {
+      await reply.code(404).send({ error: 'Asistente no encontrado.' });
+      return;
+    }
+    if (route === '/api/conversations/:conversationId/messages') {
+      const conversationId = (request.params as { conversationId?: unknown } | null)
+        ?.conversationId;
+      if (
+        typeof conversationId === 'string' &&
+        !context.database.canPanelUserAccessConversation(session.username, conversationId)
+      ) {
+        await reply.code(404).send({ error: 'Conversación no encontrada.' });
+        return;
+      }
+    }
+    if (
+      authorization.role !== 'global_admin' &&
+      isGlobalAdministratorRoute(route, request.method)
+    ) {
+      await reply.code(403).send({
+        error: 'Esta acción requiere permisos de administración global.',
+        code: 'GLOBAL_ADMIN_REQUIRED',
+      });
+    }
+  });
+
+  app.addHook('preHandler', async (request, reply) => {
+    if (!request.url.startsWith('/api/')) return;
+    const route = request.routeOptions.url ?? '';
     const module = moduleForProtectedRoute(route);
     if (module === null) return;
     const botId = botIdForProtectedRoute(request, route);
@@ -675,6 +797,13 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       if (input.assistantId !== undefined && context.database.getBot(input.assistantId) === null) {
         return reply.code(404).send({ error: 'Asistente no encontrado.' });
       }
+      const session = getSession(request, sessions) as PanelSession;
+      if (
+        input.assistantId !== undefined &&
+        !context.database.canPanelUserAccessBot(session.username, input.assistantId)
+      ) {
+        return reply.code(404).send({ error: 'Asistente no encontrado.' });
+      }
       context.database.recordTechnicalEvent({
         ...(input.assistantId === undefined ? {} : { botId: input.assistantId }),
         eventType: input.eventType,
@@ -699,70 +828,113 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     loginGate.success(key);
     const { token, session } = sessions.create(input.username);
     reply.setCookie(COOKIE_NAME, token, cookieOptions(request));
-    return { authenticated: true, csrfToken: session.csrfToken };
+    const authorization = context.database.getPanelUserAuthorization(input.username);
+    return {
+      authenticated: true,
+      csrfToken: session.csrfToken,
+      role: authorization?.role ?? 'global_admin',
+    };
   });
 
   app.get('/api/auth/session', { preHandler: requireSession(sessions) }, async (request) => {
     const session = getSession(request, sessions) as PanelSession;
-    return { authenticated: true, username: session.username, csrfToken: session.csrfToken };
+    const authorization = context.database.getPanelUserAuthorization(session.username);
+    return {
+      authenticated: true,
+      username: session.username,
+      csrfToken: session.csrfToken,
+      role: authorization?.role ?? 'global_admin',
+    };
   });
 
-  app.get('/api/bots', { preHandler: requireSession(sessions) }, async () => ({
-    bots: (
-      context.multiBotManager?.snapshots() ??
-      context.database.listBots().map((bot) => ({ bot, runtime: null }))
-    )
-      .filter(
-        ({ bot }) => !['ARCHIVED', 'PENDING_DELETION', 'DELETED'].includes(bot.lifecycleStatus),
+  app.get('/api/bots', { preHandler: requireSession(sessions) }, async (request) => {
+    const session = getSession(request, sessions) as PanelSession;
+    const authorization = context.database.getPanelUserAuthorization(session.username);
+    return {
+      bots: (
+        context.multiBotManager?.snapshots() ??
+        context.database.listBots().map((bot) => ({ bot, runtime: null }))
       )
-      .map(({ bot, runtime }) => {
-        const period = localPeriod(new Date(), bot.timezone);
-        const usage = context.database.getAIUsageSummary(bot.profileId, period.date, period.month);
-        const provider = context.aiProviderFactory?.forBot(bot.id);
-        const aiSettings = context.database.getAISettings(bot.profileId);
-        return {
+        .filter(
+          ({ bot }) =>
+            !['ARCHIVED', 'PENDING_DELETION', 'DELETED'].includes(bot.lifecycleStatus) &&
+            (authorization?.role === 'global_admin' ||
+              authorization?.businessIds.includes(bot.businessId) === true),
+        )
+        .map(({ bot, runtime }) => {
+          const period = localPeriod(new Date(), bot.timezone);
+          const usage = context.database.getAIUsageSummary(
+            bot.profileId,
+            period.date,
+            period.month,
+          );
+          const provider = context.aiProviderFactory?.forBot(bot.id);
+          const aiSettings = context.database.getAISettings(bot.profileId);
+          const readiness = readinessFor(context, bot);
+          return {
+            id: bot.id,
+            businessId: bot.businessId,
+            businessName: bot.businessName,
+            internalIdentifier: bot.internalIdentifier,
+            botName: bot.botName,
+            assistantName: bot.botName,
+            organizationName: bot.organizationName,
+            organizationType: bot.organizationType,
+            connectorType: bot.connectorType,
+            channel: bot.channel,
+            capabilities: bot.capabilities,
+            enabled: bot.enabled,
+            maskedNumber: bot.maskedNumber,
+            phoneNumber: adminPhoneNumberFor(context, bot.id),
+            whatsappStatus: runtime?.connection.state ?? bot.whatsappStatus,
+            aiConfigured: provider?.isConfigured() ?? false,
+            aiEnabled: aiSettings.enabled,
+            aiProvider: aiSettings.provider,
+            aiModel: aiSettings.model,
+            knowledgeStatus: readiness.knowledge,
+            assistantStatus: readiness.assistant,
+            readiness,
+            requestsToday: usage.requests,
+            tokensToday: usage.totalTokens,
+            lastConnectedAt: runtime?.connection.lastConnectedAt ?? bot.lastConnectedAt,
+            lastUpdatedAt: context.database.getAssistantLastUpdatedAt(bot.id),
+            meta: metaConfigurationFor(context, bot.id),
+            lifecycleStatus: bot.lifecycleStatus,
+            deletionLocked: bot.deletionLocked,
+            connectorConflict: safeConnectorConflict(context, bot),
+            visibleModules: moduleVisibility.visibleModules(bot),
+          };
+        }),
+      templates: PROFILE_PRESETS,
+    };
+  });
+
+  app.get('/api/assistants/trash', { preHandler: requireSession(sessions) }, async (request) => {
+    const session = getSession(request, sessions) as PanelSession;
+    const authorization = context.database.getPanelUserAuthorization(session.username);
+    return {
+      assistants: context.database
+        .listBots()
+        .filter(
+          (bot) =>
+            authorization?.role === 'global_admin' ||
+            authorization?.businessIds.includes(bot.businessId) === true,
+        )
+        .filter((bot) => bot.lifecycleStatus === 'ARCHIVED')
+        .map((bot) => ({
           id: bot.id,
-          internalIdentifier: bot.internalIdentifier,
+          businessId: bot.businessId,
+          businessName: bot.businessName,
           botName: bot.botName,
           organizationName: bot.organizationName,
           organizationType: bot.organizationType,
-          connectorType: bot.connectorType,
-          capabilities: bot.capabilities,
-          enabled: bot.enabled,
-          maskedNumber: bot.maskedNumber,
           phoneNumber: adminPhoneNumberFor(context, bot.id),
-          whatsappStatus: runtime?.connection.state ?? bot.whatsappStatus,
-          aiConfigured: provider?.isConfigured() ?? false,
-          aiEnabled: aiSettings.enabled,
-          aiProvider: aiSettings.provider,
-          requestsToday: usage.requests,
-          tokensToday: usage.totalTokens,
-          lastConnectedAt: runtime?.connection.lastConnectedAt ?? bot.lastConnectedAt,
-          meta: metaConfigurationFor(context, bot.id),
-          lifecycleStatus: bot.lifecycleStatus,
+          deletedAt: bot.deletedAt,
+          scheduledPermanentDeletionAt: bot.scheduledPermanentDeletionAt,
           deletionLocked: bot.deletionLocked,
-          connectorConflict: safeConnectorConflict(context, bot),
-          visibleModules: moduleVisibility.visibleModules(bot),
-        };
-      }),
-    templates: PROFILE_PRESETS,
-  }));
-
-  app.get('/api/assistants/trash', { preHandler: requireSession(sessions) }, async () => ({
-    assistants: context.database
-      .listBots()
-      .filter((bot) => bot.lifecycleStatus === 'ARCHIVED')
-      .map((bot) => ({
-        id: bot.id,
-        botName: bot.botName,
-        organizationName: bot.organizationName,
-        organizationType: bot.organizationType,
-        phoneNumber: adminPhoneNumberFor(context, bot.id),
-        deletedAt: bot.deletedAt,
-        scheduledPermanentDeletionAt: bot.scheduledPermanentDeletionAt,
-        deletionLocked: bot.deletionLocked,
-      })),
-  }));
+        })),
+    };
+  });
 
   app.post(
     '/api/bots/:botId/trash',
@@ -890,15 +1062,33 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       if (context.multiBotManager === undefined)
         return reply.code(503).send({ error: 'El gestor multibot no está disponible.' });
       const input = botCreateSchema.parse(request.body);
-      const profile = createProfileFromPreset(input);
+      const registry = new AIProviderRegistry(context.aiProviderFactory?.defaultModel());
+      if (!registry.isAllowedModel(input.provider, input.model)) {
+        return reply.code(400).send({
+          error: 'El modelo seleccionado no está habilitado para Groq.',
+          code: 'AI_MODEL_NOT_ALLOWED',
+        });
+      }
+      const profile = {
+        ...createProfileFromPreset(input),
+        description: input.description,
+        applicationName: 'Don Gato Digital',
+      };
       const bot = await context.multiBotManager.create({
-        id: input.id,
+        ...(input.id === undefined ? {} : { id: input.id }),
+        business: {
+          name: input.organizationName,
+          description: input.description,
+          language: input.language,
+          timezone: input.timezone,
+        },
         connectorType: input.connectorType,
         menuType: input.menuType,
+        whatsappSetupMode: input.whatsappSetupMode,
+        ai: { provider: input.provider, model: input.model, enabled: true },
+        behavior: { ...input.behavior, humanHandoffReady: false },
         profile,
       });
-      const aiSettings = context.database.getAISettings(bot.profileId);
-      context.database.saveAISettings({ ...aiSettings, provider: input.provider, enabled: false });
       audit(context, 'bot_create', bot.id, 'ok', bot.id);
       return reply.code(201).send({
         bot: adminBotResponse(context, bot),
@@ -914,17 +1104,22 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     const profile = context.database.getBotProfile(botId);
     const period = localPeriod(new Date(), profile.timezone);
     const provider = context.aiProviderFactory?.forBot(botId);
+    const aiStatus = context.database.getAIProviderStatus(
+      profile.id,
+      provider?.isConfigured() ?? false,
+      provider?.getModelInformation().model ?? 'disabled',
+    );
     return {
       bot: adminBotResponse(context, bot),
+      business: context.database.getBusinessByBotId(botId),
+      whatsapp: adminWhatsAppConnection(context, botId),
+      behavior: context.database.getAssistantBehavior(botId),
+      readiness: readinessFor(context, bot),
       visibleModules: moduleVisibility.visibleModules(bot),
       connectorConflict: safeConnectorConflict(context, bot),
       profile,
       runtime: context.multiBotManager?.snapshot(botId) ?? null,
-      ai: context.database.getAIProviderStatus(
-        profile.id,
-        provider?.isConfigured() ?? false,
-        provider?.getModelInformation().model ?? 'disabled',
-      ),
+      ai: aiStatus,
       usage: context.database.getAIUsageSummary(profile.id, period.date, period.month),
       activeConversations: context.database.countActiveConversationStates(botId),
       pendingRequests: context.database
@@ -933,11 +1128,26 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     };
   });
 
+  app.get('/api/ai/providers', { preHandler: requireSession(sessions) }, async () => ({
+    providers: context.aiProviderFactory?.catalog() ?? new AIProviderRegistry().list(),
+    defaultProvider: 'groq',
+    defaultModel:
+      context.aiProviderFactory?.defaultModel() ?? new AIProviderRegistry().defaultModel('groq'),
+  }));
+
   app.get(
     '/api/conversations',
     { preHandler: requireSession(sessions) },
     async (request, reply) => {
       const query = conversationListQuerySchema.parse(request.query ?? {});
+      const session = getSession(request, sessions) as PanelSession;
+      const authorization = context.database.getPanelUserAuthorization(session.username);
+      if (
+        query.assistantId !== undefined &&
+        !context.database.canPanelUserAccessBot(session.username, query.assistantId)
+      ) {
+        return reply.code(404).send({ error: 'Asistente no encontrado.' });
+      }
       if (query.from !== undefined && query.to !== undefined && query.from > query.to) {
         return reply.code(400).send({
           error: 'La fecha inicial no puede ser posterior a la fecha final.',
@@ -951,6 +1161,9 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         pageSize: query.pageSize,
         ...(query.search === undefined ? {} : { search: query.search }),
         ...(query.assistantId === undefined ? {} : { assistantId: query.assistantId }),
+        ...(authorization?.role === 'business_admin'
+          ? { businessIds: authorization.businessIds }
+          : {}),
         ...(from === null ? {} : { from }),
         ...(toExclusive === null ? {} : { toExclusive }),
       });
@@ -1025,10 +1238,22 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
   app.patch(
     '/api/bots/:botId/configuration',
     { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
+    async (request, reply) => {
       const botId = parseBotId(request.params);
       const input = botConfigurationSchema.parse(request.body);
       const previous = context.database.getBot(botId);
+      if (previous === null) return reply.code(404).send({ error: 'Asistente no encontrado.' });
+      if (input.enabled && !previous.enabled) {
+        const readiness = readinessFor(context, previous);
+        if (!readiness.canActivate) {
+          return reply.code(409).send({
+            error: `El asistente todavía no puede activarse: ${readiness.missingRequirements.join(' ')}`,
+            code: 'ASSISTANT_NOT_READY',
+            missingRequirements: readiness.missingRequirements,
+            readiness,
+          });
+        }
+      }
       const bot = context.database.updateBotConfiguration({ botId, ...input });
       if (context.multiBotManager !== undefined) {
         const connectionSettingsChanged = previous !== null && previous.enabled !== bot.enabled;
@@ -1049,10 +1274,105 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     async (request) => {
       const botId = parseBotId(request.params);
       const existing = context.database.getBotProfile(botId);
-      const input = profileFieldsSchema.parse(request.body);
-      const profile = context.database.saveAssistantProfile({ ...existing, ...input });
+      const business = context.database.getBusinessByBotId(botId);
+      const input = profileUpdateSchema.parse(request.body);
+      const { language, ...profileFields } = input;
+      const updatedBusiness = context.database.saveBusiness({
+        id: business.id,
+        name: profileFields.organizationName,
+        description: profileFields.description,
+        language: language ?? business.language,
+        timezone: profileFields.timezone,
+      });
+      const profile = context.database.saveAssistantProfile({ ...existing, ...profileFields });
       audit(context, 'bot_profile_update', String(profile.id), 'ok', botId);
-      return { profile };
+      return {
+        profile,
+        business: updatedBusiness,
+        readiness: readinessFor(context, context.database.getBot(botId)!),
+      };
+    },
+  );
+
+  app.get(
+    '/api/bots/:botId/behavior',
+    { preHandler: requireSession(sessions) },
+    async (request) => ({
+      behavior: context.database.getAssistantBehavior(parseBotId(request.params)),
+    }),
+  );
+
+  app.patch(
+    '/api/bots/:botId/behavior',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request) => {
+      const botId = parseBotId(request.params);
+      const behavior = context.database.saveAssistantBehavior({
+        assistantId: botId,
+        ...assistantBehaviorSchema.parse(request.body),
+      });
+      audit(context, 'assistant_behavior_update', botId, 'ok', botId);
+      return {
+        behavior,
+        readiness: readinessFor(context, context.database.getBot(botId)!),
+      };
+    },
+  );
+
+  app.get(
+    '/api/bots/:botId/whatsapp',
+    { preHandler: requireSession(sessions) },
+    async (request) => ({
+      connection: adminWhatsAppConnection(context, parseBotId(request.params)),
+    }),
+  );
+
+  app.patch(
+    '/api/bots/:botId/whatsapp/setup',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request) => {
+      const botId = parseBotId(request.params);
+      const connection = context.database.saveWhatsAppSetupMode(
+        botId,
+        whatsappSetupSchema.parse(request.body).setupMode,
+      );
+      audit(context, 'whatsapp_setup_mode_update', botId, 'ok', botId);
+      return { connection };
+    },
+  );
+
+  app.post(
+    '/api/bots/:botId/simulator',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request, reply) => {
+      const botId = parseBotId(request.params);
+      const input = assistantSimulationSchema.parse(request.body);
+      if (context.multiBotManager === undefined) {
+        return reply.code(503).send({
+          error: 'El simulador no está disponible en esta instalación.',
+          code: 'ASSISTANT_SIMULATOR_UNAVAILABLE',
+        });
+      }
+      const result = await context.multiBotManager.simulateAssistantQuestion(botId, input.message);
+      audit(context, 'assistant_simulator_query', botId, result.debug.status, botId);
+      return {
+        response: result.response.message,
+        presentation: result.response.presentation,
+        options: result.response.options,
+        debug: {
+          route: result.debug.route,
+          provider: result.debug.provider,
+          model: result.debug.model,
+          knowledgeUsed: result.debug.knowledgeUsed,
+          toolCalled: result.debug.toolCalled,
+          toolResultCount: result.debug.toolResultCount,
+          presentation: result.debug.presentation,
+          actions: result.debug.actionIds,
+          durationMs: result.debug.durationMs,
+          status: result.debug.status,
+          error: result.debug.error,
+        },
+      };
     },
   );
 
@@ -1273,9 +1593,8 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       queue,
       recentEvents: context.database.listRecentAIUsageEvents(profile.id),
       credential: {
-        mode: context.database.getBotEncryptedCredential(botId).mode,
+        mode: 'platform_managed',
         configured: provider?.isConfigured() ?? false,
-        encryptionAvailable: context.secretVault?.isConfigured() ?? false,
       },
     };
   });
@@ -1372,6 +1691,14 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const botId = parseBotId(request.params);
       const profile = context.database.getBotProfile(botId);
       const input = aiSettingsSchema.parse(request.body);
+      const selectedModel = input.provider === 'disabled' ? 'disabled' : input.model;
+      const registry = new AIProviderRegistry(context.aiProviderFactory?.defaultModel());
+      if (!registry.isAllowedModel(input.provider, selectedModel)) {
+        return reply.code(400).send({
+          error: 'El modelo seleccionado no está habilitado para este proveedor.',
+          code: 'AI_MODEL_NOT_ALLOWED',
+        });
+      }
       if (exceedsSafeDefaults(input) && !input.confirmIncreasedLimits) {
         return reply.code(409).send({
           error: 'Confirma explícitamente el aumento sobre los límites seguros iniciales.',
@@ -1382,6 +1709,8 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       void confirmIncreasedLimits;
       const settings = context.database.saveAISettings({
         ...values,
+        model: selectedModel,
+        providerConfig: input.provider === 'groq' ? { model: selectedModel } : {},
         profileId: profile.id,
         updatedAt: new Date().toISOString(),
       });
@@ -1472,60 +1801,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     },
   );
 
-  app.put(
-    '/api/bots/:botId/ai-key',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      if (!isSecureCredentialRequest(request))
-        return reply
-          .code(403)
-          .send({ error: 'Las claves solo pueden configurarse mediante HTTPS o localhost.' });
-      const botId = parseBotId(request.params);
-      if (context.database.getBot(botId) === null)
-        return reply.code(404).send({ error: 'Asistente no encontrado.' });
-      const input = z
-        .object({
-          mode: z.enum(['global', 'per_bot']),
-          apiKey: z.string().min(16).max(500).optional(),
-        })
-        .strict()
-        .parse(request.body);
-      if (input.mode === 'global') {
-        context.database.setBotEncryptedCredential(botId, 'global', null, null);
-        audit(context, 'bot_ai_key_mode_global', botId, 'ok', botId);
-        return {
-          configured: context.aiProviderFactory?.forBot(botId).isConfigured() ?? false,
-          mode: 'global',
-        };
-      }
-      if (input.apiKey === undefined || context.secretVault?.isConfigured() !== true) {
-        return reply.code(409).send({
-          error: 'APP_ENCRYPTION_KEY debe estar configurada para guardar una clave por bot.',
-        });
-      }
-      const encrypted = context.secretVault.encrypt(input.apiKey, `bot:${botId}:groq`);
-      context.database.setBotEncryptedCredential(
-        botId,
-        'per_bot',
-        encrypted.encrypted,
-        encrypted.fingerprint,
-      );
-      audit(context, 'bot_ai_key_replace', botId, 'ok', botId);
-      return { configured: true, mode: 'per_bot' };
-    },
-  );
-
-  app.delete(
-    '/api/bots/:botId/ai-key',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const botId = parseBotId(request.params);
-      context.database.setBotEncryptedCredential(botId, 'per_bot', null, null);
-      audit(context, 'bot_ai_key_delete', botId, 'ok', botId);
-      return { configured: false, mode: 'per_bot' };
-    },
-  );
-
   app.get('/api/bots/:botId/menus', { preHandler: requireSession(sessions) }, async (request) => {
     const botId = parseBotId(request.params);
     return {
@@ -1533,6 +1808,76 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       options: context.database.listMenuOptions(botId),
     };
   });
+
+  app.get(
+    '/api/bots/:botId/interactions',
+    { preHandler: requireSession(sessions) },
+    async (request) => {
+      const botId = parseBotId(request.params);
+      return {
+        persistent: {
+          menus: context.database.listMenus(botId),
+          options: context.database.listMenuOptions(botId),
+        },
+        dynamic: context.database.getAssistantBehavior(botId),
+        tools: new ToolRegistry(context.database).list(botId),
+        actions: new ActionRegistry().list(),
+      };
+    },
+  );
+
+  app.patch(
+    '/api/bots/:botId/interactions/dynamic',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request) => {
+      const botId = parseBotId(request.params);
+      const current = context.database.getAssistantBehavior(botId);
+      const input = dynamicInteractionSettingsSchema.parse(request.body);
+      const behavior = context.database.saveAssistantBehavior({
+        ...current,
+        ...input,
+        assistantId: botId,
+      });
+      audit(context, 'dynamic_interactions_update', botId, 'ok', botId);
+      return { behavior };
+    },
+  );
+
+  app.get('/api/bots/:botId/tools', { preHandler: requireSession(sessions) }, async (request) => {
+    const botId = parseBotId(request.params);
+    return { tools: new ToolRegistry(context.database).list(botId) };
+  });
+
+  app.patch(
+    '/api/bots/:botId/tools/:toolId',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request, reply) => {
+      const botId = parseBotId(request.params);
+      const toolId = z
+        .object({ toolId: z.string().regex(/^[a-z][a-z0-9_]{2,63}$/u) })
+        .parse(request.params).toolId;
+      const registry = new ToolRegistry(context.database);
+      const descriptor = registry.list(botId).find((tool) => tool.id === toolId);
+      if (descriptor === undefined) {
+        return reply.code(404).send({ error: 'Herramienta no encontrada.' });
+      }
+      const input = toolConfigurationSchema.parse(request.body);
+      if (descriptor.availability === 'FUTURE' && input.enabled) {
+        return reply.code(409).send({
+          error: 'La herramienta requiere una fuente real antes de habilitarse.',
+          code: 'TOOL_REAL_SOURCE_REQUIRED',
+        });
+      }
+      const configuration = context.database.saveAssistantToolConfiguration({
+        assistantId: botId,
+        toolId,
+        enabled: input.enabled,
+        permissions: input.permissions,
+      });
+      audit(context, 'tool_configuration_update', toolId, 'ok', botId);
+      return { configuration, tools: registry.list(botId) };
+    },
+  );
 
   app.post(
     '/api/bots/:botId/menus',
@@ -1547,6 +1892,8 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         title: input.title,
         message: input.message,
         helpText: input.helpText,
+        presentation: input.presentation,
+        listButtonLabel: input.listButtonLabel,
         enabled: input.enabled,
         isInitial: input.isInitial,
         expirationMinutes: input.expirationMinutes,
@@ -1580,6 +1927,8 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         botId,
         menuId: input.menuId,
         label: input.label,
+        description: input.description,
+        section: input.section,
         aliases: input.aliases,
         order: input.order,
         actionType: input.actionType,
@@ -2134,9 +2483,25 @@ function botIdForProtectedRoute(request: FastifyRequest, route: string): string 
   return null;
 }
 
+function isGlobalAdministratorRoute(route: string, method: string): boolean {
+  return (
+    route.startsWith('/api/administrators') ||
+    route.startsWith('/api/admin/maintenance') ||
+    route === '/api/ai/global-limits' ||
+    (route === '/api/bots' && method === 'POST')
+  );
+}
+
 function safeBotResponse(bot: NonNullable<ReturnType<AppDatabase['getBot']>>) {
   return {
     id: bot.id,
+    businessId: bot.businessId,
+    businessName: bot.businessName,
+    businessDescription: bot.businessDescription,
+    businessLanguage: bot.businessLanguage,
+    businessStatus: bot.businessStatus,
+    channel: bot.channel,
+    isPrimary: bot.isPrimary,
     internalIdentifier: bot.internalIdentifier,
     connectorType: bot.connectorType,
     lifecycleStatus: bot.lifecycleStatus,
@@ -2155,17 +2520,20 @@ function safeBotResponse(bot: NonNullable<ReturnType<AppDatabase['getBot']>>) {
     lastConnectedAt: bot.lastConnectedAt,
     continuedConversationsEnabled: bot.continuedConversationsEnabled,
     menuType: bot.menuType,
-    aiCredentialMode: bot.aiCredentialMode,
-    aiKeyConfigured: bot.perBotAIKeyConfigured,
     createdAt: bot.createdAt,
     updatedAt: bot.updatedAt,
   };
 }
 
 function adminPhoneNumberFor(context: AdminServerContext, botId: string): string | null {
-  void context;
-  void botId;
-  return null;
+  return context.database.getWhatsAppConnection(botId).displayPhoneNumber;
+}
+
+function adminWhatsAppConnection(context: AdminServerContext, botId: string) {
+  const { credentialReference: omittedCredentialReference, ...connection } =
+    context.database.getWhatsAppConnection(botId);
+  void omittedCredentialReference;
+  return connection;
 }
 
 function adminBotResponse(
@@ -2180,10 +2548,15 @@ function adminBotResponse(
 }
 
 function metaConfigurationFor(context: AdminServerContext, botId: string) {
+  const connection = context.database.getWhatsAppConnection(botId);
   const account = context.multiBotManager?.metaConfiguration(botId) ?? {
     configured: false,
     credentialsMissing: ['META_ACCESS_TOKEN', 'META_PHONE_NUMBER_ID', 'META_WABA_ID'],
-    phoneNumberIdConfigured: false,
+    phoneNumberIdConfigured: connection.phoneNumberIdConfigured,
+    wabaIdConfigured: connection.wabaIdConfigured,
+    setupMode: connection.setupMode,
+    connectionStatus: connection.status,
+    webhookStatus: connection.webhookStatus,
     lastErrorCode: null,
   };
   const webhookCredentialsMissing = [
@@ -2197,6 +2570,30 @@ function metaConfigurationFor(context: AdminServerContext, botId: string) {
     credentialsMissing: [...account.credentialsMissing, ...webhookCredentialsMissing],
     webhookAvailable,
   };
+}
+
+function readinessFor(
+  context: AdminServerContext,
+  bot: NonNullable<ReturnType<AppDatabase['getBot']>>,
+) {
+  const meta = metaConfigurationFor(context, bot.id);
+  const provider = context.aiProviderFactory?.forBot(bot.id);
+  const settings = context.database.getAISettings(bot.profileId);
+  const status = context.database.getAIProviderStatus(
+    bot.profileId,
+    provider?.isConfigured() ?? false,
+    provider?.getModelInformation().model ?? 'disabled',
+  );
+  const registry = new AIProviderRegistry(context.aiProviderFactory?.defaultModel());
+  return calculateAssistantReadiness(context.database, bot, {
+    metaConfigured: meta.configured,
+    webhookAvailable: meta.webhookAvailable,
+    phoneNumberIdConfigured: meta.phoneNumberIdConfigured,
+    metaLastErrorCode: meta.lastErrorCode,
+    aiConfigured: provider?.isConfigured() ?? false,
+    aiSelectionValid: registry.isAllowedModel(settings.provider, settings.model),
+    aiConnection: status.connection,
+  });
 }
 
 function safeConnectorConflict(
@@ -2215,17 +2612,6 @@ function safeConnectorConflict(
     existingAssistantStatus: existing.lifecycleStatus,
     phoneNumber: adminPhoneNumberFor(context, existing.id),
   };
-}
-
-function isSecureCredentialRequest(request: FastifyRequest): boolean {
-  const hostname = request.hostname.toLocaleLowerCase('en');
-  return (
-    request.protocol === 'https' ||
-    hostname === 'localhost' ||
-    hostname === '127.0.0.1' ||
-    hostname === '::1' ||
-    hostname === '[::1]'
-  );
 }
 
 function localPeriod(now: Date, timezone: string): { date: string; month: string } {

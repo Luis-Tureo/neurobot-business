@@ -21,8 +21,9 @@ const navigation = createNavigation();
 const assistantPanel = createAssistantPanel({ navigation });
 let authenticated = false;
 
-function showAuthenticated(value, username = '') {
+function showAuthenticated(value, username = '', role = 'global_admin') {
   authenticated = value;
+  assistantPanel.setRole(role);
   loginView.classList.toggle('hidden', value);
   panelView.classList.toggle('hidden', !value);
   logoutButton.classList.toggle('hidden', !value);
@@ -31,8 +32,8 @@ function showAuthenticated(value, username = '') {
   sessionUser.textContent = username ? `Sesión: ${username}` : '';
   if (!value) {
     navigation.setContext('global');
-    document.title = 'Neurobot Business';
-    document.querySelector('#application-title').textContent = 'Business';
+    document.title = 'Don Gato Digital';
+    document.querySelector('#application-title').textContent = 'Digital';
     document.querySelector('#application-subtitle').textContent =
       'Atención inteligente para cada negocio.';
   }
@@ -100,7 +101,7 @@ bindAsyncForm('#login-form', async (_event, form) => {
     body: JSON.stringify(Object.fromEntries(data)),
   });
   setCsrfToken(result.csrfToken);
-  showAuthenticated(true, String(data.get('username') || 'admin'));
+  showAuthenticated(true, String(data.get('username') || 'admin'), result.role);
   await assistantPanel.initialize({ force: true });
   notify('Sesión iniciada.');
 });
@@ -136,7 +137,7 @@ async function bootstrap() {
   try {
     const session = await api('/api/auth/session');
     setCsrfToken(session.csrfToken);
-    showAuthenticated(true, session.username);
+    showAuthenticated(true, session.username, session.role);
     await assistantPanel.initialize();
   } catch {
     clearCsrfToken();

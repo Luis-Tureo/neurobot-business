@@ -65,6 +65,24 @@ export type OrganizationType =
   | 'Profesional independiente'
   | 'Otro';
 
+export type BusinessStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'ERROR';
+
+export type Business = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  language: string;
+  timezone: string;
+  status: BusinessStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AssistantChannel = 'WHATSAPP';
+
+export type AIProviderId = 'groq' | 'disabled';
+
 export type AssistantProfile = {
   id: number;
   internalName: string;
@@ -166,7 +184,9 @@ export type CachedAnswer = {
 export type AISettings = {
   profileId: number;
   enabled: boolean;
-  provider: 'groq' | 'disabled';
+  provider: AIProviderId;
+  model: string;
+  providerConfig: { model?: string };
   questionMaxChars: number;
   contextMaxTokens: number;
   inputMaxTokens: number;
@@ -294,6 +314,13 @@ export type BotCapabilities = {
 
 export type BotRecord = {
   id: string;
+  businessId: string;
+  businessName: string;
+  businessDescription: string;
+  businessLanguage: string;
+  businessStatus: BusinessStatus;
+  channel: AssistantChannel;
+  isPrimary: boolean;
   internalIdentifier: string;
   clientId: string;
   connectorType: ConnectorType;
@@ -314,10 +341,54 @@ export type BotRecord = {
   lastConnectedAt: string | null;
   continuedConversationsEnabled: boolean;
   menuType: MenuType;
-  aiCredentialMode: 'global' | 'per_bot';
-  perBotAIKeyConfigured: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type WhatsAppSetupMode = 'EXISTING' | 'NEW_CUSTOMER' | 'NEW_PLATFORM';
+export type WhatsAppWebhookStatus = 'NOT_CONFIGURED' | 'PENDING' | 'ACTIVE' | 'ERROR';
+
+export type WhatsAppConnection = {
+  id: number;
+  businessId: string;
+  assistantId: string;
+  provider: 'META_CLOUD_API';
+  setupMode: WhatsAppSetupMode;
+  phoneNumberIdConfigured: boolean;
+  wabaIdConfigured: boolean;
+  displayPhoneNumber: string | null;
+  status: 'DRAFT' | 'UNLINKED' | 'LINKING' | 'CONNECTED' | 'CONFLICT' | 'DISABLED' | 'ARCHIVED';
+  webhookStatus: WhatsAppWebhookStatus;
+  credentialReference: string | null;
+  connectedAt: string | null;
+  lastVerifiedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AssistantBehaviorSettings = {
+  assistantId: string;
+  showInitialMenuOnGreeting: boolean;
+  allowFreeQuestions: boolean;
+  useAIForUnmatched: boolean;
+  useBusinessKnowledge: boolean;
+  allowDynamicButtons: boolean;
+  allowDynamicLists: boolean;
+  allowBusinessDataQueries: boolean;
+  showAISuggestedActions: boolean;
+  allowWriteTools: boolean;
+  fallbackMessage: string;
+  humanHandoffReady: boolean;
+  updatedAt: string;
+};
+
+export type AssistantReadiness = {
+  whatsapp: 'NOT_CONFIGURED' | 'CONFIGURING' | 'CONNECTED' | 'ERROR';
+  ai: 'NOT_CONFIGURED' | 'GROQ_CONNECTED' | 'ERROR';
+  knowledge: 'EMPTY' | 'CONFIGURED';
+  assistant: 'DRAFT' | 'READY_TO_TEST' | 'OPERATIONAL' | 'PAUSED' | 'ERROR';
+  canActivate: boolean;
+  missingRequirements: string[];
 };
 
 export type MenuDefinition = {
@@ -327,6 +398,8 @@ export type MenuDefinition = {
   title: string;
   message: string;
   helpText: string;
+  presentation: 'AUTOMATIC' | 'BUTTONS' | 'LIST';
+  listButtonLabel: string;
   enabled: boolean;
   isInitial: boolean;
   expirationMinutes: number;
@@ -356,6 +429,8 @@ export type MenuOption = {
   botId: string;
   menuId: number;
   label: string;
+  description: string;
+  section: string;
   aliases: string[];
   order: number;
   actionType: MenuActionType;
@@ -363,6 +438,88 @@ export type MenuOption = {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ToolPermission = 'READ' | 'SUGGEST' | 'EXECUTE';
+
+export type ToolAvailability = 'AVAILABLE' | 'FUTURE';
+
+export type AssistantToolConfiguration = {
+  assistantId: string;
+  businessId: string;
+  toolId: string;
+  enabled: boolean;
+  permissions: ToolPermission[];
+  updatedAt: string;
+};
+
+export type ToolResultItem = {
+  resourceId: string;
+  label: string;
+  description?: string;
+  section?: string;
+  volatile: boolean;
+};
+
+export type ToolExecutionResult = {
+  toolId: string;
+  executionId: string;
+  message: string;
+  items: ToolResultItem[];
+  resultCount: number;
+  source: 'BUSINESS_DATA';
+};
+
+export type SemanticPresentationPreference = 'text' | 'buttons' | 'list' | 'automatic';
+
+export type SemanticToolRequest = {
+  name: string;
+  arguments: Record<string, string | number | boolean | null>;
+};
+
+export type SemanticResponse = {
+  message: string;
+  intent: string;
+  presentationPreference: SemanticPresentationPreference;
+  suggestedActions: string[];
+  toolRequest: SemanticToolRequest | null;
+};
+
+export type ResponseOption = {
+  id: string;
+  label: string;
+  description?: string;
+  section?: string;
+  source: 'PERSISTENT' | 'TOOL';
+};
+
+export type ConversationResponse =
+  | { presentation: 'text'; message: string; options: [] }
+  | { presentation: 'buttons'; message: string; options: ResponseOption[] }
+  | {
+      presentation: 'list';
+      title: string;
+      message: string;
+      buttonLabel: string;
+      options: ResponseOption[];
+    };
+
+export type EphemeralInteractionStatus = 'ACTIVE' | 'CONSUMED' | 'EXPIRED';
+
+export type EphemeralInteraction = {
+  id: string;
+  businessId: string;
+  assistantId: string;
+  conversationHash: string;
+  toolId: string;
+  actionId: string;
+  resourceId: string;
+  label: string;
+  volatile: boolean;
+  status: EphemeralInteractionStatus;
+  expiresAt: string;
+  createdAt: string;
+  consumedAt: string | null;
 };
 
 export type ConversationState = {

@@ -1,7 +1,9 @@
 import type BetterSqlite3 from 'better-sqlite3';
 import { DEFAULT_BUSINESS_ASSISTANT_ID } from '../domain/business-defaults.js';
 
-const BUSINESS_SCHEMA_VERSION = 24;
+const LEGACY_BUSINESS_SCHEMA_VERSION = 24;
+const SAAS_SCHEMA_VERSION = 25;
+const ASSISTANT_PLATFORM_SCHEMA_VERSION = 26;
 
 export function migrateBusinessSchema(database: BetterSqlite3.Database): void {
   database.exec(`
@@ -10,11 +12,21 @@ export function migrateBusinessSchema(database: BetterSqlite3.Database): void {
       applied_at TEXT NOT NULL
     );
   `);
-  const applied = database
-    .prepare('SELECT 1 FROM migrations WHERE version = ?')
-    .get(BUSINESS_SCHEMA_VERSION);
-  if (applied !== undefined) {
+  const legacyApplied =
+    database
+      .prepare('SELECT 1 FROM migrations WHERE version = ?')
+      .get(LEGACY_BUSINESS_SCHEMA_VERSION) !== undefined;
+  const saasApplied =
+    database.prepare('SELECT 1 FROM migrations WHERE version = ?').get(SAAS_SCHEMA_VERSION) !==
+    undefined;
+  const assistantPlatformApplied =
+    database
+      .prepare('SELECT 1 FROM migrations WHERE version = ?')
+      .get(ASSISTANT_PLATFORM_SCHEMA_VERSION) !== undefined;
+  if (legacyApplied && saasApplied && assistantPlatformApplied) {
     createBusinessSchema(database);
+    createSaasSchema(database);
+    createAssistantPlatformSchema(database);
     ensureBusinessExample(database);
     return;
   }
@@ -23,14 +35,33 @@ export function migrateBusinessSchema(database: BetterSqlite3.Database): void {
   if (foreignKeysEnabled) database.pragma('foreign_keys = OFF');
   try {
     database.transaction(() => {
-      if (tableExists(database, 'bots') && columnExists(database, 'bots', 'mode')) {
+      if (
+        !legacyApplied &&
+        tableExists(database, 'bots') &&
+        columnExists(database, 'bots', 'mode')
+      ) {
         migrateLegacySchema(database);
       }
       createBusinessSchema(database);
+      if (!legacyApplied) {
+        ensureBusinessExample(database);
+        database
+          .prepare('INSERT INTO migrations(version, applied_at) VALUES (?, ?)')
+          .run(LEGACY_BUSINESS_SCHEMA_VERSION, new Date().toISOString());
+      }
+      createSaasSchema(database);
+      createAssistantPlatformSchema(database);
       ensureBusinessExample(database);
-      database
-        .prepare('INSERT INTO migrations(version, applied_at) VALUES (?, ?)')
-        .run(BUSINESS_SCHEMA_VERSION, new Date().toISOString());
+      if (!saasApplied) {
+        database
+          .prepare('INSERT INTO migrations(version, applied_at) VALUES (?, ?)')
+          .run(SAAS_SCHEMA_VERSION, new Date().toISOString());
+      }
+      if (!assistantPlatformApplied) {
+        database
+          .prepare('INSERT INTO migrations(version, applied_at) VALUES (?, ?)')
+          .run(ASSISTANT_PLATFORM_SCHEMA_VERSION, new Date().toISOString());
+      }
     })();
   } finally {
     if (foreignKeysEnabled) database.pragma('foreign_keys = ON');
@@ -954,6 +985,274 @@ function createBusinessSchema(database: BetterSqlite3.Database): void {
   `);
 }
 
+function createSaasSchema(database: BetterSqlite3.Database): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS businesses (
+      id TEXT PRIMARY KEY,
+      slug TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      language TEXT NOT NULL DEFAULT 'es-CL',
+      timezone TEXT NOT NULL DEFAULT 'America/Santiago',
+      status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','ACTIVE','PAUSED','ERROR')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  addColumn(database, 'bots', 'business_id', 'TEXT');
+  addColumn(database, 'bots', 'channel_type', "TEXT NOT NULL DEFAULT 'WHATSAPP'");
+  addColumn(database, 'bots', 'is_primary', 'INTEGER NOT NULL DEFAULT 1');
+  backfillBusinesses(database);
+
+  addColumn(database, 'ai_settings', 'model', "TEXT NOT NULL DEFAULT 'openai/gpt-oss-120b'");
+
+  addColumn(database, 'assistant_connectors', 'business_id', 'TEXT');
+  addColumn(database, 'assistant_connectors', 'meta_waba_id', 'TEXT');
+  addColumn(database, 'assistant_connectors', 'display_phone_number', 'TEXT');
+  addColumn(database, 'assistant_connectors', 'setup_mode', "TEXT NOT NULL DEFAULT 'EXISTING'");
+  addColumn(
+    database,
+    'assistant_connectors',
+    'webhook_status',
+    "TEXT NOT NULL DEFAULT 'NOT_CONFIGURED'",
+  );
+  addColumn(database, 'assistant_connectors', 'credential_reference', 'TEXT');
+  addColumn(database, 'assistant_connectors', 'connected_at', 'TEXT');
+  addColumn(database, 'assistant_connectors', 'last_verified_at', 'TEXT');
+  database.exec(`
+    UPDATE assistant_connectors
+    SET business_id=(SELECT business_id FROM bots WHERE bots.id=assistant_connectors.assistant_id)
+    WHERE business_id IS NULL;
+    UPDATE assistant_connectors
+    SET webhook_status=CASE
+      WHEN connector_status='CONNECTED' THEN 'ACTIVE'
+      WHEN meta_phone_number_id IS NOT NULL THEN 'PENDING'
+      ELSE 'NOT_CONFIGURED'
+    END
+    WHERE webhook_status='NOT_CONFIGURED';
+    UPDATE assistant_connectors
+    SET connected_at=(SELECT last_connected_at FROM messaging_runtime
+                      WHERE messaging_runtime.bot_id=assistant_connectors.assistant_id)
+    WHERE connected_at IS NULL AND connector_status='CONNECTED';
+  `);
+
+  addColumn(database, 'panel_users', 'role', "TEXT NOT NULL DEFAULT 'global_admin'");
+  addColumn(database, 'technical_events', 'business_id', 'TEXT');
+  addColumn(database, 'technical_events', 'channel', 'TEXT');
+  addColumn(database, 'technical_events', 'route', 'TEXT');
+  addColumn(database, 'technical_events', 'ai_provider', 'TEXT');
+  addColumn(database, 'technical_events', 'ai_model', 'TEXT');
+  addColumn(database, 'technical_events', 'knowledge_used', 'INTEGER');
+  addColumn(database, 'technical_events', 'status', 'TEXT');
+  addColumn(database, 'conversations', 'business_id', 'TEXT');
+  database.exec(`
+    UPDATE conversations
+    SET business_id=(SELECT business_id FROM bots WHERE bots.id=conversations.assistant_id)
+    WHERE business_id IS NULL AND assistant_id IS NOT NULL;
+    UPDATE profile_branding
+    SET application_name='Don Gato Digital',updated_at=datetime('now')
+    WHERE application_name='Neurobot Business';
+
+    CREATE TABLE IF NOT EXISTS assistant_behavior_settings (
+      assistant_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
+      show_initial_menu_on_greeting INTEGER NOT NULL DEFAULT 1 CHECK (show_initial_menu_on_greeting IN (0,1)),
+      allow_free_questions INTEGER NOT NULL DEFAULT 1 CHECK (allow_free_questions IN (0,1)),
+      use_ai_for_unmatched INTEGER NOT NULL DEFAULT 1 CHECK (use_ai_for_unmatched IN (0,1)),
+      use_business_knowledge INTEGER NOT NULL DEFAULT 1 CHECK (use_business_knowledge IN (0,1)),
+      fallback_message TEXT NOT NULL DEFAULT 'No pude responder en este momento. Intenta nuevamente o contacta al negocio.',
+      human_handoff_ready INTEGER NOT NULL DEFAULT 0 CHECK (human_handoff_ready IN (0,1)),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT OR IGNORE INTO assistant_behavior_settings(assistant_id,created_at,updated_at)
+      SELECT id,created_at,updated_at FROM bots;
+
+    CREATE TABLE IF NOT EXISTS panel_user_business_access (
+      username TEXT NOT NULL REFERENCES panel_users(username) ON DELETE CASCADE,
+      business_id TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(username,business_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bots_business_channel
+      ON bots(business_id,channel_type,lifecycle_status);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_primary_assistant_per_business_channel
+      ON bots(business_id,channel_type) WHERE is_primary=1 AND lifecycle_status<>'DELETED';
+    CREATE INDEX IF NOT EXISTS idx_connectors_business
+      ON assistant_connectors(business_id,connector_status);
+    CREATE INDEX IF NOT EXISTS idx_conversations_business_activity
+      ON conversations(business_id,last_message_at DESC,id DESC);
+
+    CREATE TRIGGER IF NOT EXISTS bots_require_business_insert
+    BEFORE INSERT ON bots
+    WHEN NEW.business_id IS NULL OR NEW.business_id=''
+      OR NOT EXISTS (SELECT 1 FROM businesses WHERE id=NEW.business_id)
+    BEGIN SELECT RAISE(ABORT,'BUSINESS_ID_REQUIRED'); END;
+
+    CREATE TRIGGER IF NOT EXISTS connectors_require_matching_business_insert
+    BEFORE INSERT ON assistant_connectors
+    WHEN NEW.business_id IS NULL OR NEW.business_id<>(SELECT business_id FROM bots WHERE id=NEW.assistant_id)
+    BEGIN SELECT RAISE(ABORT,'CONNECTOR_BUSINESS_MISMATCH'); END;
+
+    CREATE TRIGGER IF NOT EXISTS connectors_require_matching_business_update
+    BEFORE UPDATE OF business_id,assistant_id ON assistant_connectors
+    WHEN NEW.business_id IS NULL OR NEW.business_id<>(SELECT business_id FROM bots WHERE id=NEW.assistant_id)
+    BEGIN SELECT RAISE(ABORT,'CONNECTOR_BUSINESS_MISMATCH'); END;
+
+    CREATE TRIGGER IF NOT EXISTS knowledge_category_require_matching_owner_insert
+    BEFORE INSERT ON knowledge_categories
+    WHEN NEW.bot_id<>(SELECT bot_id FROM assistant_profiles WHERE id=NEW.profile_id)
+    BEGIN SELECT RAISE(ABORT,'KNOWLEDGE_BUSINESS_MISMATCH'); END;
+
+    CREATE TRIGGER IF NOT EXISTS knowledge_entry_require_matching_owner_insert
+    BEFORE INSERT ON knowledge_entries
+    WHEN NEW.bot_id<>(SELECT bot_id FROM assistant_profiles WHERE id=NEW.profile_id)
+      OR NEW.profile_id<>(SELECT profile_id FROM knowledge_categories WHERE id=NEW.category_id)
+    BEGIN SELECT RAISE(ABORT,'KNOWLEDGE_BUSINESS_MISMATCH'); END;
+  `);
+}
+
+function createAssistantPlatformSchema(database: BetterSqlite3.Database): void {
+  addColumn(database, 'ai_settings', 'provider_config', "TEXT NOT NULL DEFAULT '{}'");
+  addColumn(database, 'menu_definitions', 'presentation_type', "TEXT NOT NULL DEFAULT 'AUTOMATIC'");
+  addColumn(
+    database,
+    'menu_definitions',
+    'list_button_label',
+    "TEXT NOT NULL DEFAULT 'Ver opciones'",
+  );
+  addColumn(database, 'menu_options', 'description', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'menu_options', 'section_title', "TEXT NOT NULL DEFAULT ''");
+  addColumn(
+    database,
+    'assistant_behavior_settings',
+    'allow_dynamic_buttons',
+    'INTEGER NOT NULL DEFAULT 1',
+  );
+  addColumn(
+    database,
+    'assistant_behavior_settings',
+    'allow_dynamic_lists',
+    'INTEGER NOT NULL DEFAULT 1',
+  );
+  addColumn(
+    database,
+    'assistant_behavior_settings',
+    'allow_business_data_queries',
+    'INTEGER NOT NULL DEFAULT 1',
+  );
+  addColumn(
+    database,
+    'assistant_behavior_settings',
+    'show_ai_suggested_actions',
+    'INTEGER NOT NULL DEFAULT 1',
+  );
+  addColumn(
+    database,
+    'assistant_behavior_settings',
+    'allow_write_tools',
+    'INTEGER NOT NULL DEFAULT 0',
+  );
+  addColumn(database, 'technical_events', 'tool_requested', 'TEXT');
+  addColumn(database, 'technical_events', 'tool_executed', 'TEXT');
+  addColumn(database, 'technical_events', 'result_count', 'INTEGER');
+  addColumn(database, 'technical_events', 'presentation', 'TEXT');
+  addColumn(database, 'technical_events', 'action_ids', 'TEXT');
+
+  database.exec(`
+    UPDATE ai_settings
+    SET provider_config=printf('{"model":"%s"}',model)
+    WHERE provider='groq' AND (provider_config='{}' OR provider_config='');
+
+    CREATE TABLE IF NOT EXISTS assistant_tool_configurations (
+      assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+      business_id TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+      tool_id TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+      permissions TEXT NOT NULL DEFAULT '["READ","SUGGEST"]',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(assistant_id,tool_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS ephemeral_interactions (
+      id TEXT PRIMARY KEY,
+      business_id TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+      assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+      conversation_hash TEXT NOT NULL,
+      tool_id TEXT NOT NULL,
+      action_id TEXT NOT NULL,
+      resource_id TEXT NOT NULL,
+      label TEXT NOT NULL,
+      volatile INTEGER NOT NULL DEFAULT 0 CHECK (volatile IN (0,1)),
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','CONSUMED','EXPIRED')),
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      consumed_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tool_config_business
+      ON assistant_tool_configurations(business_id,assistant_id,enabled);
+    CREATE INDEX IF NOT EXISTS idx_ephemeral_interaction_lookup
+      ON ephemeral_interactions(assistant_id,conversation_hash,status,expires_at);
+    CREATE INDEX IF NOT EXISTS idx_ephemeral_interaction_expiry
+      ON ephemeral_interactions(status,expires_at);
+
+    CREATE TRIGGER IF NOT EXISTS tool_configuration_require_matching_business_insert
+    BEFORE INSERT ON assistant_tool_configurations
+    WHEN NEW.business_id<>(SELECT business_id FROM bots WHERE id=NEW.assistant_id)
+    BEGIN SELECT RAISE(ABORT,'TOOL_CONFIGURATION_BUSINESS_MISMATCH'); END;
+
+    CREATE TRIGGER IF NOT EXISTS tool_configuration_require_matching_business_update
+    BEFORE UPDATE OF business_id,assistant_id ON assistant_tool_configurations
+    WHEN NEW.business_id<>(SELECT business_id FROM bots WHERE id=NEW.assistant_id)
+    BEGIN SELECT RAISE(ABORT,'TOOL_CONFIGURATION_BUSINESS_MISMATCH'); END;
+
+    CREATE TRIGGER IF NOT EXISTS ephemeral_interaction_require_matching_business_insert
+    BEFORE INSERT ON ephemeral_interactions
+    WHEN NEW.business_id<>(SELECT business_id FROM bots WHERE id=NEW.assistant_id)
+    BEGIN SELECT RAISE(ABORT,'EPHEMERAL_INTERACTION_BUSINESS_MISMATCH'); END;
+
+    INSERT OR IGNORE INTO assistant_tool_configurations(
+      assistant_id,business_id,tool_id,enabled,permissions,created_at,updated_at
+    )
+    SELECT id,business_id,tool_id,1,'["READ","SUGGEST"]',created_at,updated_at
+    FROM bots
+    CROSS JOIN (
+      SELECT 'get_business_hours' AS tool_id
+      UNION ALL SELECT 'get_services'
+      UNION ALL SELECT 'get_products'
+      UNION ALL SELECT 'get_product_stock'
+      UNION ALL SELECT 'get_locations'
+      UNION ALL SELECT 'show_menu'
+    );
+  `);
+}
+
+function backfillBusinesses(database: BetterSqlite3.Database): void {
+  if (!columnExists(database, 'bots', 'business_id')) return;
+  database.exec(`
+    INSERT OR IGNORE INTO businesses(
+      id,slug,name,description,language,timezone,status,created_at,updated_at
+    )
+    SELECT bots.client_id,bots.client_id,
+      COALESCE(profiles.organization_name,bots.client_id),
+      COALESCE(profiles.description,''),'es-CL',
+      COALESCE(profiles.timezone,'America/Santiago'),
+      CASE WHEN bots.enabled=1 THEN 'ACTIVE'
+           WHEN bots.lifecycle_status IN ('DRAFT','UNLINKED','LINKING') THEN 'DRAFT'
+           ELSE 'PAUSED' END,
+      bots.created_at,bots.updated_at
+    FROM bots
+    LEFT JOIN bot_profiles mapping ON mapping.bot_id=bots.id
+    LEFT JOIN assistant_profiles profiles ON profiles.id=mapping.profile_id;
+
+    UPDATE bots SET business_id=client_id WHERE business_id IS NULL;
+  `);
+}
+
 function ensureBusinessExample(database: BetterSqlite3.Database): void {
   const count = database
     .prepare("SELECT COUNT(*) AS count FROM bots WHERE lifecycle_status<>'DELETED'")
@@ -963,14 +1262,35 @@ function ensureBusinessExample(database: BetterSqlite3.Database): void {
   if (Number(count.count) > 0) return;
   const now = new Date().toISOString();
   const botId = DEFAULT_BUSINESS_ASSISTANT_ID;
-  database
-    .prepare(
-      `INSERT INTO bots(
-         id,internal_identifier,client_id,connector_type,lifecycle_status,deletion_locked,
-         enabled,created_at,updated_at
-       ) VALUES (?, ?, ?, 'WHATSAPP_CLOUD_API', 'UNLINKED', 0, 0, ?, ?)`,
-    )
-    .run(botId, botId, botId, now, now);
+  const hasBusinessOwnership = columnExists(database, 'bots', 'business_id');
+  if (hasBusinessOwnership) {
+    database
+      .prepare(
+        `INSERT OR IGNORE INTO businesses(
+           id,slug,name,description,language,timezone,status,created_at,updated_at
+         ) VALUES (?, ?, 'Negocio de ejemplo',
+           'Configuración inicial editable de Don Gato Digital.',
+           'es-CL','America/Santiago','DRAFT',?,?)`,
+      )
+      .run(botId, botId, now, now);
+    database
+      .prepare(
+        `INSERT INTO bots(
+           id,business_id,channel_type,is_primary,internal_identifier,client_id,connector_type,
+           lifecycle_status,deletion_locked,enabled,created_at,updated_at
+         ) VALUES (?, ?, 'WHATSAPP', 1, ?, ?, 'WHATSAPP_CLOUD_API', 'UNLINKED', 0, 0, ?, ?)`,
+      )
+      .run(botId, botId, botId, botId, now, now);
+  } else {
+    database
+      .prepare(
+        `INSERT INTO bots(
+           id,internal_identifier,client_id,connector_type,lifecycle_status,deletion_locked,
+           enabled,created_at,updated_at
+         ) VALUES (?, ?, ?, 'WHATSAPP_CLOUD_API', 'UNLINKED', 0, 0, ?, ?)`,
+      )
+      .run(botId, botId, botId, now, now);
+  }
   const profile = database
     .prepare(
       `INSERT INTO assistant_profiles(
@@ -1013,7 +1333,7 @@ function ensureBusinessExample(database: BetterSqlite3.Database): void {
       `INSERT INTO profile_branding(
          profile_id,application_name,header_text,footer_text,support_information,
          logo_path,primary_color,secondary_color,updated_at
-       ) VALUES (?, 'Neurobot Business', 'Negocio de ejemplo', '', '', NULL, '#176b61', '#d8a446', ?)`,
+       ) VALUES (?, 'Don Gato Digital', 'Negocio de ejemplo', '', '', NULL, '#176b61', '#d8a446', ?)`,
     )
     .run(profileId, now);
   database
@@ -1021,13 +1341,25 @@ function ensureBusinessExample(database: BetterSqlite3.Database): void {
       "INSERT INTO messaging_runtime(bot_id,status,updated_at) VALUES (?, 'disconnected', ?)",
     )
     .run(botId, now);
-  database
-    .prepare(
-      `INSERT INTO assistant_connectors(
-         assistant_id,connector_type,connector_status,created_at,updated_at
-       ) VALUES (?, 'WHATSAPP_CLOUD_API', 'UNLINKED', ?, ?)`,
-    )
-    .run(botId, now, now);
+  if (columnExists(database, 'assistant_connectors', 'business_id')) {
+    database
+      .prepare(
+        `INSERT INTO assistant_connectors(
+           assistant_id,business_id,connector_type,connector_status,setup_mode,
+           webhook_status,created_at,updated_at
+         ) VALUES (?, ?, 'WHATSAPP_CLOUD_API', 'UNLINKED', 'EXISTING',
+           'NOT_CONFIGURED', ?, ?)`,
+      )
+      .run(botId, botId, now, now);
+  } else {
+    database
+      .prepare(
+        `INSERT INTO assistant_connectors(
+           assistant_id,connector_type,connector_status,created_at,updated_at
+         ) VALUES (?, 'WHATSAPP_CLOUD_API', 'UNLINKED', ?, ?)`,
+      )
+      .run(botId, now, now);
+  }
   const connector = database
     .prepare('SELECT id FROM assistant_connectors WHERE assistant_id=?')
     .get(botId) as { id: number };
@@ -1039,6 +1371,14 @@ function ensureBusinessExample(database: BetterSqlite3.Database): void {
        ) VALUES (?, 1, NULL, 'automatic', ?)`,
     )
     .run(botId, now);
+  if (tableExists(database, 'assistant_behavior_settings')) {
+    database
+      .prepare(
+        `INSERT OR IGNORE INTO assistant_behavior_settings(assistant_id,created_at,updated_at)
+         VALUES (?, ?, ?)`,
+      )
+      .run(botId, now, now);
+  }
   database
     .prepare(
       `INSERT INTO bot_capabilities(
@@ -1046,11 +1386,6 @@ function ensureBusinessExample(database: BetterSqlite3.Database): void {
          interactive_menus_enabled,numeric_menu_replies_enabled,catalog_enabled,
          human_assistance_enabled,updated_at
        ) VALUES (?, 1, 1, 1, 1, 1, 1, ?)`,
-    )
-    .run(botId, now);
-  database
-    .prepare(
-      "INSERT INTO bot_ai_credentials(bot_id,credential_mode,updated_at) VALUES (?, 'global', ?)",
     )
     .run(botId, now);
   database
@@ -1207,6 +1542,17 @@ function renameColumn(
 function dropColumn(database: BetterSqlite3.Database, table: string, column: string): void {
   if (columnExists(database, table, column)) {
     database.exec(`ALTER TABLE "${table}" DROP COLUMN "${column}"`);
+  }
+}
+
+function addColumn(
+  database: BetterSqlite3.Database,
+  table: string,
+  column: string,
+  definition: string,
+): void {
+  if (tableExists(database, table) && !columnExists(database, table, column)) {
+    database.exec(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${definition}`);
   }
 }
 

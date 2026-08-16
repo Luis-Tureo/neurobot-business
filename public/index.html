@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
     <meta name="theme-color" content="#f8fafc" />
-    <title>Neurobot Business</title>
+    <title>Don Gato Digital</title>
     <link rel="stylesheet" href="/panel.css" />
   </head>
   <body>
@@ -112,8 +112,8 @@
           <svg><use href="#icon-bots"></use></svg>
         </div>
         <div>
-          <p class="app-kicker">Neurobot</p>
-          <h1 id="application-title">Business</h1>
+          <p class="app-kicker">Don Gato</p>
+          <h1 id="application-title">Digital</h1>
         </div>
       </div>
       <p id="application-subtitle" class="app-header__subtitle">
@@ -135,7 +135,7 @@
           </span>
           <div>
             <p class="eyebrow">Administración segura</p>
-            <h2 id="login-title">Bienvenido a Neurobot Business</h2>
+            <h2 id="login-title">Bienvenido a Don Gato Digital</h2>
             <p>Gestiona tus asistentes, contenidos y atención desde un solo lugar.</p>
           </div>
         </div>
@@ -229,7 +229,8 @@
 
                 <p class="nav-section-label">Automatización</p>
                 <button class="nav-item" data-section="menus" data-module="menus" type="button">
-                  <svg aria-hidden="true"><use href="#icon-flow"></use></svg><span>Menús</span>
+                  <svg aria-hidden="true"><use href="#icon-flow"></use></svg
+                  ><span>Interacciones</span>
                 </button>
                 <button class="nav-item" data-section="cached-answers" type="button">
                   <svg aria-hidden="true"><use href="#icon-message"></use></svg
@@ -304,13 +305,14 @@
 
               <form
                 id="create-bot-form"
-                class="editor-panel hidden"
+                class="editor-panel assistant-wizard hidden"
                 aria-labelledby="create-bot-title"
               >
                 <div class="editor-panel__heading">
                   <div>
                     <p class="eyebrow">Nuevo asistente</p>
-                    <h3 id="create-bot-title">Configura lo esencial</h3>
+                    <h3 id="create-bot-title">Crea un asistente para tu negocio</h3>
+                    <p>Podrás completar y probar cada integración antes de activarlo.</p>
                   </div>
                   <button
                     id="cancel-create-bot"
@@ -322,8 +324,23 @@
                   </button>
                 </div>
 
-                <fieldset class="form-section">
-                  <legend>Identidad</legend>
+                <ol class="wizard-progress" aria-label="Progreso de creación">
+                  <li class="active" data-wizard-indicator="1"><span>1</span> Negocio</li>
+                  <li data-wizard-indicator="2"><span>2</span> WhatsApp</li>
+                  <li data-wizard-indicator="3"><span>3</span> Inteligencia artificial</li>
+                  <li data-wizard-indicator="4"><span>4</span> Conocimiento</li>
+                  <li data-wizard-indicator="5"><span>5</span> Interacciones</li>
+                  <li data-wizard-indicator="6"><span>6</span> Comportamiento</li>
+                  <li data-wizard-indicator="7"><span>7</span> Probar</li>
+                  <li data-wizard-indicator="8"><span>8</span> Activar</li>
+                </ol>
+
+                <fieldset class="form-section wizard-step" data-wizard-step="1">
+                  <legend>Paso 1 · Negocio</legend>
+                  <p class="form-help">
+                    Cuéntanos quién atenderá este asistente. Los identificadores se generan
+                    automáticamente.
+                  </p>
                   <div class="form-grid two-columns">
                     <label
                       >Nombre del negocio<input name="organizationName" maxlength="160" required
@@ -331,69 +348,286 @@
                     <label
                       >Nombre del asistente<input name="botName" maxlength="80" required
                     /></label>
+                    <label class="full-span"
+                      >Descripción breve<textarea
+                        name="description"
+                        maxlength="1000"
+                        rows="3"
+                        required
+                        placeholder="Qué ofrece el negocio y a quién atiende"
+                      ></textarea>
+                    </label>
                     <label>
-                      Tipo de negocio
-                      <select name="organizationType" required>
-                        <option>Tienda</option>
+                      Tipo de negocio<select name="organizationType" required>
+                        <option>Comercio</option>
                         <option>Restaurante</option>
-                        <option>Distribuidora</option>
-                        <option>Servicio profesional</option>
-                        <option>Organización social</option>
-                        <option>Institución educativa</option>
+                        <option>Servicios</option>
+                        <option>Salud</option>
+                        <option>Belleza</option>
+                        <option>Turismo</option>
+                        <option>Transporte</option>
+                        <option>Educación</option>
+                        <option>Profesional independiente</option>
                         <option>Otro</option>
                       </select>
                     </label>
                     <label>
-                      Identificador
-                      <input name="id" maxlength="80" placeholder="mi-negocio" required />
-                      <small>Se completa automáticamente y puedes editarlo antes de crear.</small>
+                      Idioma<select name="language" required>
+                        <option value="es-CL">Español (Chile)</option>
+                        <option value="es">Español</option>
+                        <option value="en">English</option>
+                        <option value="pt-BR">Português (Brasil)</option>
+                      </select>
                     </label>
-                  </div>
-                </fieldset>
-
-                <fieldset class="form-section">
-                  <legend>Configuración</legend>
-                  <div class="form-grid three-columns">
                     <label
                       >Zona horaria<input name="timezone" value="America/Santiago" required
                     /></label>
                     <label>
-                      Inteligencia artificial
-                      <select name="provider">
-                        <option value="groq">Groq</option>
-                        <option value="disabled">Configurar después</option>
-                      </select>
-                    </label>
-                    <label>
-                      Plantilla inicial
-                      <select name="preset">
-                        <option value="store">Tienda</option>
+                      Plantilla inicial<select name="preset">
+                        <option value="store">Comercio</option>
                         <option value="restaurant">Restaurante</option>
-                        <option value="distributor">Distribuidora</option>
-                        <option value="service">Servicio</option>
+                        <option value="service">Servicios</option>
                         <option value="empty">Comenzar en blanco</option>
                       </select>
                     </label>
                   </div>
                 </fieldset>
 
-                <fieldset class="form-section">
-                  <legend>WhatsApp</legend>
-                  <p class="form-help">
-                    Cada asistente utiliza su propio número de WhatsApp Cloud API. La conexión se
-                    completa después de crearlo.
-                  </p>
-                  <label class="check-row">
-                    <input name="exclusiveNumberConfirmed" type="checkbox" required />
-                    <span>Entiendo que este asistente necesita un número exclusivo.</span>
-                  </label>
+                <fieldset class="form-section wizard-step hidden" data-wizard-step="2">
+                  <legend>Paso 2 · Canal de WhatsApp</legend>
+                  <div class="provider-summary">
+                    <strong>Meta Cloud API</strong
+                    ><span class="status-badge success">Canal oficial</span>
+                    <p>
+                      La aplicación principal de Don Gato Digital conectará el número de cada
+                      negocio de forma aislada.
+                    </p>
+                  </div>
+                  <div class="choice-grid">
+                    <label class="choice-card"
+                      ><input type="radio" name="whatsappSetupMode" value="EXISTING" checked /><span
+                        ><strong>Conectar número existente</strong
+                        ><small
+                          >Para un negocio que ya utiliza WhatsApp Business. La conexión guiada
+                          estará disponible próximamente.</small
+                        ></span
+                      ></label
+                    >
+                    <label class="choice-card"
+                      ><input type="radio" name="whatsappSetupMode" value="NEW_CUSTOMER" /><span
+                        ><strong>Configurar número nuevo</strong
+                        ><small
+                          >El negocio aportará un número nuevo. No compraremos ni aprovisionaremos
+                          números automáticamente.</small
+                        ></span
+                      ></label
+                    >
+                    <label class="choice-card disabled"
+                      ><input type="radio" disabled /><span
+                        ><strong>Número provisto por Don Gato Digital</strong
+                        ><small>Próximamente</small></span
+                      ></label
+                    >
+                  </div>
                 </fieldset>
 
-                <input name="mode" type="hidden" value="business" />
+                <fieldset class="form-section wizard-step hidden" data-wizard-step="3">
+                  <legend>Paso 3 · Inteligencia artificial</legend>
+                  <p class="form-help">
+                    La credencial de Groq es administrada por Don Gato Digital y nunca se envía al
+                    navegador.
+                  </p>
+                  <div class="form-grid two-columns">
+                    <label
+                      >Proveedor de IA<select name="provider" required>
+                        <option value="groq">Groq</option>
+                        <option value="meta_business_agent" disabled>
+                          Meta Business Agent / Meta AI Agent — Próximamente
+                        </option>
+                      </select></label
+                    >
+                    <label
+                      >Modelo<select name="model" data-ai-model-select required>
+                        <option value="">Cargando modelos…</option></select
+                      ><small
+                        >El modelo recomendado aparece seleccionado inicialmente.</small
+                      ></label
+                    >
+                  </div>
+                </fieldset>
+
+                <fieldset class="form-section wizard-step hidden" data-wizard-step="4">
+                  <legend>Paso 4 · Conocimiento</legend>
+                  <p class="form-help">
+                    El conocimiento estable quedará aislado para este negocio. Después de guardar el
+                    borrador podrás agregar horarios, servicios, preguntas frecuentes y políticas
+                    desde su ficha.
+                  </p>
+                  <label class="switch-row"
+                    ><input
+                      name="useBusinessKnowledge"
+                      type="checkbox"
+                      role="switch"
+                      checked
+                    /><span
+                      ><strong>Utilizar conocimiento del negocio</strong
+                      ><small
+                        >Groq solo recibirá los fragmentos autorizados para este asistente.</small
+                      ></span
+                    ></label
+                  >
+                  <div class="future-note">
+                    <strong>Información dinámica</strong>
+                    <p>
+                      Stock, disponibilidad y otros datos variables no se guardan como conocimiento:
+                      requieren una herramienta conectada a una fuente real.
+                    </p>
+                  </div>
+                </fieldset>
+
+                <fieldset class="form-section wizard-step hidden" data-wizard-step="5">
+                  <legend>Paso 5 · Interacciones</legend>
+                  <p class="form-help">
+                    Podrás crear menús, botones y listas persistentes. Las opciones dinámicas solo
+                    se generarán desde datos reales autorizados.
+                  </p>
+                  <div class="behavior-grid">
+                    <label class="switch-row"
+                      ><input
+                        name="allowDynamicButtons"
+                        type="checkbox"
+                        role="switch"
+                        checked
+                      /><span
+                        ><strong>Permitir botones dinámicos</strong
+                        ><small>Para 2 o 3 resultados reales.</small></span
+                      ></label
+                    >
+                    <label class="switch-row"
+                      ><input name="allowDynamicLists" type="checkbox" role="switch" checked /><span
+                        ><strong>Permitir listas dinámicas</strong
+                        ><small>Para 4 a 10 resultados reales.</small></span
+                      ></label
+                    >
+                    <label class="switch-row"
+                      ><input
+                        name="allowBusinessDataQueries"
+                        type="checkbox"
+                        role="switch"
+                        checked
+                      /><span
+                        ><strong>Consultar datos del negocio</strong
+                        ><small>Solo mediante herramientas habilitadas.</small></span
+                      ></label
+                    >
+                    <label class="switch-row"
+                      ><input
+                        name="showAISuggestedActions"
+                        type="checkbox"
+                        role="switch"
+                        checked
+                      /><span
+                        ><strong>Mostrar acciones sugeridas</strong
+                        ><small>Don Gato valida cada acción antes de presentarla.</small></span
+                      ></label
+                    >
+                  </div>
+                  <input name="allowWriteTools" type="hidden" value="false" />
+                </fieldset>
+
+                <fieldset class="form-section wizard-step hidden" data-wizard-step="6">
+                  <legend>Paso 6 · Comportamiento</legend>
+                  <div class="behavior-grid">
+                    <label class="switch-row"
+                      ><input
+                        name="showInitialMenuOnGreeting"
+                        type="checkbox"
+                        role="switch"
+                        checked
+                      /><span
+                        ><strong>Mostrar menú al saludar</strong
+                        ><small>Presenta las opciones iniciales ante un saludo.</small></span
+                      ></label
+                    >
+                    <label class="switch-row"
+                      ><input
+                        name="allowFreeQuestions"
+                        type="checkbox"
+                        role="switch"
+                        checked
+                      /><span
+                        ><strong>Permitir preguntas libres</strong
+                        ><small>Responde preguntas que no sean opciones del menú.</small></span
+                      ></label
+                    >
+                    <label class="switch-row"
+                      ><input name="useAIForUnmatched" type="checkbox" role="switch" checked /><span
+                        ><strong>Usar IA fuera del menú</strong
+                        ><small
+                          >Las preguntas libres irán a Groq en vez de repetir el menú.</small
+                        ></span
+                      ></label
+                    >
+                  </div>
+                  <label
+                    >Respuesta alternativa<textarea
+                      name="fallbackMessage"
+                      maxlength="600"
+                      rows="3"
+                      required
+                    >
+No pude responder en este momento. Intenta nuevamente o contacta al negocio.</textarea>
+                  </label>
+                  <div class="future-note">
+                    <strong>Derivación humana</strong
+                    ><span class="status-badge neutral">Preparado para el futuro</span>
+                    <p>
+                      La configuración queda lista para incorporar esta función sin activarla
+                      todavía.
+                    </p>
+                  </div>
+                </fieldset>
+
+                <fieldset class="form-section wizard-step hidden" data-wizard-step="7">
+                  <legend>Paso 7 · Probar</legend>
+                  <div class="provider-summary">
+                    <strong>Simulador privado</strong
+                    ><span class="status-badge neutral">Sin envíos reales</span>
+                    <p>
+                      Al guardar el borrador se abrirá el centro de pruebas. Allí podrás conversar
+                      con la misma lógica central usada por WhatsApp y revisar ruta, proveedor,
+                      conocimiento, herramienta, presentación y errores.
+                    </p>
+                  </div>
+                </fieldset>
+
+                <fieldset class="form-section wizard-step hidden" data-wizard-step="8">
+                  <legend>Paso 8 · Activar</legend>
+                  <div class="attention-panel">
+                    <strong>Primero se guardará como borrador</strong>
+                    <p>
+                      La activación solo estará disponible cuando el negocio, WhatsApp, Phone Number
+                      ID, Groq, modelo y configuración obligatoria estén listos. La ficha del
+                      asistente mostrará exactamente qué falta.
+                    </p>
+                  </div>
+                </fieldset>
+
                 <input name="connectorType" type="hidden" value="WHATSAPP_CLOUD_API" />
                 <input name="menuType" type="hidden" value="automatic" />
                 <div class="form-actions">
-                  <button type="submit" data-busy-label="Creando…">Crear asistente</button>
+                  <button id="wizard-previous" class="secondary hidden" type="button">
+                    Anterior
+                  </button>
+                  <button id="wizard-next" type="button">Continuar</button>
+                  <button
+                    id="wizard-submit"
+                    class="hidden"
+                    type="submit"
+                    data-busy-label="Creando…"
+                  >
+                    Guardar borrador y probar
+                  </button>
                   <button class="secondary" type="button" data-cancel-create>Cancelar</button>
                 </div>
               </form>
@@ -502,6 +736,37 @@
               </div>
               <div id="whatsapp-cards" class="health-grid" aria-live="polite"></div>
               <div id="whatsapp-issues" class="attention-panel hidden" aria-live="polite"></div>
+              <form id="whatsapp-setup-form" class="editor-panel">
+                <div class="editor-panel__heading">
+                  <div>
+                    <h3>Cómo conectar este número</h3>
+                    <p>Elige el escenario del negocio. No necesitas ingresar IDs ni tokens aquí.</p>
+                  </div>
+                </div>
+                <div class="choice-grid">
+                  <label class="choice-card"
+                    ><input type="radio" name="setupMode" value="EXISTING" /><span
+                      ><strong>Conectar número existente</strong
+                      ><small>Para un número que ya pertenece al negocio.</small></span
+                    ></label
+                  >
+                  <label class="choice-card"
+                    ><input type="radio" name="setupMode" value="NEW_CUSTOMER" /><span
+                      ><strong>Configurar número nuevo</strong
+                      ><small>El negocio proporcionará un número nuevo.</small></span
+                    ></label
+                  >
+                  <label class="choice-card disabled"
+                    ><input type="radio" disabled /><span
+                      ><strong>Número provisto por Don Gato Digital</strong
+                      ><small>Próximamente</small></span
+                    ></label
+                  >
+                </div>
+                <div class="form-actions">
+                  <button type="submit" data-busy-label="Guardando…">Guardar opción</button>
+                </div>
+              </form>
               <p class="privacy-note">
                 Las credenciales se administran en el servidor y nunca se muestran en este panel.
               </p>
@@ -578,6 +843,14 @@
                     </label>
                     <label>Dirección opcional<input name="address" maxlength="500" /></label>
                     <label>Zona horaria<input name="timezone" maxlength="80" required /></label>
+                    <label
+                      >Idioma<select name="language" required>
+                        <option value="es-CL">Español (Chile)</option>
+                        <option value="es">Español</option>
+                        <option value="en">English</option>
+                        <option value="pt-BR">Português (Brasil)</option>
+                      </select></label
+                    >
                   </div>
                 </fieldset>
 
@@ -660,6 +933,60 @@
 
                 <div class="form-actions">
                   <button type="submit" data-busy-label="Guardando…">Guardar perfil</button>
+                </div>
+              </form>
+
+              <form id="assistant-behavior-form" class="editor-panel">
+                <div class="editor-panel__heading">
+                  <div>
+                    <h3>Comportamiento conversacional</h3>
+                    <p>Decide cuándo mostrar el menú y cuándo responder con IA.</p>
+                  </div>
+                </div>
+                <div class="behavior-grid">
+                  <label class="switch-row"
+                    ><input name="showInitialMenuOnGreeting" type="checkbox" role="switch" /><span
+                      ><strong>Mostrar menú al saludar</strong
+                      ><small>Presenta el menú inicial después de un saludo.</small></span
+                    ></label
+                  >
+                  <label class="switch-row"
+                    ><input name="allowFreeQuestions" type="checkbox" role="switch" /><span
+                      ><strong>Permitir preguntas libres</strong
+                      ><small>Acepta consultas que no coincidan con una opción.</small></span
+                    ></label
+                  >
+                  <label class="switch-row"
+                    ><input name="useAIForUnmatched" type="checkbox" role="switch" /><span
+                      ><strong>Usar IA fuera del menú</strong
+                      ><small>No vuelve a mostrar el menú si la IA puede ayudar.</small></span
+                    ></label
+                  >
+                  <label class="switch-row"
+                    ><input name="useBusinessKnowledge" type="checkbox" role="switch" /><span
+                      ><strong>Usar conocimiento del negocio</strong
+                      ><small
+                        >Limita los datos empresariales al contenido de este negocio.</small
+                      ></span
+                    ></label
+                  >
+                </div>
+                <label
+                  >Respuesta alternativa<textarea
+                    name="fallbackMessage"
+                    rows="3"
+                    maxlength="600"
+                    required
+                  ></textarea>
+                </label>
+                <div class="future-note">
+                  <strong>Derivación humana</strong
+                  ><span class="status-badge neutral">Próximamente</span>
+                  <p>La arquitectura está preparada; esta función todavía no está activa.</p>
+                </div>
+                <input name="humanHandoffReady" type="hidden" value="false" />
+                <div class="form-actions">
+                  <button type="submit" data-busy-label="Guardando…">Guardar comportamiento</button>
                 </div>
               </form>
 
@@ -838,8 +1165,10 @@
               <div class="page-heading">
                 <div>
                   <p class="eyebrow">Automatización</p>
-                  <h2 id="menus-title">Menús</h2>
-                  <p>Organiza recorridos simples para las personas que escriben al negocio.</p>
+                  <h2 id="menus-title">Interacciones</h2>
+                  <p>
+                    Combina menús persistentes con opciones dinámicas obtenidas desde datos reales.
+                  </p>
                 </div>
                 <div class="button-row">
                   <button id="new-menu" type="button">Crear menú</button>
@@ -849,12 +1178,82 @@
                 </div>
               </div>
               <section class="content-block">
-                <div class="content-block__heading"><h3>Menús disponibles</h3></div>
+                <div class="content-block__heading">
+                  <div>
+                    <p class="eyebrow">Interacciones configuradas</p>
+                    <h3>Menús, botones y listas</h3>
+                  </div>
+                </div>
                 <div id="menus-list" class="data-list"></div>
               </section>
               <section class="content-block">
                 <div class="content-block__heading"><h3>Opciones</h3></div>
                 <div id="menu-options-list" class="data-list"></div>
+              </section>
+
+              <section class="content-block" aria-labelledby="dynamic-interactions-title">
+                <div class="content-block__heading">
+                  <div>
+                    <p class="eyebrow">Durante la conversación</p>
+                    <h3 id="dynamic-interactions-title">IA e interacciones dinámicas</h3>
+                    <p>
+                      La IA puede solicitar datos; Don Gato valida permisos, consulta la fuente real
+                      y decide si mostrar texto, botones o una lista.
+                    </p>
+                  </div>
+                </div>
+                <form id="dynamic-interactions-form" class="stack-form">
+                  <div class="behavior-grid">
+                    <label class="switch-row"
+                      ><input name="allowDynamicButtons" type="checkbox" role="switch" /><span
+                        ><strong>Permitir botones dinámicos</strong
+                        ><small>Se usan con 2 o 3 resultados reales.</small></span
+                      ></label
+                    >
+                    <label class="switch-row"
+                      ><input name="allowDynamicLists" type="checkbox" role="switch" /><span
+                        ><strong>Permitir listas dinámicas</strong
+                        ><small>Se usan con 4 a 10 resultados reales.</small></span
+                      ></label
+                    >
+                    <label class="switch-row"
+                      ><input name="allowBusinessDataQueries" type="checkbox" role="switch" /><span
+                        ><strong>Consultar datos del negocio</strong
+                        ><small
+                          >Exige una herramienta habilitada y aislada por negocio.</small
+                        ></span
+                      ></label
+                    >
+                    <label class="switch-row"
+                      ><input name="showAISuggestedActions" type="checkbox" role="switch" /><span
+                        ><strong>Mostrar acciones sugeridas por IA</strong
+                        ><small>Las sugerencias nunca se ejecutan directamente.</small></span
+                      ></label
+                    >
+                    <label class="switch-row disabled"
+                      ><input name="allowWriteTools" type="checkbox" role="switch" disabled /><span
+                        ><strong>Permitir operaciones de escritura</strong
+                        ><small>No disponible hasta conectar fuentes con revalidación.</small></span
+                      ></label
+                    >
+                  </div>
+                  <div class="form-actions">
+                    <button type="submit" data-busy-label="Guardando…">
+                      Guardar interacciones dinámicas
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <section class="content-block" aria-labelledby="assistant-tools-title">
+                <div class="content-block__heading">
+                  <div>
+                    <p class="eyebrow">Datos empresariales</p>
+                    <h3 id="assistant-tools-title">Herramientas disponibles</h3>
+                    <p>Solo las herramientas con una fuente real pueden habilitarse.</p>
+                  </div>
+                </div>
+                <div id="assistant-tools-list" class="data-list" aria-live="polite"></div>
               </section>
 
               <form id="menu-form" class="editor-panel hidden" aria-labelledby="menu-form-title">
@@ -891,6 +1290,22 @@
                   >Mensaje<textarea name="message" maxlength="600" rows="4" required></textarea>
                 </label>
                 <label>Texto de ayuda<input name="helpText" maxlength="300" /></label>
+                <div class="form-grid two-columns">
+                  <label
+                    >Presentación<select name="presentation">
+                      <option value="AUTOMATIC">Automática</option>
+                      <option value="BUTTONS">Botones</option>
+                      <option value="LIST">Lista</option>
+                    </select></label
+                  >
+                  <label
+                    >Texto para abrir la lista<input
+                      name="listButtonLabel"
+                      maxlength="20"
+                      value="Ver opciones"
+                      required
+                  /></label>
+                </div>
                 <div class="form-grid two-columns">
                   <label class="switch-row"
                     ><input name="enabled" type="checkbox" role="switch" checked /><span
@@ -961,6 +1376,20 @@
                       placeholder="Una por línea"
                     ></textarea>
                   </label>
+                </div>
+                <div class="form-grid two-columns">
+                  <label
+                    >Descripción breve<input
+                      name="description"
+                      maxlength="72"
+                      placeholder="Opcional para filas de lista"
+                  /></label>
+                  <label
+                    >Sección de lista<input
+                      name="section"
+                      maxlength="24"
+                      placeholder="Por ejemplo: Servicios"
+                  /></label>
                 </div>
                 <div id="menu-action-fields" class="form-section"></div>
                 <label class="switch-row"
@@ -1237,7 +1666,14 @@
                   <label
                     >Proveedor<select name="provider">
                       <option value="groq">Groq</option>
-                      <option value="disabled">Desactivado</option>
+                      <option value="meta_business_agent" disabled>
+                        Meta Business Agent / Meta AI Agent — Próximamente
+                      </option>
+                    </select></label
+                  >
+                  <label
+                    >Modelo<select name="model" data-ai-model-select required>
+                      <option value="">Cargando modelos…</option>
                     </select></label
                   >
                   <label
@@ -1375,43 +1811,14 @@
                 </div>
               </form>
 
-              <details class="disclosure">
-                <summary>
-                  <span
-                    ><strong>Conexión del proveedor</strong
-                    ><small>Usa la clave global o una clave exclusiva del asistente.</small></span
-                  >
-                </summary>
-                <div class="disclosure__content">
-                  <form id="ai-credential-form" class="stack-form">
-                    <div class="form-grid two-columns">
-                      <label
-                        >Modalidad<select name="mode">
-                          <option value="global">Clave global</option>
-                          <option value="per_bot">Clave exclusiva</option>
-                        </select></label
-                      >
-                      <label
-                        >Nueva clave exclusiva<input
-                          name="apiKey"
-                          type="password"
-                          autocomplete="new-password"
-                          minlength="16"
-                          maxlength="500"
-                      /></label>
-                    </div>
-                    <p class="privacy-note">
-                      La clave nunca vuelve al navegador después de guardarla.
-                    </p>
-                    <div class="form-actions">
-                      <button type="submit" data-busy-label="Guardando…">Guardar conexión</button
-                      ><button id="delete-ai-key" class="danger" type="button">
-                        Eliminar clave exclusiva
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              </details>
+              <div class="provider-summary">
+                <strong>Credencial administrada por Don Gato Digital</strong>
+                <span class="status-badge success">Protegida en el servidor</span>
+                <p>
+                  Cada negocio elige proveedor y modelo; las credenciales nunca se solicitan ni se
+                  muestran aquí.
+                </p>
+              </div>
 
               <details class="disclosure">
                 <summary>
@@ -1625,6 +2032,45 @@
                 </div>
               </div>
               <div class="test-list">
+                <article class="simulator-card">
+                  <div class="simulator-card__heading">
+                    <div>
+                      <p class="eyebrow">Vista previa privada</p>
+                      <h3>Probar asistente</h3>
+                      <p>
+                        Escribe como lo haría un cliente. Usa la misma lógica central que WhatsApp
+                        sin enviar mensajes reales.
+                      </p>
+                    </div>
+                    <span class="status-badge neutral">Solo panel</span>
+                  </div>
+                  <div
+                    id="assistant-simulator-messages"
+                    class="simulator-messages"
+                    aria-live="polite"
+                  >
+                    <div class="simulator-empty">
+                      <strong>Inicia una conversación de prueba</strong
+                      ><span>Por ejemplo: ¿Cuánto es 2 + 2? o ¿Cuál es el horario?</span>
+                    </div>
+                  </div>
+                  <form id="assistant-simulator-form" class="simulator-composer">
+                    <label class="sr-only" for="assistant-simulator-message"
+                      >Mensaje de prueba</label
+                    ><input
+                      id="assistant-simulator-message"
+                      name="message"
+                      maxlength="2000"
+                      placeholder="Escribe una pregunta…"
+                      autocomplete="off"
+                      required
+                    /><button type="submit" data-busy-label="Enviando…">Enviar</button>
+                  </form>
+                  <details id="assistant-simulator-debug" class="debug-panel hidden">
+                    <summary>Detalles técnicos para administradores</summary>
+                    <dl class="debug-grid"></dl>
+                  </details>
+                </article>
                 <article class="test-item">
                   <div>
                     <h3>Configuración de WhatsApp</h3>

@@ -12,7 +12,6 @@ import { serializeError } from './infrastructure/safe-error.js';
 import { AppDatabase } from './persistence/database.js';
 import { Anonymizer } from './security/anonymizer.js';
 import { hashPassword } from './security/password.js';
-import { SecretVault } from './security/secret-vault.js';
 
 async function main(): Promise<void> {
   const environment = loadEnvironment();
@@ -28,10 +27,8 @@ async function main(): Promise<void> {
   await ensureInitialAdministrator(database, environment.panelInitialPassword);
 
   const anonymizer = new Anonymizer(environment.anonymizationSecret);
-  const vault = new SecretVault(environment.appEncryptionKey);
   const aiProviders = new AIProviderFactory(
     database,
-    vault,
     environment.groqApiKey,
     environment.groqModel,
     environment.aiProvider,
@@ -76,7 +73,6 @@ async function main(): Promise<void> {
     maintenance,
     multiBotManager,
     aiProviderFactory: aiProviders,
-    secretVault: vault,
     metaWebhook: {
       ...(environment.metaWhatsApp.appSecret === undefined
         ? {}

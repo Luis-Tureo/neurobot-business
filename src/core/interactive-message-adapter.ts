@@ -18,14 +18,26 @@ export class InteractiveMessageAdapter {
     configuredType: MenuType,
   ): Promise<InteractiveDelivery> {
     const activeOptions = options.filter((option) => option.enabled).slice(0, 20);
-    const nativeKind = chooseNativeKind(configuredType, activeOptions.length);
+    const menuType =
+      menu.presentation === 'BUTTONS'
+        ? 'native_buttons'
+        : menu.presentation === 'LIST'
+          ? 'native_list'
+          : configuredType;
+    const nativeKind = chooseNativeKind(menuType, activeOptions.length);
     if (nativeKind !== null && this.client.sendInteractiveMenu !== undefined) {
       try {
         const sent = await this.client.sendInteractiveMenu(chatId, {
           title: menu.title,
           message: menu.message,
           helpText: menu.helpText,
-          options: activeOptions.map((option) => ({ id: String(option.id), label: option.label })),
+          listButtonLabel: menu.listButtonLabel,
+          options: activeOptions.map((option) => ({
+            id: String(option.id),
+            label: option.label,
+            ...(option.description === '' ? {} : { description: option.description }),
+            ...(option.section === '' ? {} : { section: option.section }),
+          })),
           kind: nativeKind,
         });
         if (sent) return nativeKind === 'buttons' ? 'native_buttons' : 'native_list';

@@ -4,7 +4,11 @@ import { dirname } from 'node:path';
 import BetterSqlite3 from 'better-sqlite3';
 import { DEFAULT_BUSINESS_ASSISTANT_ID } from '../domain/business-defaults.js';
 import type {
+  AssistantBehaviorSettings,
+  AssistantToolConfiguration,
   BotRecord,
+  Business,
+  BusinessStatus,
   BusinessHour,
   CatalogCategory,
   CatalogItem,
@@ -32,6 +36,10 @@ import type {
   MenuOption,
   MenuType,
   OrganizationType,
+  EphemeralInteraction,
+  ToolPermission,
+  WhatsAppConnection,
+  WhatsAppSetupMode,
 } from '../domain/types.js';
 import { canonicalPhoneIdentity } from '../messaging/identifiers.js';
 import { migrateBusinessSchema } from './business-schema.js';
@@ -96,9 +104,21 @@ type KnowledgeEntryRow = {
 
 export type TechnicalEvent = {
   botId?: string;
+  businessId?: string;
   eventType: string;
   source?: string;
   activationType?: string;
+  channel?: string;
+  route?: string;
+  aiProvider?: string;
+  aiModel?: string;
+  knowledgeUsed?: boolean;
+  status?: string;
+  toolRequested?: string;
+  toolExecuted?: string;
+  resultCount?: number;
+  presentation?: string;
+  actionIds?: string[];
   conversationHash?: string;
   customerHash?: string;
   result: string;
@@ -127,6 +147,12 @@ export type AuditEvent = {
   administratorHash: string;
   durationMs?: number;
   errorCode?: string;
+};
+
+export type PanelUserAuthorization = {
+  username: string;
+  role: 'global_admin' | 'business_admin';
+  businessIds: string[];
 };
 
 export class AppDatabase {
@@ -216,26 +242,33 @@ export class AppDatabase {
       .prepare(
         `SELECT bots.*, profiles.id AS profile_id, profiles.organization_name,
            profiles.bot_name, profiles.organization_type, profiles.timezone,
+           businesses.name AS business_name, businesses.description AS business_description,
+           businesses.language AS business_language, businesses.status AS business_status,
            runtime.status AS whatsapp_status, runtime.masked_number, runtime.last_connected_at,
            channels.continued_conversations_enabled, channels.menu_type,
-           credentials.credential_mode,
            capabilities.private_chats_enabled,
            capabilities.conversation_continuation_enabled,
            capabilities.interactive_menus_enabled,
            capabilities.numeric_menu_replies_enabled,
-           capabilities.catalog_enabled, capabilities.human_assistance_enabled,
-           CASE WHEN credentials.encrypted_api_key IS NULL THEN 0 ELSE 1 END AS key_configured
+           capabilities.catalog_enabled, capabilities.human_assistance_enabled
          FROM bots
+         JOIN businesses ON businesses.id=bots.business_id
          JOIN bot_profiles mapping ON mapping.bot_id=bots.id
          JOIN assistant_profiles profiles ON profiles.id=mapping.profile_id
          JOIN messaging_runtime runtime ON runtime.bot_id=bots.id
          JOIN bot_channel_settings channels ON channels.bot_id=bots.id
-         JOIN bot_ai_credentials credentials ON credentials.bot_id=bots.id
          JOIN bot_capabilities capabilities ON capabilities.bot_id=bots.id
          ORDER BY bots.created_at,bots.internal_identifier`,
       )
       .all() as Array<{
       id: string;
+      business_id: string;
+      business_name: string;
+      business_description: string;
+      business_language: string;
+      business_status: BusinessStatus;
+      channel_type: 'WHATSAPP';
+      is_primary: number;
       internal_identifier: string;
       client_id: string;
       connector_type: ConnectorType;
@@ -255,8 +288,6 @@ export class AppDatabase {
       last_connected_at: string | null;
       continued_conversations_enabled: number;
       menu_type: MenuType;
-      credential_mode: 'global' | 'per_bot';
-      key_configured: number;
       private_chats_enabled: number;
       conversation_continuation_enabled: number;
       interactive_menus_enabled: number;
@@ -268,6 +299,13 @@ export class AppDatabase {
     }>;
     return rows.map((row) => ({
       id: row.id,
+      businessId: row.business_id,
+      businessName: row.business_name,
+      businessDescription: row.business_description,
+      businessLanguage: row.business_language,
+      businessStatus: row.business_status,
+      channel: row.channel_type,
+      isPrimary: row.is_primary === 1,
       internalIdentifier: row.internal_identifier,
       clientId: row.client_id,
       connectorType: row.connector_type,
@@ -295,8 +333,6 @@ export class AppDatabase {
       lastConnectedAt: row.last_connected_at,
       continuedConversationsEnabled: row.continued_conversations_enabled === 1,
       menuType: row.menu_type,
-      aiCredentialMode: row.credential_mode,
-      perBotAIKeyConfigured: row.key_configured === 1,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }));
@@ -305,10 +341,99 @@ export class AppDatabase {
     return this.listBots().find((bot) => bot.id === botId) ?? null;
   }
 
-  public configureMetaConnector(botId: string, phoneNumberId: string): void {
+  public listBusinesses(): Business[] {
+    return (
+      this.db.prepare('SELECT * FROM businesses ORDER BY name COLLATE NOCASE,id').all() as Array<{
+        id: string;
+        slug: string;
+        name: string;
+        description: string;
+        language: string;
+        timezone: string;
+        status: BusinessStatus;
+        created_at: string;
+        updated_at: string;
+      }>
+    ).map((row) => ({
+      id: row.id,
+      slug: row.slug,
+      name: row.name,
+      description: row.description,
+      language: row.language,
+      timezone: row.timezone,
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  public getBusiness(businessId: string): Business | null {
+    return this.listBusinesses().find((business) => business.id === businessId) ?? null;
+  }
+
+  public getBusinessByBotId(botId: string): Business {
+    const bot = this.getBot(botId);
+    if (bot === null) throw new Error('El asistente no existe.');
+    const business = this.getBusiness(bot.businessId);
+    if (business === null) throw new Error('El negocio del asistente no existe.');
+    return business;
+  }
+
+  public saveBusiness(input: {
+    id: string;
+    name: string;
+    description: string;
+    language: string;
+    timezone: string;
+    status?: BusinessStatus;
+  }): Business {
+    const current = this.getBusiness(input.id);
+    if (current === null) throw new Error('El negocio no existe.');
+    const now = new Date().toISOString();
+    const name = validatePlainText(input.name, 'nombre del negocio', 160);
+    const description = validatePlainText(input.description, 'descripción del negocio', 1000);
+    const language = validateLanguage(input.language);
+    const timezone = validateTimezone(input.timezone);
+    const status = input.status ?? current.status;
+    if (!['DRAFT', 'ACTIVE', 'PAUSED', 'ERROR'].includes(status)) {
+      throw new Error('El estado del negocio no es válido.');
+    }
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          `UPDATE businesses SET name=?,description=?,language=?,timezone=?,status=?,updated_at=?
+           WHERE id=?`,
+        )
+        .run(name, description, language, timezone, status, now, input.id);
+      this.db.prepare('UPDATE bots SET updated_at=? WHERE business_id=?').run(now, input.id);
+    })();
+    return this.getBusiness(input.id) as Business;
+  }
+
+  public configureMetaConnector(
+    botId: string,
+    configuration:
+      | string
+      | {
+          phoneNumberId: string;
+          wabaId?: string;
+          displayPhoneNumber?: string;
+          credentialReference?: string;
+        },
+  ): void {
     const bot = this.getBot(botId);
     if (bot === null) throw new Error(`El asistente configurado para Meta no existe: ${botId}.`);
+    const phoneNumberId =
+      typeof configuration === 'string' ? configuration : configuration.phoneNumberId;
     if (!/^\d{6,30}$/u.test(phoneNumberId)) throw new Error('META_PHONE_NUMBER_ID no es válido.');
+    const wabaId = typeof configuration === 'string' ? undefined : configuration.wabaId;
+    if (wabaId !== undefined && !/^\d{6,30}$/u.test(wabaId)) {
+      throw new Error('META_WABA_ID no es válido.');
+    }
+    const displayPhoneNumber =
+      typeof configuration === 'string' ? undefined : configuration.displayPhoneNumber;
+    const credentialReference =
+      typeof configuration === 'string' ? undefined : configuration.credentialReference;
     const connector = this.db
       .prepare(
         `SELECT id FROM assistant_connectors
@@ -321,10 +446,23 @@ export class AppDatabase {
       this.db
         .prepare(
           `UPDATE assistant_connectors SET connector_type='WHATSAPP_CLOUD_API',
-             meta_phone_number_id=?, connector_status='UNLINKED', conflict_reason=NULL,
+             business_id=?,meta_phone_number_id=?,meta_waba_id=COALESCE(?,meta_waba_id),
+             display_phone_number=COALESCE(?,display_phone_number),
+             credential_reference=COALESCE(?,credential_reference),
+             connector_status='UNLINKED',webhook_status='PENDING',conflict_reason=NULL,
              linked_assistant_id=NULL, updated_at=? WHERE id=?`,
         )
-        .run(phoneNumberId, now, connector.id);
+        .run(
+          bot.businessId,
+          phoneNumberId,
+          wabaId ?? null,
+          displayPhoneNumber === undefined ? null : maskStoredPhoneNumber(displayPhoneNumber),
+          credentialReference === undefined
+            ? null
+            : validateCredentialReference(credentialReference),
+          now,
+          connector.id,
+        );
       this.db
         .prepare(`UPDATE bots SET connector_type='WHATSAPP_CLOUD_API', updated_at=? WHERE id=?`)
         .run(now, botId);
@@ -339,6 +477,64 @@ export class AppDatabase {
       }
       throw error;
     }
+  }
+
+  public getWhatsAppConnection(botId: string): WhatsAppConnection {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM assistant_connectors
+         WHERE assistant_id=? AND id=(SELECT active_connector_id FROM bots WHERE id=?)`,
+      )
+      .get(botId, botId) as
+      | {
+          id: number;
+          assistant_id: string;
+          business_id: string;
+          meta_phone_number_id: string | null;
+          meta_waba_id: string | null;
+          display_phone_number: string | null;
+          setup_mode: WhatsAppSetupMode;
+          connector_status: WhatsAppConnection['status'];
+          webhook_status: WhatsAppConnection['webhookStatus'];
+          credential_reference: string | null;
+          connected_at: string | null;
+          last_verified_at: string | null;
+          created_at: string;
+          updated_at: string;
+        }
+      | undefined;
+    if (row === undefined) throw new Error('La conexión de WhatsApp no existe.');
+    return {
+      id: row.id,
+      businessId: row.business_id,
+      assistantId: row.assistant_id,
+      provider: 'META_CLOUD_API',
+      setupMode: row.setup_mode,
+      phoneNumberIdConfigured: row.meta_phone_number_id !== null,
+      wabaIdConfigured: row.meta_waba_id !== null,
+      displayPhoneNumber: row.display_phone_number,
+      status: row.connector_status,
+      webhookStatus: row.webhook_status,
+      credentialReference: row.credential_reference,
+      connectedAt: row.connected_at,
+      lastVerifiedAt: row.last_verified_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  public saveWhatsAppSetupMode(botId: string, setupMode: WhatsAppSetupMode): WhatsAppConnection {
+    if (!['EXISTING', 'NEW_CUSTOMER', 'NEW_PLATFORM'].includes(setupMode)) {
+      throw new Error('La modalidad de WhatsApp no es válida.');
+    }
+    if (setupMode === 'NEW_PLATFORM') {
+      throw new Error('La provisión de números por Don Gato Digital todavía no está disponible.');
+    }
+    const result = this.db
+      .prepare('UPDATE assistant_connectors SET setup_mode=?,updated_at=? WHERE assistant_id=?')
+      .run(setupMode, new Date().toISOString(), botId);
+    if (result.changes !== 1) throw new Error('La conexión de WhatsApp no existe.');
+    return this.getWhatsAppConnection(botId);
   }
 
   public getBotIdByMetaPhoneNumberId(phoneNumberId: string): string | null {
@@ -357,11 +553,12 @@ export class AppDatabase {
     this.db.transaction(() => {
       this.db
         .prepare(
-          `UPDATE assistant_connectors SET connector_status='CONNECTED',updated_at=?
+          `UPDATE assistant_connectors SET connector_status='CONNECTED',webhook_status='ACTIVE',
+             connected_at=COALESCE(connected_at,?),last_verified_at=?,updated_at=?
            WHERE assistant_id=? AND connector_type='WHATSAPP_CLOUD_API'
              AND id=(SELECT active_connector_id FROM bots WHERE id=?)`,
         )
-        .run(now, botId, botId);
+        .run(now, now, now, botId, botId);
       this.db
         .prepare(`UPDATE bots SET lifecycle_status='CONNECTED',updated_at=? WHERE id=?`)
         .run(now, botId);
@@ -658,25 +855,87 @@ export class AppDatabase {
   }
 
   public createBot(input: {
-    id: string;
+    id?: string;
+    businessId?: string;
+    business?: {
+      name: string;
+      description: string;
+      language: string;
+      timezone: string;
+    };
     connectorType?: ConnectorType;
     profile: Omit<AssistantProfile, 'id' | 'active' | 'createdAt' | 'updatedAt'>;
     menuType?: MenuType;
+    whatsappSetupMode?: WhatsAppSetupMode;
+    ai?: { provider: 'groq' | 'disabled'; model: string; enabled: boolean };
+    behavior?: Partial<Omit<AssistantBehaviorSettings, 'assistantId' | 'updatedAt'>>;
   }): BotRecord {
-    const botId = validateBotIdentifier(input.id);
+    const botId = validateBotIdentifier(input.id ?? `assistant-${randomUUID().slice(0, 12)}`);
     if (this.getBot(botId) !== null)
       throw new Error('Ya existe un asistente con ese identificador.');
     const now = new Date().toISOString();
     const connectorType: ConnectorType = input.connectorType ?? 'WHATSAPP_CLOUD_API';
+    const existingBusiness =
+      input.businessId === undefined ? null : this.getBusiness(input.businessId);
+    if (input.businessId !== undefined && existingBusiness === null) {
+      throw new Error('El negocio indicado no existe.');
+    }
+    const businessId =
+      existingBusiness?.id ??
+      (input.business === undefined && input.id !== undefined
+        ? botId
+        : `business-${randomUUID().slice(0, 12)}`);
+    const businessName = validatePlainText(
+      input.business?.name ?? input.profile.organizationName,
+      'nombre del negocio',
+      160,
+    );
+    const businessDescription = validatePlainText(
+      input.business?.description ?? input.profile.description,
+      'descripción del negocio',
+      1000,
+    );
+    const businessLanguage = validateLanguage(input.business?.language ?? 'es-CL');
+    const businessTimezone = validateTimezone(input.business?.timezone ?? input.profile.timezone);
+    const isPrimary =
+      existingBusiness === null ||
+      Number(
+        (
+          this.db
+            .prepare(
+              `SELECT COUNT(*) AS count FROM bots
+               WHERE business_id=? AND channel_type='WHATSAPP' AND lifecycle_status<>'DELETED'`,
+            )
+            .get(businessId) as { count: number }
+        ).count,
+      ) === 0;
     const create = this.db.transaction(() => {
+      if (existingBusiness === null) {
+        this.db
+          .prepare(
+            `INSERT INTO businesses(
+               id,slug,name,description,language,timezone,status,created_at,updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?)`,
+          )
+          .run(
+            businessId,
+            this.uniqueBusinessSlug(businessName),
+            businessName,
+            businessDescription,
+            businessLanguage,
+            businessTimezone,
+            now,
+            now,
+          );
+      }
       this.db
         .prepare(
           `INSERT INTO bots(
-             id,internal_identifier,client_id,connector_type,lifecycle_status,deletion_locked,
-             enabled,created_at,updated_at
-           ) VALUES (?, ?, ?, ?, 'DRAFT', 0, 0, ?, ?)`,
+             id,business_id,channel_type,is_primary,internal_identifier,client_id,connector_type,
+             lifecycle_status,deletion_locked,enabled,created_at,updated_at
+           ) VALUES (?, ?, 'WHATSAPP', ?, ?, ?, ?, 'DRAFT', 0, 0, ?, ?)`,
         )
-        .run(botId, botId, botId, connectorType, now, now);
+        .run(botId, businessId, isPrimary ? 1 : 0, botId, botId, connectorType, now, now);
       const profile = this.createAssistantProfile(input.profile, botId);
       this.activateAssistantProfile(profile.id);
       this.db
@@ -687,10 +946,11 @@ export class AppDatabase {
       const connector = this.db
         .prepare(
           `INSERT INTO assistant_connectors(
-             assistant_id,connector_type,connector_status,created_at,updated_at
-           ) VALUES (?, ?, 'UNLINKED', ?, ?)`,
+             assistant_id,business_id,connector_type,connector_status,setup_mode,
+             webhook_status,created_at,updated_at
+           ) VALUES (?, ?, ?, 'UNLINKED', ?, 'NOT_CONFIGURED', ?, ?)`,
         )
-        .run(botId, connectorType, now, now);
+        .run(botId, businessId, connectorType, input.whatsappSetupMode ?? 'EXISTING', now, now);
       this.db
         .prepare('UPDATE bots SET active_connector_id=? WHERE id=?')
         .run(Number(connector.lastInsertRowid), botId);
@@ -712,11 +972,6 @@ export class AppDatabase {
         .run(botId, now);
       this.db
         .prepare(
-          "INSERT INTO bot_ai_credentials(bot_id,credential_mode,updated_at) VALUES (?, 'global', ?)",
-        )
-        .run(botId, now);
-      this.db
-        .prepare(
           'INSERT INTO assistant_ai_queue_settings(assistant_id,created_at,updated_at) VALUES (?, ?, ?)',
         )
         .run(botId, now, now);
@@ -726,12 +981,85 @@ export class AppDatabase {
            VALUES (?, 'groq', 'NOT_CONFIGURED', ?)`,
         )
         .run(botId, now);
+      const currentAI = this.getAISettings(profile.id);
+      this.saveAISettings({
+        ...currentAI,
+        provider: input.ai?.provider ?? currentAI.provider,
+        model: input.ai?.model ?? currentAI.model,
+        providerConfig: {
+          model: input.ai?.model ?? currentAI.providerConfig.model ?? currentAI.model,
+        },
+        enabled: input.ai?.enabled ?? currentAI.enabled,
+      });
+      const behavior = input.behavior;
+      this.db
+        .prepare(
+          `INSERT INTO assistant_behavior_settings(
+             assistant_id,show_initial_menu_on_greeting,allow_free_questions,
+             use_ai_for_unmatched,use_business_knowledge,allow_dynamic_buttons,
+             allow_dynamic_lists,allow_business_data_queries,show_ai_suggested_actions,
+             allow_write_tools,fallback_message,human_handoff_ready,created_at,updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          botId,
+          behavior?.showInitialMenuOnGreeting === false ? 0 : 1,
+          behavior?.allowFreeQuestions === false ? 0 : 1,
+          behavior?.useAIForUnmatched === false ? 0 : 1,
+          behavior?.useBusinessKnowledge === false ? 0 : 1,
+          behavior?.allowDynamicButtons === false ? 0 : 1,
+          behavior?.allowDynamicLists === false ? 0 : 1,
+          behavior?.allowBusinessDataQueries === false ? 0 : 1,
+          behavior?.showAISuggestedActions === false ? 0 : 1,
+          behavior?.allowWriteTools === true ? 1 : 0,
+          validatePlainText(
+            behavior?.fallbackMessage ??
+              'No pude responder en este momento. Intenta nuevamente o contacta al negocio.',
+            'mensaje alternativo',
+            600,
+          ),
+          behavior?.humanHandoffReady === true ? 1 : 0,
+          now,
+          now,
+        );
+      const insertTool = this.db.prepare(
+        `INSERT OR IGNORE INTO assistant_tool_configurations(
+           assistant_id,business_id,tool_id,enabled,permissions,created_at,updated_at
+         ) VALUES (?, ?, ?, 1, '["READ","SUGGEST"]', ?, ?)`,
+      );
+      for (const toolId of [
+        'get_business_hours',
+        'get_services',
+        'get_products',
+        'get_product_stock',
+        'get_locations',
+        'show_menu',
+      ]) {
+        insertTool.run(botId, businessId, toolId, now, now);
+      }
       this.seedBotKnowledgeCategories(botId, profile.id, now);
       this.seedBotInitialMenu(botId, now);
-      this.recordTechnicalEvent({ eventType: 'BOT_CREATED', result: 'created', botId });
+      this.recordTechnicalEvent({
+        eventType: 'BOT_CREATED',
+        result: 'created',
+        botId,
+        businessId,
+        channel: 'WHATSAPP',
+      });
     });
     create();
     return this.getBot(botId) as BotRecord;
+  }
+
+  private uniqueBusinessSlug(name: string): string {
+    const base = slugifyBusinessName(name);
+    let candidate = base;
+    let suffix = 2;
+    while (this.db.prepare('SELECT 1 FROM businesses WHERE slug=?').get(candidate) !== undefined) {
+      candidate = `${base.slice(0, 72)}-${suffix}`;
+      suffix += 1;
+    }
+    return candidate;
   }
 
   private seedBotKnowledgeCategories(botId: string, profileId: number, now: string): void {
@@ -860,12 +1188,17 @@ export class AppDatabase {
       const changed = this.db
         .prepare(
           `UPDATE bots SET enabled=?,lifecycle_status=CASE
+             WHEN ?=0 AND lifecycle_status IN ('DRAFT','UNLINKED','LINKING') THEN lifecycle_status
              WHEN ?=0 THEN 'DISABLED'
+             WHEN EXISTS (
+               SELECT 1 FROM assistant_connectors connector
+               WHERE connector.assistant_id=bots.id AND connector.connector_status='CONNECTED'
+             ) THEN 'CONNECTED'
              WHEN lifecycle_status='DISABLED' THEN 'UNLINKED'
              ELSE lifecycle_status END,
              updated_at=? WHERE id=?`,
         )
-        .run(input.enabled ? 1 : 0, input.enabled ? 1 : 0, now, input.botId);
+        .run(input.enabled ? 1 : 0, input.enabled ? 1 : 0, input.enabled ? 1 : 0, now, input.botId);
       if (changed.changes !== 1) throw new Error('El asistente no existe.');
       this.db
         .prepare(
@@ -879,6 +1212,20 @@ export class AppDatabase {
            WHERE bot_id=?`,
         )
         .run(input.continuedConversationsEnabled ? 1 : 0, now, input.botId);
+      this.db
+        .prepare(
+          `UPDATE businesses SET status=CASE
+             WHEN EXISTS (SELECT 1 FROM bots WHERE business_id=businesses.id AND enabled=1)
+               THEN 'ACTIVE'
+             WHEN EXISTS (
+               SELECT 1 FROM bots WHERE business_id=businesses.id
+                 AND lifecycle_status NOT IN ('DRAFT','UNLINKED','LINKING','DELETED')
+             ) THEN 'PAUSED'
+             ELSE 'DRAFT' END,
+             updated_at=?
+           WHERE id=(SELECT business_id FROM bots WHERE id=?)`,
+        )
+        .run(now, input.botId);
     })();
     return this.getBot(input.botId) as BotRecord;
   }
@@ -905,31 +1252,102 @@ export class AppDatabase {
     return this.getAssistantProfile(row.profile_id) as AssistantProfile;
   }
 
-  public setBotEncryptedCredential(
-    botId: string,
-    mode: 'global' | 'per_bot',
-    encryptedApiKey: string | null,
-    fingerprint: string | null,
-  ): void {
-    const result = this.db
-      .prepare(
-        `UPDATE bot_ai_credentials SET credential_mode = ?, encrypted_api_key = ?,
-           key_fingerprint = ?, updated_at = ? WHERE bot_id = ?`,
-      )
-      .run(mode, encryptedApiKey, fingerprint, new Date().toISOString(), botId);
-    if (result.changes !== 1) throw new Error('La configuración de credenciales no existe.');
+  public getAssistantBehavior(botId: string): AssistantBehaviorSettings {
+    const row = this.db
+      .prepare('SELECT * FROM assistant_behavior_settings WHERE assistant_id=?')
+      .get(botId) as
+      | {
+          assistant_id: string;
+          show_initial_menu_on_greeting: number;
+          allow_free_questions: number;
+          use_ai_for_unmatched: number;
+          use_business_knowledge: number;
+          allow_dynamic_buttons: number;
+          allow_dynamic_lists: number;
+          allow_business_data_queries: number;
+          show_ai_suggested_actions: number;
+          allow_write_tools: number;
+          fallback_message: string;
+          human_handoff_ready: number;
+          updated_at: string;
+        }
+      | undefined;
+    if (row === undefined) throw new Error('La configuración de comportamiento no existe.');
+    return {
+      assistantId: row.assistant_id,
+      showInitialMenuOnGreeting: row.show_initial_menu_on_greeting === 1,
+      allowFreeQuestions: row.allow_free_questions === 1,
+      useAIForUnmatched: row.use_ai_for_unmatched === 1,
+      useBusinessKnowledge: row.use_business_knowledge === 1,
+      allowDynamicButtons: row.allow_dynamic_buttons === 1,
+      allowDynamicLists: row.allow_dynamic_lists === 1,
+      allowBusinessDataQueries: row.allow_business_data_queries === 1,
+      showAISuggestedActions: row.show_ai_suggested_actions === 1,
+      allowWriteTools: row.allow_write_tools === 1,
+      fallbackMessage: row.fallback_message,
+      humanHandoffReady: row.human_handoff_ready === 1,
+      updatedAt: row.updated_at,
+    };
   }
 
-  public getBotEncryptedCredential(botId: string): {
-    mode: 'global' | 'per_bot';
-    encryptedApiKey: string | null;
-  } {
+  public saveAssistantBehavior(
+    settings: Omit<AssistantBehaviorSettings, 'updatedAt'>,
+  ): AssistantBehaviorSettings {
+    const fallbackMessage = validatePlainText(settings.fallbackMessage, 'mensaje alternativo', 600);
+    const now = new Date().toISOString();
+    const changed = this.db
+      .prepare(
+        `UPDATE assistant_behavior_settings SET
+           show_initial_menu_on_greeting=?,allow_free_questions=?,use_ai_for_unmatched=?,
+           use_business_knowledge=?,allow_dynamic_buttons=?,allow_dynamic_lists=?,
+           allow_business_data_queries=?,show_ai_suggested_actions=?,allow_write_tools=?,
+           fallback_message=?,human_handoff_ready=?,updated_at=?
+         WHERE assistant_id=?`,
+      )
+      .run(
+        settings.showInitialMenuOnGreeting ? 1 : 0,
+        settings.allowFreeQuestions ? 1 : 0,
+        settings.useAIForUnmatched ? 1 : 0,
+        settings.useBusinessKnowledge ? 1 : 0,
+        settings.allowDynamicButtons ? 1 : 0,
+        settings.allowDynamicLists ? 1 : 0,
+        settings.allowBusinessDataQueries ? 1 : 0,
+        settings.showAISuggestedActions ? 1 : 0,
+        settings.allowWriteTools ? 1 : 0,
+        fallbackMessage,
+        settings.humanHandoffReady ? 1 : 0,
+        now,
+        settings.assistantId,
+      );
+    if (changed.changes !== 1) throw new Error('La configuración de comportamiento no existe.');
+    this.db.prepare('UPDATE bots SET updated_at=? WHERE id=?').run(now, settings.assistantId);
+    return this.getAssistantBehavior(settings.assistantId);
+  }
+
+  public countEnabledKnowledgeEntries(botId: string): number {
     const row = this.db
-      .prepare('SELECT credential_mode, encrypted_api_key FROM bot_ai_credentials WHERE bot_id = ?')
-      .get(botId) as
-      { credential_mode: 'global' | 'per_bot'; encrypted_api_key: string | null } | undefined;
-    if (row === undefined) throw new Error('La configuración de credenciales no existe.');
-    return { mode: row.credential_mode, encryptedApiKey: row.encrypted_api_key };
+      .prepare('SELECT COUNT(*) AS count FROM knowledge_entries WHERE bot_id=? AND enabled=1')
+      .get(botId) as { count: number };
+    return Number(row.count);
+  }
+
+  public getAssistantLastUpdatedAt(botId: string): string {
+    const row = this.db
+      .prepare(
+        `SELECT MAX(updated_at) AS updated_at FROM (
+           SELECT updated_at FROM bots WHERE id=@botId
+           UNION ALL SELECT updated_at FROM businesses
+             WHERE id=(SELECT business_id FROM bots WHERE id=@botId)
+           UNION ALL SELECT updated_at FROM assistant_profiles WHERE bot_id=@botId
+           UNION ALL SELECT updated_at FROM assistant_connectors WHERE assistant_id=@botId
+           UNION ALL SELECT updated_at FROM ai_settings WHERE bot_id=@botId
+           UNION ALL SELECT updated_at FROM assistant_behavior_settings WHERE assistant_id=@botId
+           UNION ALL SELECT updated_at FROM knowledge_entries WHERE bot_id=@botId
+           UNION ALL SELECT updated_at FROM menu_definitions WHERE bot_id=@botId
+         )`,
+      )
+      .get({ botId }) as { updated_at: string | null };
+    return row.updated_at ?? this.getBot(botId)?.updatedAt ?? new Date(0).toISOString();
   }
 
   public listMenus(botId: string): MenuDefinition[] {
@@ -945,6 +1363,8 @@ export class AppDatabase {
         title: string;
         message: string;
         help_text: string;
+        presentation_type: 'AUTOMATIC' | 'BUTTONS' | 'LIST';
+        list_button_label: string;
         enabled: number;
         is_initial: number;
         expiration_minutes: number;
@@ -958,6 +1378,8 @@ export class AppDatabase {
       title: row.title,
       message: row.message,
       helpText: row.help_text,
+      presentation: row.presentation_type,
+      listButtonLabel: row.list_button_label,
       enabled: row.enabled === 1,
       isInitial: row.is_initial === 1,
       expirationMinutes: row.expiration_minutes,
@@ -977,6 +1399,8 @@ export class AppDatabase {
     title: string;
     message: string;
     helpText: string;
+    presentation?: 'AUTOMATIC' | 'BUTTONS' | 'LIST';
+    listButtonLabel?: string;
     enabled: boolean;
     isInitial: boolean;
     expirationMinutes: number;
@@ -985,6 +1409,12 @@ export class AppDatabase {
     const title = validatePlainText(input.title, 'título del menú', 120);
     const message = validatePlainText(input.message, 'mensaje del menú', 600);
     const helpText = validatePlainText(input.helpText, 'ayuda del menú', 300, true);
+    const presentation = input.presentation ?? 'AUTOMATIC';
+    const listButtonLabel = validatePlainText(
+      input.listButtonLabel ?? 'Ver opciones',
+      'botón de lista',
+      20,
+    );
     if (
       !Number.isInteger(input.expirationMinutes) ||
       input.expirationMinutes < 1 ||
@@ -1003,9 +1433,9 @@ export class AppDatabase {
           this.db
             .prepare(
               `INSERT INTO menu_definitions(
-                 bot_id, parent_menu_id, title, message, help_text, enabled, is_initial,
-                 expiration_minutes, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 bot_id, parent_menu_id, title, message, help_text, presentation_type,
+                 list_button_label, enabled, is_initial, expiration_minutes, created_at, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
             .run(
               input.botId,
@@ -1013,6 +1443,8 @@ export class AppDatabase {
               title,
               message,
               helpText,
+              presentation,
+              listButtonLabel,
               input.enabled ? 1 : 0,
               input.isInitial ? 1 : 0,
               input.expirationMinutes,
@@ -1024,7 +1456,8 @@ export class AppDatabase {
       const changed = this.db
         .prepare(
           `UPDATE menu_definitions SET parent_menu_id = ?, title = ?, message = ?, help_text = ?,
-             enabled = ?, is_initial = ?, expiration_minutes = ?, updated_at = ?
+             presentation_type = ?, list_button_label = ?, enabled = ?, is_initial = ?,
+             expiration_minutes = ?, updated_at = ?
            WHERE id = ? AND bot_id = ?`,
         )
         .run(
@@ -1032,6 +1465,8 @@ export class AppDatabase {
           title,
           message,
           helpText,
+          presentation,
+          listButtonLabel,
           input.enabled ? 1 : 0,
           input.isInitial ? 1 : 0,
           input.expirationMinutes,
@@ -1071,6 +1506,8 @@ export class AppDatabase {
       bot_id: string;
       menu_id: number;
       label: string;
+      description: string;
+      section_title: string;
       aliases: string;
       option_order: number;
       action_type: MenuActionType;
@@ -1084,6 +1521,8 @@ export class AppDatabase {
       botId: row.bot_id,
       menuId: row.menu_id,
       label: row.label,
+      description: row.description,
+      section: row.section_title,
       aliases: parseStringArray(row.aliases),
       order: row.option_order,
       actionType: row.action_type,
@@ -1099,6 +1538,8 @@ export class AppDatabase {
     botId: string;
     menuId: number;
     label: string;
+    description?: string;
+    section?: string;
     aliases: string[];
     order: number;
     actionType: MenuActionType;
@@ -1107,6 +1548,13 @@ export class AppDatabase {
   }): MenuOption {
     if (this.getMenu(input.botId, input.menuId) === null) throw new Error('El menú no existe.');
     const label = validatePlainText(input.label, 'opción', 100);
+    const description = validatePlainText(
+      input.description ?? '',
+      'descripción de opción',
+      72,
+      true,
+    );
+    const section = validatePlainText(input.section ?? '', 'sección de lista', 24, true);
     const aliases = validateTextArray(input.aliases, 'alias de opción', 20);
     if (!Number.isInteger(input.order) || input.order < 1 || input.order > 100)
       throw new Error('El orden no es válido.');
@@ -1118,14 +1566,16 @@ export class AppDatabase {
         this.db
           .prepare(
             `INSERT INTO menu_options(
-               bot_id, menu_id, label, aliases, option_order, action_type, action_payload,
-               enabled, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               bot_id, menu_id, label, description, section_title, aliases, option_order,
+               action_type, action_payload, enabled, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             input.botId,
             input.menuId,
             label,
+            description,
+            section,
             JSON.stringify(aliases),
             input.order,
             input.actionType,
@@ -1138,13 +1588,15 @@ export class AppDatabase {
     } else {
       const changed = this.db
         .prepare(
-          `UPDATE menu_options SET menu_id = ?, label = ?, aliases = ?, option_order = ?,
+          `UPDATE menu_options SET menu_id = ?, label = ?, description = ?, section_title = ?, aliases = ?, option_order = ?,
              action_type = ?, action_payload = ?, enabled = ?, updated_at = ?
            WHERE id = ? AND bot_id = ?`,
         )
         .run(
           input.menuId,
           label,
+          description,
+          section,
           JSON.stringify(aliases),
           input.order,
           input.actionType,
@@ -1164,6 +1616,197 @@ export class AppDatabase {
       this.db.prepare('DELETE FROM menu_options WHERE id = ? AND bot_id = ?').run(id, botId)
         .changes === 1
     );
+  }
+
+  public listAssistantToolConfigurations(botId: string): AssistantToolConfiguration[] {
+    const bot = this.getBot(botId);
+    if (bot === null) throw new Error('El asistente no existe.');
+    return (
+      this.db
+        .prepare(
+          `SELECT assistant_id,business_id,tool_id,enabled,permissions,updated_at
+           FROM assistant_tool_configurations WHERE assistant_id=? ORDER BY tool_id`,
+        )
+        .all(botId) as Array<{
+        assistant_id: string;
+        business_id: string;
+        tool_id: string;
+        enabled: number;
+        permissions: string;
+        updated_at: string;
+      }>
+    ).map((row) => ({
+      assistantId: row.assistant_id,
+      businessId: row.business_id,
+      toolId: row.tool_id,
+      enabled: row.enabled === 1,
+      permissions: parseToolPermissions(row.permissions),
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  public saveAssistantToolConfiguration(input: {
+    assistantId: string;
+    toolId: string;
+    enabled: boolean;
+    permissions: ToolPermission[];
+  }): AssistantToolConfiguration {
+    const bot = this.getBot(input.assistantId);
+    if (bot === null) throw new Error('El asistente no existe.');
+    const toolId = validateStableIdentifier(input.toolId, 'herramienta');
+    const permissions = [...new Set(input.permissions)];
+    if (
+      permissions.length === 0 ||
+      permissions.some((permission) => !['READ', 'SUGGEST', 'EXECUTE'].includes(permission))
+    ) {
+      throw new Error('Los permisos de la herramienta no son válidos.');
+    }
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO assistant_tool_configurations(
+           assistant_id,business_id,tool_id,enabled,permissions,created_at,updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(assistant_id,tool_id) DO UPDATE SET
+           enabled=excluded.enabled,permissions=excluded.permissions,updated_at=excluded.updated_at`,
+      )
+      .run(
+        bot.id,
+        bot.businessId,
+        toolId,
+        input.enabled ? 1 : 0,
+        JSON.stringify(permissions),
+        now,
+        now,
+      );
+    return this.listAssistantToolConfigurations(bot.id).find(
+      (configuration) => configuration.toolId === toolId,
+    ) as AssistantToolConfiguration;
+  }
+
+  public createEphemeralInteraction(input: {
+    businessId: string;
+    assistantId: string;
+    conversationHash: string;
+    toolId: string;
+    actionId: string;
+    resourceId: string;
+    label: string;
+    volatile: boolean;
+    expiresAt: string;
+  }): EphemeralInteraction {
+    const bot = this.getBot(input.assistantId);
+    if (bot === null || bot.businessId !== input.businessId) {
+      throw new Error('La interacción no pertenece al negocio del asistente.');
+    }
+    const expiresAt = new Date(input.expiresAt);
+    if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
+      throw new Error('La expiración de la interacción no es válida.');
+    }
+    const id = `dyn_${randomUUID().replaceAll('-', '')}`;
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO ephemeral_interactions(
+           id,business_id,assistant_id,conversation_hash,tool_id,action_id,resource_id,label,
+           volatile,payload_json,status,expires_at,created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 'ACTIVE', ?, ?)`,
+      )
+      .run(
+        id,
+        input.businessId,
+        input.assistantId,
+        validateOpaqueHash(input.conversationHash),
+        validateStableIdentifier(input.toolId, 'herramienta'),
+        validateStableIdentifier(input.actionId, 'acción'),
+        validateResourceIdentifier(input.resourceId),
+        validatePlainText(input.label, 'etiqueta de interacción', 80),
+        input.volatile ? 1 : 0,
+        expiresAt.toISOString(),
+        now,
+      );
+    return this.getEphemeralInteraction(
+      id,
+      input.assistantId,
+      input.conversationHash,
+    ) as EphemeralInteraction;
+  }
+
+  public getEphemeralInteraction(
+    id: string,
+    assistantId: string,
+    conversationHash: string,
+    now = new Date(),
+  ): EphemeralInteraction | null {
+    this.db
+      .prepare(
+        `UPDATE ephemeral_interactions SET status='EXPIRED'
+         WHERE id=? AND assistant_id=? AND conversation_hash=? AND status='ACTIVE' AND expires_at<=?`,
+      )
+      .run(id, assistantId, conversationHash, now.toISOString());
+    const row = this.db
+      .prepare(
+        `SELECT id,business_id,assistant_id,conversation_hash,tool_id,action_id,resource_id,
+                label,volatile,status,expires_at,created_at,consumed_at
+         FROM ephemeral_interactions WHERE id=? AND assistant_id=? AND conversation_hash=?`,
+      )
+      .get(id, assistantId, conversationHash) as
+      | {
+          id: string;
+          business_id: string;
+          assistant_id: string;
+          conversation_hash: string;
+          tool_id: string;
+          action_id: string;
+          resource_id: string;
+          label: string;
+          volatile: number;
+          status: 'ACTIVE' | 'CONSUMED' | 'EXPIRED';
+          expires_at: string;
+          created_at: string;
+          consumed_at: string | null;
+        }
+      | undefined;
+    if (row === undefined) return null;
+    return {
+      id: row.id,
+      businessId: row.business_id,
+      assistantId: row.assistant_id,
+      conversationHash: row.conversation_hash,
+      toolId: row.tool_id,
+      actionId: row.action_id,
+      resourceId: row.resource_id,
+      label: row.label,
+      volatile: row.volatile === 1,
+      status: row.status,
+      expiresAt: row.expires_at,
+      createdAt: row.created_at,
+      consumedAt: row.consumed_at,
+    };
+  }
+
+  public markEphemeralInteractionConsumed(
+    id: string,
+    assistantId: string,
+    conversationHash: string,
+    now = new Date(),
+  ): boolean {
+    return (
+      this.db
+        .prepare(
+          `UPDATE ephemeral_interactions SET status='CONSUMED',consumed_at=?
+           WHERE id=? AND assistant_id=? AND conversation_hash=? AND status='ACTIVE' AND expires_at>?`,
+        )
+        .run(now.toISOString(), id, assistantId, conversationHash, now.toISOString()).changes === 1
+    );
+  }
+
+  public expireEphemeralInteractions(now = new Date()): number {
+    return this.db
+      .prepare(
+        "UPDATE ephemeral_interactions SET status='EXPIRED' WHERE status='ACTIVE' AND expires_at<=?",
+      )
+      .run(now.toISOString()).changes;
   }
 
   public getConversationState(
@@ -1973,6 +2616,12 @@ export class AppDatabase {
     input: Omit<KnowledgeEntry, 'categoryName' | 'createdAt' | 'updatedAt'> & { id: number },
   ): KnowledgeEntry {
     const values = validateKnowledgeEntry(input);
+    const category = this.db
+      .prepare('SELECT 1 FROM knowledge_categories WHERE id=? AND profile_id=?')
+      .get(input.categoryId, input.profileId);
+    if (category === undefined) {
+      throw new Error('La categoría no pertenece a la base de conocimiento de este negocio.');
+    }
     const now = new Date().toISOString();
     let id = input.id;
     if (id <= 0) {
@@ -2355,7 +3004,7 @@ export class AppDatabase {
     const now = new Date().toISOString();
     const result = this.db
       .prepare(
-        `UPDATE ai_settings SET enabled = ?, provider = ?, question_max_chars = ?,
+        `UPDATE ai_settings SET enabled = ?, provider = ?, model = ?, provider_config = ?, question_max_chars = ?,
            context_max_tokens = ?, input_max_tokens = ?, response_max_tokens = ?,
            response_max_chars = ?, response_max_lines = ?, temperature = ?,
            user_hourly_limit = ?, user_daily_limit = ?, user_cooldown_seconds = ?,
@@ -2367,6 +3016,8 @@ export class AppDatabase {
       .run(
         settings.enabled ? 1 : 0,
         settings.provider,
+        settings.model,
+        JSON.stringify(settings.provider === 'groq' ? { model: settings.model } : {}),
         settings.questionMaxChars,
         settings.contextMaxTokens,
         settings.inputMaxTokens,
@@ -2397,7 +3048,7 @@ export class AppDatabase {
   public getAIProviderStatus(
     profileId: number,
     configured: boolean,
-    model: string,
+    _model?: string,
   ): AIProviderStatus {
     const settings = this.getAISettings(profileId);
     const row = this.db
@@ -2413,7 +3064,7 @@ export class AppDatabase {
       configured,
       enabled: settings.enabled,
       provider: settings.provider,
-      model,
+      model: settings.model,
       connection: row?.connection_status ?? 'not_tested',
       lastCheckedAt: row?.last_checked_at ?? null,
       lastErrorCode: row?.last_error_code ?? null,
@@ -3203,13 +3854,18 @@ export class AppDatabase {
   }
 
   public recordTechnicalEvent(event: TechnicalEvent): void {
+    const businessId =
+      event.businessId ??
+      (event.botId === undefined ? null : (this.getBot(event.botId)?.businessId ?? null));
     this.db
       .prepare(
         `
         INSERT INTO technical_events
           (bot_id, event_type, source, activation_type, conversation_hash, customer_hash,
-           result, duration_ms, error_code, item_count, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           result, duration_ms, error_code, item_count, business_id, channel, route,
+           ai_provider, ai_model, knowledge_used, status, tool_requested, tool_executed,
+           result_count, presentation, action_ids, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       )
       .run(
@@ -3223,6 +3879,18 @@ export class AppDatabase {
         event.durationMs ?? null,
         event.errorCode ?? null,
         event.itemCount ?? null,
+        businessId,
+        event.channel ?? null,
+        event.route ?? null,
+        event.aiProvider ?? null,
+        event.aiModel ?? null,
+        event.knowledgeUsed === undefined ? null : event.knowledgeUsed ? 1 : 0,
+        event.status ?? event.result,
+        event.toolRequested ?? null,
+        event.toolExecuted ?? null,
+        event.resultCount ?? null,
+        event.presentation ?? null,
+        event.actionIds === undefined ? null : JSON.stringify(event.actionIds),
         new Date().toISOString(),
       );
   }
@@ -3289,6 +3957,67 @@ export class AppDatabase {
          ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash, updated_at = excluded.updated_at`,
       )
       .run(username, passwordHash, now, now);
+  }
+
+  public setPanelUserRole(username: string, role: 'global_admin' | 'business_admin'): void {
+    const result = this.db
+      .prepare('UPDATE panel_users SET role=?,updated_at=? WHERE username=?')
+      .run(role, new Date().toISOString(), username);
+    if (result.changes !== 1) throw new Error('El usuario del panel no existe.');
+  }
+
+  public grantPanelUserBusinessAccess(username: string, businessId: string): void {
+    if (this.getBusiness(businessId) === null) throw new Error('El negocio no existe.');
+    if (this.getPanelPasswordHash(username) === null)
+      throw new Error('El usuario del panel no existe.');
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO panel_user_business_access(username,business_id,created_at)
+         VALUES (?, ?, ?)`,
+      )
+      .run(username, businessId, new Date().toISOString());
+  }
+
+  public getPanelUserAuthorization(username: string): PanelUserAuthorization | null {
+    const user = this.db.prepare('SELECT role FROM panel_users WHERE username=?').get(username) as
+      { role: string } | undefined;
+    if (user === undefined) return null;
+    const role = user.role === 'business_admin' ? 'business_admin' : 'global_admin';
+    const businessIds =
+      role === 'global_admin'
+        ? this.listBusinesses().map((business) => business.id)
+        : (
+            this.db
+              .prepare(
+                'SELECT business_id FROM panel_user_business_access WHERE username=? ORDER BY business_id',
+              )
+              .all(username) as Array<{ business_id: string }>
+          ).map((row) => row.business_id);
+    return { username, role, businessIds };
+  }
+
+  public canPanelUserAccessBot(username: string, botId: string): boolean {
+    const authorization = this.getPanelUserAuthorization(username);
+    const bot = this.getBot(botId);
+    return (
+      authorization !== null &&
+      bot !== null &&
+      (authorization.role === 'global_admin' || authorization.businessIds.includes(bot.businessId))
+    );
+  }
+
+  public canPanelUserAccessConversation(username: string, conversationId: string): boolean {
+    const authorization = this.getPanelUserAuthorization(username);
+    if (authorization === null) return false;
+    if (authorization.role === 'global_admin') return true;
+    const row = this.db
+      .prepare('SELECT business_id FROM conversations WHERE id=?')
+      .get(conversationId) as { business_id: string | null } | undefined;
+    return (
+      row !== undefined &&
+      row.business_id !== null &&
+      authorization.businessIds.includes(row.business_id)
+    );
   }
 }
 
@@ -3387,6 +4116,8 @@ function mapAISettings(row: Record<string, number | string>): AISettings {
     profileId: Number(row.profile_id),
     enabled: row.enabled === 1,
     provider: row.provider === 'disabled' ? 'disabled' : 'groq',
+    model: String(row.model),
+    providerConfig: parseProviderConfig(String(row.provider_config ?? '{}'), String(row.model)),
     questionMaxChars: Number(row.question_max_chars),
     contextMaxTokens: Number(row.context_max_tokens),
     inputMaxTokens: Number(row.input_max_tokens),
@@ -3435,6 +4166,60 @@ function parseSafeObject(value: string): Record<string, string | number | boolea
   } catch {
     return {};
   }
+}
+
+function parseProviderConfig(value: string, fallbackModel: string): { model?: string } {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      !Array.isArray(parsed) &&
+      typeof (parsed as Record<string, unknown>).model === 'string'
+    ) {
+      return { model: String((parsed as Record<string, unknown>).model) };
+    }
+  } catch {
+    // La columna heredada model sigue siendo la fuente de compatibilidad.
+  }
+  return { model: fallbackModel };
+}
+
+function parseToolPermissions(value: string): ToolPermission[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed)].filter(
+      (permission): permission is ToolPermission =>
+        permission === 'READ' || permission === 'SUGGEST' || permission === 'EXECUTE',
+    );
+  } catch {
+    return [];
+  }
+}
+
+function validateStableIdentifier(value: string, field: string): string {
+  const normalized = value.trim();
+  if (!/^[a-z][a-z0-9_]{2,63}$/u.test(normalized)) {
+    throw new Error(`El identificador de ${field} no es válido.`);
+  }
+  return normalized;
+}
+
+function validateOpaqueHash(value: string): string {
+  const normalized = value.trim();
+  if (!/^[A-Za-z0-9_-]{8,128}$/u.test(normalized)) {
+    throw new Error('El identificador de conversación no es válido.');
+  }
+  return normalized;
+}
+
+function validateResourceIdentifier(value: string): string {
+  const normalized = value.trim();
+  if (!/^[A-Za-z0-9_.:-]{1,160}$/u.test(normalized)) {
+    throw new Error('El identificador del recurso no es válido.');
+  }
+  return normalized;
 }
 
 function validateAssistantProfile<
@@ -3523,6 +4308,9 @@ function validateKnowledgeEntry(input: {
 }
 
 function validateAISettings(settings: AISettings): void {
+  if (!/^[a-z0-9][a-z0-9._/-]{1,119}$/u.test(settings.model)) {
+    throw new Error('El modelo de IA no es válido.');
+  }
   const integers: Array<[number, number, number, string]> = [
     [settings.interactionHourlyLimit, 1, 5000, 'activaciones por usuario y hora'],
     [settings.interactionCooldownSeconds, 0, 3600, 'espera entre activaciones'],
@@ -3601,6 +4389,42 @@ function validateTimezone(value: string): string {
   } catch {
     throw new Error('La zona horaria no es válida.');
   }
+}
+
+function validateLanguage(value: string): string {
+  const normalized = validatePlainText(value, 'idioma', 35);
+  if (!/^[a-z]{2,3}(?:-[A-Z]{2})?$/u.test(normalized)) {
+    throw new Error('El idioma no es válido.');
+  }
+  return normalized;
+}
+
+function slugifyBusinessName(value: string): string {
+  const slug = value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/gu, '')
+    .toLocaleLowerCase('es')
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+    .slice(0, 80)
+    .replace(/-+$/u, '');
+  return slug.length >= 3 ? slug : `negocio-${randomUUID().slice(0, 8)}`;
+}
+
+function maskStoredPhoneNumber(value: string): string {
+  const normalized = value.replace(/\D/gu, '');
+  if (normalized.length < 8 || normalized.length > 20) {
+    throw new Error('El número visible de WhatsApp no es válido.');
+  }
+  return `${'*'.repeat(Math.max(4, normalized.length - 4))}${normalized.slice(-4)}`;
+}
+
+function validateCredentialReference(value: string): string {
+  const normalized = value.trim();
+  if (!/^[a-z][a-z0-9+.-]{1,30}:[a-zA-Z0-9_./:-]{1,180}$/u.test(normalized)) {
+    throw new Error('La referencia de credenciales no es válida.');
+  }
+  return normalized;
 }
 
 function validateLogoPath(value: string): string {
