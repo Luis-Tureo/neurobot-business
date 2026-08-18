@@ -5,6 +5,11 @@ import { AIProviderFactory } from '../src/ai/ai-provider-factory.js';
 import { AIProviderRegistry, DEFAULT_GROQ_MODEL } from '../src/ai/ai-provider-registry.js';
 import { MultiBotManager } from '../src/core/multi-bot-manager.js';
 import { createProfileFromPreset } from '../src/core/profile-presets.js';
+import {
+  ORGANIZATION_TYPE_OPTIONS,
+  ORGANIZATION_TYPES,
+  type OrganizationType,
+} from '../src/domain/organization-types.js';
 import { createLogger } from '../src/infrastructure/logger.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { Anonymizer } from '../src/security/anonymizer.js';
@@ -184,6 +189,76 @@ describe('API SaaS y seguridad multi-tenant', () => {
   afterEach(async () => {
     await app?.close();
     database?.close();
+  });
+
+  it('crea y edita asistentes con todos los tipos canónicos y rechaza el alias legado', async () => {
+    const setup = await createServer('platform-secret-never-expose');
+    ({ database, app } = setup);
+    const auth = await login(app, 'admin', 'contraseña-global-segura');
+
+    const contract = await app.inject({
+      method: 'GET',
+      url: '/api/bots',
+      headers: { cookie: auth.cookie },
+    });
+    expect(contract.statusCode).toBe(200);
+    expect(contract.json().organizationTypes).toEqual(ORGANIZATION_TYPE_OPTIONS);
+
+    const createdIds = new Map<OrganizationType, string>();
+    for (const [index, organizationType] of ORGANIZATION_TYPES.entries()) {
+      const created = await authenticated(app, auth, {
+        method: 'POST',
+        url: '/api/bots',
+        payload: assistantCreatePayload(organizationType, index),
+      });
+      expect(created.statusCode, organizationType).toBe(201);
+      const assistantId = created.json().bot.id as string;
+      createdIds.set(organizationType, assistantId);
+      expect(database.getBotProfile(assistantId).organizationType).toBe(organizationType);
+    }
+
+    const servicesId = createdIds.get('Servicios');
+    if (servicesId === undefined) throw new Error('No se creó el asistente de servicios.');
+    const currentProfile = database.getBotProfile(servicesId);
+    const edited = await authenticated(app, auth, {
+      method: 'PATCH',
+      url: `/api/bots/${servicesId}/profile`,
+      payload: editableProfile(currentProfile, {
+        organizationName: currentProfile.organizationName,
+        description: currentProfile.description,
+        language: 'es-CL',
+        organizationType: 'Profesional independiente',
+      }),
+    });
+    expect(edited.statusCode).toBe(200);
+    expect(database.getBotProfile(servicesId).organizationType).toBe('Profesional independiente');
+
+    const invalidEdit = await authenticated(app, auth, {
+      method: 'PATCH',
+      url: `/api/bots/${servicesId}/profile`,
+      payload: editableProfile(database.getBotProfile(servicesId), {
+        organizationName: currentProfile.organizationName,
+        description: currentProfile.description,
+        language: 'es-CL',
+        organizationType: 'Servicio profesional',
+      }),
+    });
+    expect(invalidEdit.statusCode).toBe(400);
+    expect(invalidEdit.json()).toEqual({
+      error: 'No se pudo guardar porque el tipo de negocio seleccionado no es válido.',
+      code: 'INVALID_ORGANIZATION_TYPE',
+    });
+
+    const invalidCreate = await authenticated(app, auth, {
+      method: 'POST',
+      url: '/api/bots',
+      payload: assistantCreatePayload('Servicio profesional', 99),
+    });
+    expect(invalidCreate.statusCode).toBe(400);
+    expect(invalidCreate.json()).toEqual({
+      error: 'No se pudo guardar porque el tipo de negocio seleccionado no es válido.',
+      code: 'INVALID_ORGANIZATION_TYPE',
+    });
   });
 
   it('completa el wizard, edita el negocio, persiste el modelo y prueba la lógica central', async () => {
@@ -674,14 +749,19 @@ async function authenticated(
 
 function editableProfile(
   value: ReturnType<AppDatabase['getBotProfile']>,
-  changes: { organizationName: string; description: string; language: string },
+  changes: {
+    organizationName: string;
+    description: string;
+    language: string;
+    organizationType?: unknown;
+  },
 ) {
   return {
     internalName: value.internalName,
     organizationName: changes.organizationName,
     botName: value.botName,
     description: changes.description,
-    organizationType: value.organizationType,
+    organizationType: changes.organizationType ?? value.organizationType,
     industry: value.industry,
     objective: value.objective,
     allowedTopics: value.allowedTopics,
@@ -704,5 +784,29 @@ function editableProfile(
     headerText: value.headerText,
     footerText: value.footerText,
     supportInformation: value.supportInformation,
+  };
+}
+
+function assistantCreatePayload(organizationType: unknown, index: number) {
+  return {
+    organizationName: `Negocio contrato ${index}`,
+    botName: `Asistente ${index}`,
+    description: `Descripción del negocio de prueba ${index}.`,
+    language: 'es-CL',
+    organizationType,
+    timezone: 'America/Santiago',
+    connectorType: 'WHATSAPP_CLOUD_API',
+    whatsappSetupMode: 'EXISTING',
+    provider: 'groq',
+    model: DEFAULT_GROQ_MODEL,
+    behavior: {
+      showInitialMenuOnGreeting: true,
+      allowFreeQuestions: true,
+      useAIForUnmatched: true,
+      useBusinessKnowledge: false,
+      fallbackMessage: 'No pude responder. Contacta al negocio.',
+    },
+    preset: 'empty',
+    menuType: 'automatic',
   };
 }

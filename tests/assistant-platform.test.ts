@@ -42,7 +42,8 @@ describe('plataforma Don Gato Digital', () => {
     expect(html).toContain('<title>Don Gato Digital</title>');
     expect(html).toContain('data-section="test-center"');
     expect(html).toContain('data-section="history"');
-    expect(html).toContain('<option>Comercio</option>');
+    expect(html).toContain('data-organization-type-select');
+    expect(panel).toContain('result.organizationTypes');
     expect(html).toContain('name="conversationHourlyLimit"');
     expect(panel).toContain("connectorType: 'WHATSAPP_CLOUD_API'");
     expect(panel).toContain('state.visibleModules = detail.visibleModules || []');

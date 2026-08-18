@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import type { Response as InjectResponse } from 'light-my-request';
 import { buildAdminServer } from '../src/admin/server.js';
+import {
+  LEGACY_ORGANIZATION_TYPE_ALIASES,
+  ORGANIZATION_TYPE_OPTIONS,
+} from '../src/domain/organization-types.js';
 import { createLogger } from '../src/infrastructure/logger.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { Anonymizer } from '../src/security/anonymizer.js';
@@ -52,6 +56,10 @@ describe('API administrativa de Neurobot Business', () => {
         enabled: false,
       }),
     ]);
+    expect(response.json()).toMatchObject({
+      organizationTypes: ORGANIZATION_TYPE_OPTIONS,
+      legacyOrganizationTypeAliases: LEGACY_ORGANIZATION_TYPE_ALIASES,
+    });
     expect(response.body).not.toMatch(/community|groupsEnabled|activationAlias/iu);
   });
 

@@ -1,25 +1,26 @@
 import { readFileSync } from 'node:fs';
-import { ORGANIZATION_TYPES } from '../src/core/profile-presets.js';
+import {
+  friendlyApiError,
+  normalizeOrganizationTypePayload,
+  setOrganizationTypeAliases,
+} from '../public/js/api-client.js';
+import {
+  isOrganizationType,
+  LEGACY_ORGANIZATION_TYPE_ALIASES,
+  normalizeLegacyOrganizationType,
+  ORGANIZATION_TYPE_OPTIONS,
+  ORGANIZATION_TYPES,
+} from '../src/domain/organization-types.js';
 
 const html = readFileSync('public/index.html', 'utf8');
+const client = readFileSync('public/multibot-panel.js', 'utf8');
 const server = readFileSync('src/admin/server.ts', 'utf8');
-const apiClient = readFileSync('public/js/api-client.js', 'utf8');
+const database = readFileSync('src/persistence/database.ts', 'utf8');
 const schema = readFileSync('src/persistence/business-schema.ts', 'utf8');
-
-function organizationTypeSelects(): string[] {
-  return [...html.matchAll(/<select name="organizationType" required>([\s\S]*?)<\/select>/gu)].map(
-    (match) => match[1] ?? '',
-  );
-}
-
-function optionValues(selectHtml: string): string[] {
-  return [...selectHtml.matchAll(/<option(?:\s+value="([^"]+)")?>([^<]+)<\/option>/gu)].map(
-    (match) => (match[1] ?? match[2] ?? '').trim(),
-  );
-}
+const presets = readFileSync('src/core/profile-presets.ts', 'utf8');
 
 describe('contrato de tipos de negocio', () => {
-  it('mantiene una lista canónica completa', () => {
+  it('mantiene una fuente canónica completa con etiquetas separadas de los valores', () => {
     expect(ORGANIZATION_TYPES).toEqual([
       'Comercio',
       'Restaurante',
@@ -32,37 +33,72 @@ describe('contrato de tipos de negocio', () => {
       'Profesional independiente',
       'Otro',
     ]);
-  });
-
-  it('todas las opciones visibles de creación y edición envían valores canónicos', () => {
-    const selects = organizationTypeSelects();
-    expect(selects.length).toBeGreaterThanOrEqual(2);
-    for (const select of selects) {
-      expect(optionValues(select)).toEqual(ORGANIZATION_TYPES);
-    }
-    expect(html).not.toContain('<option>Servicio profesional</option>');
-    expect(html).not.toContain('value="Servicio profesional"');
-  });
-
-  it('la validación estricta del backend contiene todos los valores canónicos', () => {
-    for (const type of ORGANIZATION_TYPES) {
-      expect(server).toContain(`'${type}'`);
-    }
-    expect(server).toContain('organizationType: organizationTypeSchema');
-    expect(server).not.toContain("'Servicio profesional',\n  'Otro'");
-  });
-
-  it('preserva compatibilidad con el alias legado sin ampliar el contrato del backend', () => {
-    expect(schema).toContain("WHEN 'Servicio profesional' THEN 'Profesional independiente'");
-    expect(apiClient).toContain("'Servicio profesional': 'Profesional independiente'");
-    expect(apiClient).toContain('LEGACY_ORGANIZATION_TYPE_ALIASES');
-  });
-
-  it('mantiene un mensaje amigable y conserva el detalle técnico para diagnóstico', () => {
-    expect(apiClient).toContain(
-      'No se pudo guardar porque el tipo de negocio seleccionado no es válido.',
+    expect(ORGANIZATION_TYPE_OPTIONS.map(({ value }) => value)).toEqual(ORGANIZATION_TYPES);
+    expect(ORGANIZATION_TYPE_OPTIONS).toEqual(
+      expect.arrayContaining([
+        { value: 'Servicios', label: 'Servicios' },
+        { value: 'Profesional independiente', label: 'Servicio profesional' },
+      ]),
     );
-    expect(apiClient).toContain('error.technicalMessage = technicalMessage');
-    expect(apiClient).toContain("window.console.error('API validation error:', technicalMessage)");
+    expect(new Set(ORGANIZATION_TYPE_OPTIONS.map(({ value }) => value)).size).toBe(
+      ORGANIZATION_TYPES.length,
+    );
+    for (const type of ORGANIZATION_TYPES) expect(isOrganizationType(type)).toBe(true);
+    expect(isOrganizationType('Servicio profesional')).toBe(false);
+  });
+
+  it('creación y edición cargan sus opciones desde el contrato publicado por la API', () => {
+    const selects = html.match(/<select[^>]*data-organization-type-select[^>]*>/gu) ?? [];
+    expect(selects).toHaveLength(2);
+    expect(selects.every((select) => select.includes('disabled'))).toBe(true);
+    expect(html).not.toContain('value="Servicio profesional"');
+    expect(client).toContain('result.organizationTypes');
+    expect(client).toContain('select.add(new window.Option(option.label, option.value))');
+    expect(client).toContain("document.querySelectorAll('[data-organization-type-select]')");
+  });
+
+  it('Zod, tipos, persistencia y SQLite derivan de la misma lista canónica', () => {
+    expect(server).toContain('z.enum(ORGANIZATION_TYPES)');
+    expect(database).toContain('isOrganizationType(input.organizationType)');
+    expect(schema).toContain('ORGANIZATION_TYPES.map(sqlStringLiteral)');
+    expect(presets).toContain(
+      "export { ORGANIZATION_TYPES } from '../domain/organization-types.js'",
+    );
+    expect(presets).not.toContain('export const ORGANIZATION_TYPES');
+  });
+
+  it('preserva compatibilidad con valores antiguos sin ampliar el contrato del backend', () => {
+    expect(normalizeLegacyOrganizationType('Servicio profesional')).toBe(
+      'Profesional independiente',
+    );
+    expect(normalizeLegacyOrganizationType('Servicios')).toBe('Servicios');
+    expect(normalizeLegacyOrganizationType('No permitido')).toBeNull();
+
+    setOrganizationTypeAliases(LEGACY_ORGANIZATION_TYPE_ALIASES);
+    const normalizedBody = normalizeOrganizationTypePayload(
+      JSON.stringify({ organizationType: 'Servicio profesional' }),
+    );
+    expect(typeof normalizedBody).toBe('string');
+    expect(JSON.parse(String(normalizedBody))).toEqual({
+      organizationType: 'Profesional independiente',
+    });
+    expect(
+      normalizeOrganizationTypePayload(JSON.stringify({ organizationType: 'Servicios' })),
+    ).toBe(JSON.stringify({ organizationType: 'Servicios' }));
+  });
+
+  it('transforma el error técnico de validación en un mensaje amigable', () => {
+    expect(
+      friendlyApiError(
+        {
+          error: '[{"code":"invalid_value","path":["organizationType"]}]',
+          code: 'INVALID_ORGANIZATION_TYPE',
+        },
+        { status: 400 },
+      ),
+    ).toEqual({
+      technicalMessage: '[{"code":"invalid_value","path":["organizationType"]}]',
+      message: 'No se pudo guardar porque el tipo de negocio seleccionado no es válido.',
+    });
   });
 });

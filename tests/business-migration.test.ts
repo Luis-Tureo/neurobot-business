@@ -108,6 +108,40 @@ describe('migración irreversible a Business', () => {
       database.close();
     }
   });
+
+  it('normaliza Servicio profesional conservando el asistente existente', () => {
+    const database = legacyDatabase();
+    try {
+      insertLegacyAssistant(database, {
+        id: 'profesional-legado',
+        name: 'Asesoría del Sur',
+        type: 'Servicio profesional',
+        enabled: 1,
+      });
+
+      migrateBusinessSchema(database);
+
+      expect(database.prepare('SELECT id FROM bots').get()).toEqual({ id: 'profesional-legado' });
+      expect(
+        database
+          .prepare('SELECT organization_type FROM assistant_profiles WHERE bot_id = ?')
+          .get('profesional-legado'),
+      ).toEqual({ organization_type: 'Profesional independiente' });
+
+      database
+        .prepare('UPDATE assistant_profiles SET organization_type = ? WHERE bot_id = ?')
+        .run('Servicio profesional', 'profesional-legado');
+      migrateBusinessSchema(database);
+      expect(
+        database
+          .prepare('SELECT organization_type FROM assistant_profiles WHERE bot_id = ?')
+          .get('profesional-legado'),
+      ).toEqual({ organization_type: 'Profesional independiente' });
+      expect(database.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function legacyDatabase(): BetterSqlite3.Database {

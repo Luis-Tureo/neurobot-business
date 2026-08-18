@@ -1,3 +1,7 @@
+import type { OrganizationType } from './organization-types.js';
+
+export type { OrganizationType } from './organization-types.js';
+
 export type ConnectionState =
   | 'disconnected'
   | 'initializing'
@@ -52,18 +56,6 @@ export type ConnectionSnapshot = {
   reconnectAttempt: number;
   lastErrorCode: string | null;
 };
-
-export type OrganizationType =
-  | 'Comercio'
-  | 'Restaurante'
-  | 'Servicios'
-  | 'Salud'
-  | 'Belleza'
-  | 'Turismo'
-  | 'Transporte'
-  | 'Educación'
-  | 'Profesional independiente'
-  | 'Otro';
 
 export type BusinessStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'ERROR';
 

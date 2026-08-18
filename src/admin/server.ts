@@ -26,6 +26,11 @@ import {
 } from '../core/maintenance-service.js';
 import type { MultiBotManager } from '../core/multi-bot-manager.js';
 import { createProfileFromPreset, PROFILE_PRESETS } from '../core/profile-presets.js';
+import {
+  LEGACY_ORGANIZATION_TYPE_ALIASES,
+  ORGANIZATION_TYPE_OPTIONS,
+  ORGANIZATION_TYPES,
+} from '../domain/organization-types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import {
   isValidMetaWebhookPayload,
@@ -41,18 +46,7 @@ import { LoginAttemptGate, SessionStore, type PanelSession } from './session-sto
 
 const COOKIE_NAME = 'panel_session';
 
-const organizationTypeSchema = z.enum([
-  'Comercio',
-  'Restaurante',
-  'Servicios',
-  'Salud',
-  'Belleza',
-  'Turismo',
-  'Transporte',
-  'Educación',
-  'Profesional independiente',
-  'Otro',
-]);
+const organizationTypeSchema = z.enum(ORGANIZATION_TYPES);
 
 const profileFieldsSchema = z
   .object({
@@ -773,6 +767,9 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         : 400;
     const statusCode = candidateStatus < 500 ? candidateStatus : 500;
     const details = serializeError(knownError, 'ADMIN_REQUEST_REJECTED', context.developmentMode);
+    const invalidOrganizationType =
+      knownError instanceof z.ZodError &&
+      knownError.issues.some((issue) => issue.path.includes('organizationType'));
     context.logger.warn(
       {
         ...details,
@@ -782,9 +779,15 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       },
       'Solicitud administrativa rechazada',
     );
-    void reply
-      .code(statusCode)
-      .send({ error: statusCode >= 500 ? 'Error interno.' : details.errorMessage });
+    void reply.code(statusCode).send({
+      error:
+        statusCode >= 500
+          ? 'Error interno.'
+          : invalidOrganizationType
+            ? 'No se pudo guardar porque el tipo de negocio seleccionado no es válido.'
+            : details.errorMessage,
+      ...(invalidOrganizationType ? { code: 'INVALID_ORGANIZATION_TYPE' } : {}),
+    });
   });
 
   app.get('/api/health', async () => ({ ok: true }));
@@ -906,6 +909,8 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           };
         }),
       templates: PROFILE_PRESETS,
+      organizationTypes: ORGANIZATION_TYPE_OPTIONS,
+      legacyOrganizationTypeAliases: LEGACY_ORGANIZATION_TYPE_ALIASES,
     };
   });
 

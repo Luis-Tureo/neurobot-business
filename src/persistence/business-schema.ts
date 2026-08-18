@@ -1,9 +1,23 @@
 import type BetterSqlite3 from 'better-sqlite3';
 import { DEFAULT_BUSINESS_ASSISTANT_ID } from '../domain/business-defaults.js';
+import {
+  LEGACY_ORGANIZATION_TYPE_ALIASES,
+  ORGANIZATION_TYPES,
+} from '../domain/organization-types.js';
 
 const LEGACY_BUSINESS_SCHEMA_VERSION = 24;
 const SAAS_SCHEMA_VERSION = 25;
 const ASSISTANT_PLATFORM_SCHEMA_VERSION = 26;
+const ORGANIZATION_TYPE_SQL_VALUES = ORGANIZATION_TYPES.map(sqlStringLiteral).join(',');
+const LEGACY_ORGANIZATION_TYPE_SQL_CASES = Object.entries(LEGACY_ORGANIZATION_TYPE_ALIASES)
+  .map(
+    ([legacy, canonical]) => `WHEN ${sqlStringLiteral(legacy)} THEN ${sqlStringLiteral(canonical)}`,
+  )
+  .join('\n      ');
+
+function sqlStringLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
 
 export function migrateBusinessSchema(database: BetterSqlite3.Database): void {
   database.exec(`
@@ -24,6 +38,7 @@ export function migrateBusinessSchema(database: BetterSqlite3.Database): void {
       .prepare('SELECT 1 FROM migrations WHERE version = ?')
       .get(ASSISTANT_PLATFORM_SCHEMA_VERSION) !== undefined;
   if (legacyApplied && saasApplied && assistantPlatformApplied) {
+    normalizeBusinessOrganizationTypes(database);
     createBusinessSchema(database);
     createSaasSchema(database);
     createAssistantPlatformSchema(database);
@@ -42,6 +57,7 @@ export function migrateBusinessSchema(database: BetterSqlite3.Database): void {
       ) {
         migrateLegacySchema(database);
       }
+      normalizeBusinessOrganizationTypes(database);
       createBusinessSchema(database);
       if (!legacyApplied) {
         ensureBusinessExample(database);
@@ -111,7 +127,6 @@ function migrateLegacySchema(database: BetterSqlite3.Database): void {
   ]) {
     dropColumn(database, 'assistant_profiles', column);
   }
-  normalizeBusinessOrganizationTypes(database);
   for (const column of [
     'mode',
     'operating_mode',
@@ -158,11 +173,7 @@ function normalizeBusinessOrganizationTypes(database: BetterSqlite3.Database): v
   if (!tableExists(database, 'assistant_profiles')) return;
   database.exec(`
     UPDATE assistant_profiles SET organization_type = CASE organization_type
-      WHEN 'Tienda' THEN 'Comercio'
-      WHEN 'Distribuidora' THEN 'Comercio'
-      WHEN 'Servicio profesional' THEN 'Profesional independiente'
-      WHEN 'Organización social' THEN 'Servicios'
-      WHEN 'Institución educativa' THEN 'Educación'
+      ${LEGACY_ORGANIZATION_TYPE_SQL_CASES}
       ELSE organization_type
     END;
   `);
@@ -410,10 +421,7 @@ function createBusinessSchema(database: BetterSqlite3.Database): void {
       organization_name TEXT NOT NULL,
       bot_name TEXT NOT NULL,
       description TEXT NOT NULL,
-      organization_type TEXT NOT NULL CHECK (organization_type IN (
-        'Comercio','Restaurante','Servicios','Salud','Belleza','Turismo','Transporte',
-        'Educación','Profesional independiente','Otro'
-      )),
+      organization_type TEXT NOT NULL CHECK (organization_type IN (${ORGANIZATION_TYPE_SQL_VALUES})),
       industry TEXT NOT NULL,
       objective TEXT NOT NULL,
       allowed_topics TEXT NOT NULL,

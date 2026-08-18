@@ -1,8 +1,5 @@
 let csrfToken = null;
-
-const LEGACY_ORGANIZATION_TYPE_ALIASES = {
-  'Servicio profesional': 'Profesional independiente',
-};
+let legacyOrganizationTypeAliases = {};
 
 export function setCsrfToken(value) {
   csrfToken = typeof value === 'string' && value.length > 0 ? value : null;
@@ -12,31 +9,53 @@ export function clearCsrfToken() {
   csrfToken = null;
 }
 
-function normalizeOrganizationTypePayload(body) {
+export function setOrganizationTypeAliases(aliases) {
+  legacyOrganizationTypeAliases = {};
+  if (typeof aliases !== 'object' || aliases === null || Array.isArray(aliases)) return;
+  for (const [legacy, canonical] of Object.entries(aliases)) {
+    if (typeof canonical === 'string' && legacy.length > 0 && canonical.length > 0) {
+      legacyOrganizationTypeAliases[legacy] = canonical;
+    }
+  }
+}
+
+export function normalizeOrganizationType(value) {
+  if (typeof value !== 'string') return value;
+  return legacyOrganizationTypeAliases[value] ?? value;
+}
+
+export function normalizeOrganizationTypePayload(body) {
   if (typeof body !== 'string' || body.length === 0) return body;
   try {
     const payload = JSON.parse(body);
     if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return body;
     const current = payload.organizationType;
-    if (typeof current !== 'string' || !(current in LEGACY_ORGANIZATION_TYPE_ALIASES)) return body;
+    const normalized = normalizeOrganizationType(current);
+    if (typeof current !== 'string' || normalized === current) return body;
     return JSON.stringify({
       ...payload,
-      organizationType: LEGACY_ORGANIZATION_TYPE_ALIASES[current],
+      organizationType: normalized,
     });
   } catch {
     return body;
   }
 }
 
-function friendlyApiError(payload, response) {
+export function friendlyApiError(payload, response) {
   const technicalMessage =
     typeof payload === 'object' && payload !== null && 'error' in payload
       ? String(payload.error)
       : 'La solicitud no pudo completarse.';
+  const errorCode =
+    typeof payload === 'object' && payload !== null && 'code' in payload
+      ? String(payload.code)
+      : null;
   const isOrganizationTypeValidationError =
     [400, 422].includes(response.status) &&
-    (/organizationType/iu.test(technicalMessage) ||
-      (/Invalid option/iu.test(technicalMessage) && /Comercio|Restaurante|Servicios/iu.test(technicalMessage)));
+    (errorCode === 'INVALID_ORGANIZATION_TYPE' ||
+      /organizationType/iu.test(technicalMessage) ||
+      (/Invalid option/iu.test(technicalMessage) &&
+        /Comercio|Restaurante|Servicios/iu.test(technicalMessage)));
   return {
     technicalMessage,
     message: isOrganizationTypeValidationError

@@ -1,4 +1,4 @@
-import { api } from './js/api-client.js';
+import { api, normalizeOrganizationType, setOrganizationTypeAliases } from './js/api-client.js';
 import {
   actionButton,
   bindAsyncForm,
@@ -256,6 +256,7 @@ async function loadBots({ background = false } = {}) {
   const target = document.querySelector('#bots-list');
   if (!background) setLoading(target, 'Cargando asistentes…');
   const result = await api('/api/bots');
+  configureOrganizationTypeContract(result.organizationTypes, result.legacyOrganizationTypeAliases);
   state.bots = result.bots;
   if (result.bots.length === 0) {
     renderEmpty(
@@ -323,6 +324,35 @@ async function loadBots({ background = false } = {}) {
     );
     card.append(heading, facts, actions);
     target.append(card);
+  }
+}
+
+function configureOrganizationTypeContract(options, aliases) {
+  if (!Array.isArray(options) || options.length === 0) {
+    throw new Error('No fue posible cargar los tipos de negocio. Actualiza la página.');
+  }
+  const normalizedOptions = options.map((option) => ({
+    value: typeof option?.value === 'string' ? option.value : '',
+    label: typeof option?.label === 'string' ? option.label : '',
+  }));
+  if (
+    normalizedOptions.some((option) => option.value.length === 0 || option.label.length === 0) ||
+    new Set(normalizedOptions.map((option) => option.value)).size !== normalizedOptions.length
+  ) {
+    throw new Error('No fue posible cargar los tipos de negocio. Actualiza la página.');
+  }
+
+  setOrganizationTypeAliases(aliases);
+  for (const select of document.querySelectorAll('[data-organization-type-select]')) {
+    const current = normalizeOrganizationType(select.value);
+    select.replaceChildren();
+    for (const option of normalizedOptions) {
+      select.add(new window.Option(option.label, option.value));
+    }
+    select.value = normalizedOptions.some((option) => option.value === current)
+      ? current
+      : normalizedOptions[0].value;
+    select.disabled = false;
   }
 }
 
@@ -515,7 +545,12 @@ function fillProfile(profile, business) {
   for (const [field, value] of Object.entries(profile)) {
     const input = form.elements[field];
     if (!input) continue;
-    input.value = Array.isArray(value) ? value.join('\n') : (value ?? '');
+    input.value =
+      field === 'organizationType'
+        ? normalizeOrganizationType(value)
+        : Array.isArray(value)
+          ? value.join('\n')
+          : (value ?? '');
   }
   form.elements.address.value = profile.address || '';
   form.elements.language.value = business?.language || 'es-CL';

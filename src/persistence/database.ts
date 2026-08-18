@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import BetterSqlite3 from 'better-sqlite3';
 import { DEFAULT_BUSINESS_ASSISTANT_ID } from '../domain/business-defaults.js';
+import { isOrganizationType } from '../domain/organization-types.js';
 import type {
   AssistantBehaviorSettings,
   AssistantToolConfiguration,
@@ -4225,19 +4226,7 @@ function validateResourceIdentifier(value: string): string {
 function validateAssistantProfile<
   T extends Omit<AssistantProfile, 'id' | 'active' | 'createdAt' | 'updatedAt'>,
 >(input: T): T {
-  const organizationTypes: OrganizationType[] = [
-    'Comercio',
-    'Restaurante',
-    'Servicios',
-    'Salud',
-    'Belleza',
-    'Turismo',
-    'Transporte',
-    'Educación',
-    'Profesional independiente',
-    'Otro',
-  ];
-  if (!organizationTypes.includes(input.organizationType))
+  if (!isOrganizationType(input.organizationType))
     throw new Error('El tipo de organización no es válido.');
   const timezone = validateTimezone(input.timezone);
   const logoPath = input.logoPath === null ? null : validateLogoPath(input.logoPath);

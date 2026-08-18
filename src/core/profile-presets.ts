@@ -1,4 +1,7 @@
-import type { AssistantProfile, OrganizationType } from '../domain/types.js';
+import type { OrganizationType } from '../domain/organization-types.js';
+import type { AssistantProfile } from '../domain/types.js';
+
+export { ORGANIZATION_TYPES } from '../domain/organization-types.js';
 
 export type ProfilePresetKey = 'store' | 'restaurant' | 'service' | 'empty';
 
@@ -12,19 +15,6 @@ export type ProfilePreset = {
   excludedTopics: string[];
   tone: string;
 };
-
-export const ORGANIZATION_TYPES: OrganizationType[] = [
-  'Comercio',
-  'Restaurante',
-  'Servicios',
-  'Salud',
-  'Belleza',
-  'Turismo',
-  'Transporte',
-  'Educación',
-  'Profesional independiente',
-  'Otro',
-];
 
 export const PROFILE_PRESETS: ProfilePreset[] = [
   {
